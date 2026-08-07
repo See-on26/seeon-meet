@@ -1,0 +1,19 @@
+[Unit]
+Description=seeon VLM (vLLM Qwen3.5-35B-A3B-GPTQ-Int4)
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+User=tta
+Environment=HOME=/home/tta
+Environment=HF_HOME=/data/hf-cache
+Environment=CUDA_HOME=/data/venv-vllm-35/lib/python3.12/site-packages/nvidia/cu13
+Environment=PATH=/data/venv-vllm-35/lib/python3.12/site-packages/nvidia/cu13/bin:/data/venv-vllm-35/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin
+Environment=VLLM_USE_FLASHINFER_SAMPLER=0
+WorkingDirectory=/home/tta/gpu-server
+ExecStart=/data/venv-vllm-35/bin/vllm serve Qwen/Qwen3.5-35B-A3B-GPTQ-Int4 --served-model-name qwen3.5-35b-a3b --host 127.0.0.1 --port 8801 --quantization moe_wna16 --max-model-len 32768 --max-num-batched-tokens 2096 --gpu-memory-utilization 0.85 --reasoning-parser qwen3
+Restart=always
+RestartSec=5
+
+[Install]
+WantedBy=multi-user.target
