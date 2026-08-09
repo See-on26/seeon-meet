@@ -1157,7 +1157,7 @@ async function attemptStartExperiment() {
     $('stCapture').textContent = `실패: ${err.message}`;
     showModal({
       title: '회의 캡처 실패',
-      message: `위 Meet 창을 캡처하지 못했습니다.\n(${err.name}: ${err.message})\n회의에 참여한 상태인지 확인한 뒤 다시 시도해 주세요.`,
+      message: `왼쪽 Meet 창을 캡처하지 못했습니다.\n(${err.name}: ${err.message})\n회의에 참여한 상태인지 확인한 뒤 다시 시도해 주세요.`,
       buttons: [{ label: '닫기', secondary: true }],
     });
   } finally {
@@ -1291,7 +1291,7 @@ function syncToggleAvailability() {
   $('toggleBtn').disabled = !isCaptureStartable();
   $('meetHint').textContent = isCaptureStartable()
     ? `회의 참여 확인 (타일 ${latestMeetTileCount}개)`
-    : '위 Meet 창에서 회의에 참여하면 시작할 수 있습니다';
+    : '왼쪽 Meet 창에서 회의에 참여하면 시작할 수 있습니다';
 }
 
 syncToggleAvailability();

@@ -3,7 +3,7 @@ const path = require('path');
 const { createMeetSession } = require('./meeting/session');
 const { getUaForUrl } = require('./meeting/ua');
 
-const MEET_VIEW_HEIGHT_RATIO = 0.55;
+const MEET_VIEW_WIDTH_RATIO = 0.52;
 const MEET_HOME_URL = 'https://meet.google.com/';
 
 const SMOKE_URL = 'about:blank';
@@ -19,9 +19,9 @@ const getMeetView = () => meetView;
 function layoutView() {
   if (!win) return;
   const { width, height } = win.getContentBounds();
-  const meetHeight = Math.round(height * MEET_VIEW_HEIGHT_RATIO);
-  meetView.setBounds({ x: 0, y: 0, width, height: meetHeight });
-  viewerView.setBounds({ x: 0, y: meetHeight, width, height: height - meetHeight });
+  const meetWidth = Math.round(width * MEET_VIEW_WIDTH_RATIO);
+  meetView.setBounds({ x: 0, y: 0, width: meetWidth, height });
+  viewerView.setBounds({ x: meetWidth, y: 0, width: width - meetWidth, height });
 }
 
 function createMeetView() {
@@ -51,7 +51,7 @@ function createMeetView() {
 }
 
 function createWindow() {
-  win = new BaseWindow({ width: 1440, height: 1200, title: 'seeon 실험 뷰어' });
+  win = new BaseWindow({ width: 1600, height: 900, title: 'seeon 실험 뷰어' });
 
   meetView = createMeetView();
 
