@@ -1,0 +1,286 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+  <meta charset="UTF-8" />
+  <title>seeon</title>
+  <style>
+    :root {
+      color-scheme: light;
+      --primary: #0066cc;
+      --primary-soft: #e8f1fd;
+      --ink: #1d1d1f;
+      --ink-80: #333333;
+      --ink-48: #7a7a7a;
+      --ink-28: #b0b0b0;
+      --canvas: #ffffff;
+      --parchment: #f5f5f7;
+      --hairline: #e5e5ea;
+      --hairline-strong: #d2d2d7;
+      --danger: #e0342b;
+      --shadow: 0 1px 3px rgba(0,0,0,.06), 0 8px 24px rgba(0,0,0,.05);
+    }
+    * { box-sizing: border-box; }
+    html, body { height: 100%; }
+    body {
+      margin: 0; background: var(--parchment); color: var(--ink);
+      font: 14px/1.5 -apple-system, BlinkMacSystemFont, 'Apple SD Gothic Neo', 'Segoe UI', sans-serif;
+      letter-spacing: -0.2px;
+    }
+    button { font: inherit; cursor: pointer; }
+    button:disabled { opacity: .4; cursor: not-allowed; }
+
+    .app { display: grid; grid-template-rows: auto 1fr auto; height: 100vh; }
+
+    header {
+      display: flex; align-items: center; gap: 14px; flex-wrap: wrap;
+      padding: 10px 14px; background: var(--canvas); border-bottom: 1px solid var(--hairline);
+    }
+    .brand { display: flex; align-items: baseline; gap: 7px; white-space: nowrap; }
+    .brand .logo { font-weight: 800; font-size: 17px; letter-spacing: .5px; }
+    .brand .tag { font-size: 10px; font-weight: 600; letter-spacing: 1.4px; color: var(--ink-48); }
+
+    .live { display: flex; align-items: center; gap: 8px; }
+    .live-dot { width: 8px; height: 8px; border-radius: 50%; background: var(--ink-28); }
+    .live.on .live-dot { background: var(--danger); box-shadow: 0 0 0 3px rgba(224,52,43,.15); }
+    .live-state { font-size: 12px; color: var(--ink-48); white-space: nowrap; }
+
+    .capture-btn {
+      padding: 7px 13px; border-radius: 9px; font-weight: 600;
+      background: var(--primary); color: #fff; border: 1px solid var(--primary);
+    }
+    .capture-btn.on { background: var(--ink); border-color: var(--ink); }
+    .ghost-btn {
+      padding: 7px 12px; border-radius: 9px; background: var(--canvas);
+      color: var(--ink-80); border: 1px solid var(--hairline-strong);
+    }
+    .ghost-btn.on { background: var(--parchment); }
+
+    .header-spacer { flex: 1 1 auto; }
+
+    .mode-cluster { display: flex; align-items: center; gap: 14px; flex-wrap: wrap; }
+    .mode-field { display: flex; align-items: center; gap: 7px; }
+    .mode-field[hidden] { display: none; }
+    .mode-label { font-size: 11px; font-weight: 600; color: var(--ink-48); white-space: nowrap; }
+
+    .toggle {
+      display: inline-flex; position: relative; background: var(--parchment);
+      border: 1px solid var(--hairline-strong); border-radius: 999px; padding: 3px; user-select: none;
+    }
+    .toggle .opt {
+      position: relative; z-index: 1; padding: 5px 13px; font-size: 12px; font-weight: 600;
+      color: var(--ink-48); border-radius: 999px; transition: color .18s; background: transparent; border: 0;
+    }
+    .toggle .opt.active { color: #fff; }
+    .toggle .opt:disabled { opacity: .35; }
+    .toggle .thumb {
+      position: absolute; top: 3px; bottom: 3px; left: 3px; width: calc(50% - 3px);
+      background: var(--ink); border-radius: 999px; transition: transform .2s ease;
+    }
+    .toggle[data-axis="concurrent"] .thumb { transform: translateX(100%); }
+
+    .segment { display: inline-flex; background: var(--parchment); border: 1px solid var(--hairline-strong); border-radius: 9px; padding: 2px; }
+    .segment button {
+      font-size: 12px; font-weight: 600; padding: 4px 10px; border: 0;
+      background: transparent; color: var(--ink-48); border-radius: 7px; white-space: nowrap;
+    }
+    .segment button.on { background: var(--canvas); color: var(--ink); box-shadow: 0 1px 2px rgba(0,0,0,.08); }
+
+    .icon-btn {
+      display: grid; place-items: center; width: 34px; height: 34px; border-radius: 9px;
+      background: var(--canvas); border: 1px solid var(--hairline-strong); color: var(--ink-80);
+    }
+    .icon-btn:hover { background: var(--parchment); }
+    .icon-btn.on { background: var(--ink); border-color: var(--ink); color: #fff; }
+
+    .stream { overflow-y: auto; padding: 16px; display: flex; flex-direction: column; gap: 12px; }
+    .stream::-webkit-scrollbar { width: 9px; }
+    .stream::-webkit-scrollbar-thumb { background: var(--hairline-strong); border-radius: 4px; }
+    .stream-empty {
+      margin: auto; max-width: 340px; text-align: center; color: var(--ink-48); font-size: 14px; line-height: 1.6;
+    }
+
+    .card {
+      border: 1px solid var(--hairline); border-left: 3px solid var(--hairline-strong);
+      border-radius: 10px; padding: 10px 12px; background: #fcfcfd;
+    }
+    .card.playing { border-left-color: var(--primary); background: var(--primary-soft); }
+    .card-meta { display: flex; align-items: center; gap: 8px; margin-bottom: 5px; font-size: 11px; }
+    .card-tag { font-weight: 700; color: var(--ink-80); }
+    .card-tag .aid { color: var(--primary); margin-right: 4px; }
+    .card-time { color: var(--ink-48); }
+    .card-body { font-size: 14px; line-height: 1.55; color: var(--ink-80); white-space: pre-wrap; }
+
+    .ask { align-self: flex-end; max-width: 82%; }
+    .ask .bubble { background: var(--ink); color: #fff; border-radius: 14px 14px 4px 14px; padding: 9px 13px; font-size: 14px; }
+    .ask .who { text-align: right; font-size: 10px; color: var(--ink-48); margin-top: 4px; }
+
+    .sys { align-self: center; max-width: 90%; text-align: center; font-size: 12px; color: var(--ink-48); padding: 2px 8px; }
+
+    .composer { border-top: 1px solid var(--hairline); padding: 10px 12px 12px; background: var(--canvas); }
+    .chips { display: flex; flex-wrap: wrap; gap: 6px; margin-bottom: 9px; }
+    .chip {
+      font-size: 12px; padding: 5px 11px; border-radius: 999px; background: var(--parchment);
+      border: 1px solid var(--hairline-strong); color: var(--ink-80); white-space: nowrap;
+    }
+    .chip:hover:not(:disabled) { background: var(--primary-soft); border-color: var(--primary); color: var(--primary); }
+    .input-row { display: flex; align-items: center; gap: 8px; }
+    .input-row .field {
+      flex: 1; display: flex; align-items: center; gap: 8px; background: var(--parchment);
+      border: 1px solid var(--hairline-strong); border-radius: 11px; padding: 7px 10px;
+    }
+    .input-row input { flex: 1; border: 0; background: transparent; font: inherit; color: var(--ink); outline: none; }
+    .input-row input::placeholder { color: var(--ink-28); }
+    .mic { display: grid; place-items: center; width: 30px; height: 30px; border-radius: 8px; border: 1px solid var(--hairline-strong); background: var(--canvas); color: var(--ink-80); }
+    .mic.recording { color: #fff; background: #e11d48; border-color: #e11d48; animation: micpulse 1s ease-in-out infinite; }
+    @keyframes micpulse { 0%,100% { box-shadow: 0 0 0 0 rgba(225,29,72,0.5); } 50% { box-shadow: 0 0 0 5px rgba(225,29,72,0); } }
+    .send { display: grid; place-items: center; width: 40px; height: 40px; border-radius: 11px; border: 1px solid var(--primary); background: var(--primary); color: #fff; }
+    .shortcuts { margin-top: 9px; display: flex; flex-wrap: wrap; gap: 8px 14px; font-size: 11px; color: var(--ink-48); }
+    .shortcuts kbd {
+      font: inherit; font-size: 10px; font-weight: 700; background: var(--parchment);
+      border: 1px solid var(--hairline-strong); border-bottom-width: 2px; border-radius: 5px; padding: 1px 5px; color: var(--ink-80);
+    }
+
+    #settingsPanel {
+      position: fixed; top: 54px; right: 14px; width: 300px; z-index: 20;
+      background: var(--canvas); border: 1px solid var(--hairline-strong); border-radius: 14px;
+      box-shadow: var(--shadow); padding: 14px;
+    }
+    #settingsPanel[hidden] { display: none; }
+    #settingsPanel h4 { margin: 0 0 10px; font-size: 13px; font-weight: 700; }
+    .set-row { display: flex; align-items: center; justify-content: space-between; gap: 10px; padding: 7px 0; }
+    .set-row + .set-row { border-top: 1px solid var(--hairline); }
+    .set-row .label { font-size: 13px; color: var(--ink-80); }
+    .set-row .value { font-size: 12px; color: var(--ink-48); }
+    .set-toggle { padding: 4px 12px; border-radius: 999px; border: 1px solid var(--hairline-strong); background: var(--parchment); color: var(--ink-80); font-size: 12px; font-weight: 600; }
+    .set-toggle.on { background: var(--ink); border-color: var(--ink); color: #fff; }
+    .set-note { margin-top: 10px; font-size: 11px; color: var(--ink-48); line-height: 1.5; }
+    .set-status { margin-top: 10px; display: grid; grid-template-columns: auto 1fr; gap: 4px 12px; font-size: 12px; }
+    .set-status b { font-weight: 600; color: var(--ink-48); }
+    .set-status span { color: var(--ink-80); }
+
+    #prepOverlay {
+      position: fixed; inset: 0; background: rgba(0,0,0,.72); color: #fff;
+      display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 8px;
+      font-size: 18px; z-index: 30;
+    }
+    #prepOverlay[hidden] { display: none; }
+
+    dialog#permModal {
+      background: var(--canvas); color: var(--ink); border: 1px solid var(--hairline);
+      border-radius: 18px; padding: 24px; max-width: 440px;
+    }
+    dialog#permModal::backdrop { background: rgba(0,0,0,.4); }
+    dialog#permModal h3 { margin: 0 0 8px; font-size: 16px; font-weight: 600; }
+    dialog#permModal p { margin: 0 0 16px; color: var(--ink-80); white-space: pre-line; }
+    dialog#permModal .btns { display: flex; gap: 8px; justify-content: flex-end; flex-wrap: wrap; }
+    dialog#permModal button { padding: 7px 14px; border-radius: 9px; background: var(--primary); color: #fff; border: 1px solid var(--primary); }
+    dialog#permModal button.secondary { background: var(--canvas); color: var(--ink); border-color: var(--hairline-strong); }
+  </style>
+</head>
+<body>
+  <div class="app">
+
+    <header>
+      <div class="brand">
+        <span class="logo">SEE-ON</span>
+        <span class="tag">SCREEN NARRATION</span>
+      </div>
+
+      <div class="live" id="live">
+        <span class="live-dot"></span>
+        <span class="live-state" id="liveState">대기 중</span>
+      </div>
+      <button class="capture-btn" id="toggleBtn" disabled>회의 캡처 시작</button>
+      <button class="ghost-btn" id="pauseBtn" disabled>일시정지</button>
+      <span class="live-state" id="meetHint"></span>
+
+      <div class="header-spacer"></div>
+
+      <div class="mode-cluster">
+        <div class="mode-field">
+          <span class="mode-label">삽입 방식</span>
+          <div class="toggle" id="modeToggle" data-axis="concurrent" role="group" aria-label="삽입 방식 전환">
+            <button class="opt" type="button" data-axis="delayed">교차</button>
+            <button class="opt active" type="button" data-axis="concurrent">동시</button>
+            <span class="thumb"></span>
+          </div>
+        </div>
+        <div class="mode-field" id="segmentField" hidden>
+          <span class="mode-label">교차 프로필</span>
+          <div class="segment" id="modeSegment">
+            <button type="button" data-mode="listening">품질</button>
+            <button type="button" data-mode="delayed">균형</button>
+            <button type="button" data-mode="realtime_sic">성능</button>
+          </div>
+        </div>
+      </div>
+
+      <button class="icon-btn" id="settingsBtn" title="사용자 설정" aria-label="사용자 설정">
+        <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 1 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 1 1-2.83-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 1 1 2.83-2.83l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 1 1 2.83 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z"/></svg>
+      </button>
+    </header>
+
+    <div class="stream" id="logStream">
+      <div class="stream-empty" id="streamEmpty">
+        왼쪽 Meet 창에서 회의에 참여한 뒤 <b>회의 캡처 시작</b>을 누르세요.<br />
+        지금까지 나온 화면 해설과 내가 던진 질문이 여기에 실시간으로 쌓입니다.
+      </div>
+    </div>
+
+    <div class="composer">
+      <div class="chips" id="cmdChips">
+        <button class="chip" data-command="page_summary">지금 화면 요약</button>
+        <button class="chip" data-command="screen_material">무슨 자료야?</button>
+        <button class="chip" data-command="graph_axis">그래프 축이 뭐야?</button>
+      </div>
+      <div class="input-row">
+        <div class="field">
+          <input type="text" id="cmdInput" placeholder='화면에 대해 무엇이든 물어보세요' />
+          <button class="mic" id="cmdMic" title="음성 질문" aria-label="음성 질문">
+            <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><rect x="9" y="2" width="6" height="12" rx="3"/><path d="M5 10a7 7 0 0 0 14 0M12 17v4"/></svg>
+          </button>
+        </div>
+        <button class="send" id="cmdSend" title="전송" aria-label="전송">
+          <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M5 12h14M13 6l6 6-6 6"/></svg>
+        </button>
+      </div>
+      <div class="shortcuts">
+        <span><kbd>Ctrl</kbd>+<kbd>5~7</kbd> 빠른 질의</span>
+        <span><kbd>Ctrl</kbd>+<kbd>0</kbd> 회의 요약 토글</span>
+      </div>
+    </div>
+  </div>
+
+  <div id="settingsPanel" hidden>
+    <h4>사용자 설정</h4>
+    <div class="set-row">
+      <span class="label">캡션 파이프라인</span>
+      <input type="checkbox" id="pipeChk" checked />
+    </div>
+    <div class="set-row">
+      <span class="label">회의 요약</span>
+      <button class="set-toggle on" id="setSummary">켜짐</button>
+    </div>
+    <div class="set-status">
+      <b>캡처</b><span id="stCapture">off</span>
+      <b>해상도</b><span id="stRes">–</span>
+      <b>화면 해설 내레이션</b><span id="stDelay">–</span>
+      <b>버퍼</b><span id="stBuffer">–</span>
+    </div>
+    <div class="set-note" id="modeNote"></div>
+  </div>
+
+  <div id="prepOverlay" hidden>
+    <div>회의 소리를 모으는 중입니다</div>
+    <div id="prepRemain"></div>
+  </div>
+
+  <dialog id="permModal">
+    <h3 id="permTitle"></h3>
+    <p id="permMessage"></p>
+    <div class="btns" id="permBtns"></div>
+  </dialog>
+
+  <script type="module" src="./main.js"></script>
+</body>
+</html>
