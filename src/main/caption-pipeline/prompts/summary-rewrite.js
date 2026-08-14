@@ -1,0 +1,62 @@
+
+const { buildOutputLanguageRuleList } = require('./output-language-rule');
+
+// 한국어 합성음 낭독용 규칙(영문 약어 음차·"퍼센트" 표기). 영어로 다듬을 때는 빼고 영어 규칙을 붙인다.
+const KOREAN_READING_RULE_PATTERN = /음차|엔에프티|퍼센트/;
+
+const ENGLISH_REWRITE_RULE_LINE_LIST = [
+  '다듬은 글은 자연스러운 영어로 쓴다(초안에 한국어가 남아 있으면 영어로 옮긴다). 구성 제목도 영어로 쓴다.',
+  '숫자는 읽는 대로 쓴다(42% → 42 percent). 영문 약어·상표는 그대로 둔다(영어 목소리가 읽는다).',
+  '네 부분의 제목 줄은 영어 제목(Overview / Topics / Slide by slide / Decisions and next steps) 그대로 둔다.'
+    + ' 지우거나 바꾸지 않고, 초안 제목이 한국어면 이 영어 제목으로만 옮긴다.',
+];
+
+function buildSummaryRewriteSystemPrompt({ language = 'ko' } = {}) {
+  const lineList = buildKoreanRewriteLineList();
+  if (language === 'ko') return lineList.join('\n');
+  return [
+    ...lineList.filter((line) => !KOREAN_READING_RULE_PATTERN.test(line)),
+    ...buildOutputLanguageRuleList({ language, detailLineList: ENGLISH_REWRITE_RULE_LINE_LIST }),
+  ].join('\n');
+}
+
+function buildKoreanRewriteLineList() {
+  return [
+    '너는 이미 작성된 회의 요약 초안을 소리 내어 듣기 좋은 글로 다듬는 역할이다.',
+    '독자는 회의에 함께 있었지만 화면을 볼 수 없었던 시각장애인 참석자다.',
+    '이 글은 그대로 음성으로 합성되어 귀로 들린다.',
+    '',
+    '■ 가장 중요한 원칙',
+    '  · 내용을 새로 지어내거나 없애지 마라. 초안에 있는 사실·수치·결론만 쓴다.',
+    '  · 수치·단위·고유명사는 초안 그대로 둔다. 값을 바꾸거나 어림하지 마라.',
+    '  · 하는 일은 "문장 흐름과 낭독 자연스러움"을 다듬는 것뿐이다.',
+    '    끊긴 문장을 잇고, 어색한 어순을 바로잡고, 귀로 따라가기 쉽게 문장을 고른다.',
+    '',
+    '■ 형식 (반드시 지킨다 — 합성음이 기호를 소리 내 읽는다)',
+    '  · 표를 만들지 마라. 세로줄(|)·괘선·칸 맞춤 공백을 쓰지 마라.',
+    '  · 막대그래프나 도형 기호(●, ○, ■, ▲ 등)를 쓰지 마라.',
+    '  · 마크다운을 쓰지 마라. 제목의 #, 강조의 **, 코드의 백틱 모두 금지다.',
+    '  · 영문 약어·상표는 한글로 음차해 쓴다. (NFT→엔에프티 · VR→브이알 · KPMG→케이피엠지)',
+    '  · 숫자는 읽는 대로 쓴다. 42%보다 42퍼센트가 낫다.',
+    '    숫자 자체는 아라비아 숫자로 둔다. 16.1퍼센트를 "십육 점 일 퍼센트"처럼 한글로 풀어 쓰지 마라.',
+    '  · 각 항목은 그냥 줄을 바꿔 쓴다. 항목 앞에 기호를 붙이지 않는다.',
+    '',
+    '■ 구성 (초안의 순서를 그대로 유지한다)',
+    '  개요 → 다룬 주제 → 슬라이드별 내용 → 결정된 것과 앞으로 할 일.',
+    '  초안이 이미 이 순서라면 순서를 바꾸지 말고 문장만 다듬는다.',
+    '  네 부분의 제목 줄(개요 / 다룬 주제 / 슬라이드별 내용 / 결정된 것과 앞으로 할 일)은 지우거나 바꾸지 말고 그대로 둔다.',
+    '',
+    '다듬은 본문만 출력한다. 머리말이나 설명을 덧붙이지 마라.',
+  ];
+}
+
+function buildSummaryRewriteInput({ draftText, language = 'ko' }) {
+  return [
+    language === 'ko' ? '아래는 회의 요약 초안이다. 위 원칙에 따라 낭독하기 좋게 다듬어라.'
+      : '아래는 회의 요약 초안이다. 위 원칙에 따라 영어로 낭독하기 좋게 다듬어라.',
+    '',
+    draftText,
+  ].join('\n');
+}
+
+module.exports = { buildSummaryRewriteSystemPrompt, buildSummaryRewriteInput };

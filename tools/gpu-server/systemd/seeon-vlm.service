@@ -1,0 +1,27 @@
+[Unit]
+Description=seeon VLM (vLLM Gemma 4 26B-A4B-it QAT 4bit)
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+User=@GPU_USER@
+Environment=HOME=/home/@GPU_USER@
+Environment=HF_HOME=/data/hf-cache
+# 받아 둔 리비전만 쓴다. 기동 때 Hugging Face 에 묻지 않아 파일이 바뀌거나 받기가 실패해도 영향이 없다.
+Environment=HF_HUB_OFFLINE=1
+# vLLM 의 익명 사용 통계(stats.vllm.ai) 전송을 끈다.
+Environment=VLLM_NO_USAGE_STATS=1
+Environment=DO_NOT_TRACK=1
+# 같은 모델을 8805(이미지 0)에도 띄우므로 컴파일 캐시를 자리마다 나눈다. 같이 쓰면 서로의 캐시를 읽고 기동이 죽는다(vLLM #50891).
+Environment=VLLM_CACHE_ROOT=/home/@GPU_USER@/.cache/vllm-gemma4-vlm
+Environment=CUDA_HOME=/data/venv-vllm-35/lib/python3.12/site-packages/nvidia/cu13
+Environment=PATH=/data/venv-vllm-35/lib/python3.12/site-packages/nvidia/cu13/bin:/data/venv-vllm-35/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin
+Environment=VLLM_USE_FLASHINFER_SAMPLER=0
+WorkingDirectory=/home/@GPU_USER@/gpu-server
+# 이미지 토큰 예산 560: 1280x720 화면을 비율 그대로 줄이지 않는 가장 작은 값(약 527토큰). 기본 280 은 1056x576 으로 줄인다.
+ExecStart=/data/venv-vllm-35/bin/vllm serve cyankiwi/gemma-4-26B-A4B-it-qat-AWQ-INT4 --revision 18a3c7285c33ee39d3e5e16ee6fb2c18f4955ef9 --served-model-name gemma-4-26b-a4b-qat --host 127.0.0.1 --port 8801 --max-model-len 32768 --gpu-memory-utilization 0.55 --limit-mm-per-prompt '{"video":0}' --mm-processor-kwargs '{"max_soft_tokens":560}' --reasoning-parser gemma4
+Restart=always
+RestartSec=5
+
+[Install]
+WantedBy=multi-user.target

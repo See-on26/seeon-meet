@@ -1,0 +1,18 @@
+[Unit]
+Description=seeon ASR (faster-whisper)
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+User=@GPU_USER@
+Environment=HOME=/home/@GPU_USER@
+# faster-whisper의 ctranslate2는 torch와 달리 venv 안의 CUDA 라이브러리를 스스로 찾지 못한다.
+# torch(cu121)가 venv에 받아 둔 cuBLAS·cuDNN 경로를 알려 준다 — 없으면 전사 요청이 libcublas.so.12로 500을 낸다.
+Environment=LD_LIBRARY_PATH=/home/@GPU_USER@/venv-audio/lib/python3.10/site-packages/nvidia/cublas/lib:/home/@GPU_USER@/venv-audio/lib/python3.10/site-packages/nvidia/cudnn/lib
+WorkingDirectory=/home/@GPU_USER@/gpu-server
+ExecStart=/home/@GPU_USER@/venv-audio/bin/uvicorn asr_server:app --host 127.0.0.1 --port 8802
+Restart=always
+RestartSec=5
+
+[Install]
+WantedBy=multi-user.target
