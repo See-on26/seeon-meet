@@ -1,0 +1,389 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+  <meta charset="UTF-8" />
+  <title>seeon</title>
+  <style>
+    :root {
+      color-scheme: light;
+      --primary: #0066cc;
+      --primary-soft: #e8f1fd;
+      --ink: #1d1d1f;
+      --ink-80: #333333;
+      --ink-48: #7a7a7a;
+      --ink-28: #b0b0b0;
+      --canvas: #ffffff;
+      --parchment: #f5f5f7;
+      --hairline: #e5e5ea;
+      --hairline-strong: #d2d2d7;
+      --danger: #e0342b;
+      --shadow: 0 1px 3px rgba(0,0,0,.06), 0 8px 24px rgba(0,0,0,.05);
+    }
+    * { box-sizing: border-box; }
+    html, body { height: 100%; }
+    body {
+      margin: 0; background: var(--parchment); color: var(--ink);
+      font: 14px/1.5 -apple-system, BlinkMacSystemFont, 'Apple SD Gothic Neo', 'Segoe UI', sans-serif;
+      letter-spacing: -0.2px;
+    }
+    button { font: inherit; cursor: pointer; }
+    button:disabled { opacity: .4; cursor: not-allowed; }
+
+    .app { display: grid; grid-template-rows: auto 1fr auto; height: 100vh; }
+
+    header {
+      display: flex; align-items: center; gap: 14px; flex-wrap: wrap;
+      padding: 10px 14px; background: var(--canvas); border-bottom: 1px solid var(--hairline);
+    }
+    .brand { display: flex; align-items: baseline; gap: 7px; white-space: nowrap; }
+    .brand .logo { font-weight: 800; font-size: 17px; letter-spacing: .5px; }
+    .brand .tag { font-size: 10px; font-weight: 600; letter-spacing: 1.4px; color: var(--ink-48); }
+
+    .live { display: flex; align-items: center; gap: 8px; }
+    .live-dot { width: 8px; height: 8px; border-radius: 50%; background: var(--ink-28); }
+    .live.on .live-dot { background: var(--danger); box-shadow: 0 0 0 3px rgba(224,52,43,.15); }
+    .live-state { font-size: 12px; color: var(--ink-48); white-space: nowrap; }
+
+    .capture-btn {
+      padding: 7px 13px; border-radius: 9px; font-weight: 600;
+      background: var(--primary); color: #fff; border: 1px solid var(--primary);
+    }
+    .capture-btn.on { background: var(--ink); border-color: var(--ink); }
+    .ghost-btn {
+      padding: 7px 12px; border-radius: 9px; background: var(--canvas);
+      color: var(--ink-80); border: 1px solid var(--hairline-strong);
+    }
+    .ghost-btn.on { background: var(--parchment); }
+    /* 꺼진 기능을 캡처 전부터 보여 준다 — 시작 안내 한 줄은 뒤 로그에 묻힌다. */
+    .feature-off-badge {
+      padding: 4px 9px; border-radius: 8px; font-size: 12px; font-weight: 600; white-space: nowrap;
+      color: var(--danger); border: 1px solid var(--danger); background: rgba(224,52,43,.06);
+    }
+    .feature-off-badge[hidden] { display: none; }
+
+    .header-spacer { flex: 1 1 auto; }
+
+    .mode-cluster { display: flex; align-items: center; gap: 14px; flex-wrap: wrap; }
+    .mode-field { display: flex; align-items: center; gap: 7px; }
+    .mode-field[hidden] { display: none; }
+    .mode-label { font-size: 11px; font-weight: 600; color: var(--ink-48); white-space: nowrap; }
+
+    .toggle {
+      display: inline-flex; position: relative; background: var(--parchment);
+      border: 1px solid var(--hairline-strong); border-radius: 999px; padding: 3px; user-select: none;
+    }
+    .toggle .opt {
+      position: relative; z-index: 1; padding: 5px 13px; font-size: 12px; font-weight: 600;
+      color: var(--ink-48); border-radius: 999px; transition: color .18s; background: transparent; border: 0;
+    }
+    .toggle .opt.active { color: #fff; }
+    .toggle .opt:disabled { opacity: .35; }
+    .toggle .thumb {
+      position: absolute; top: 3px; bottom: 3px; left: 3px; width: calc(50% - 3px);
+      background: var(--ink); border-radius: 999px; transition: transform .2s ease;
+    }
+    .toggle[data-axis="concurrent"] .thumb { transform: translateX(100%); }
+
+    .segment { display: inline-flex; background: var(--parchment); border: 1px solid var(--hairline-strong); border-radius: 9px; padding: 2px; }
+    .segment button {
+      font-size: 12px; font-weight: 600; padding: 4px 10px; border: 0;
+      background: transparent; color: var(--ink-48); border-radius: 7px; white-space: nowrap;
+    }
+    .segment button.on { background: var(--canvas); color: var(--ink); box-shadow: 0 1px 2px rgba(0,0,0,.08); }
+
+    .icon-btn {
+      display: grid; place-items: center; width: 34px; height: 34px; border-radius: 9px;
+      background: var(--canvas); border: 1px solid var(--hairline-strong); color: var(--ink-80);
+    }
+    .icon-btn:hover { background: var(--parchment); }
+    .icon-btn.on { background: var(--ink); border-color: var(--ink); color: #fff; }
+
+    #panelRail { display: none; }
+    body.panel-collapsed .app { display: none; }
+    body.panel-collapsed #panelRail {
+      display: flex; flex-direction: column; align-items: center; gap: 14px;
+      height: 100vh; padding: 10px 0; background: var(--canvas); border-left: 1px solid var(--hairline);
+    }
+
+    .stream { overflow-y: auto; padding: 16px; display: flex; flex-direction: column; gap: 12px; }
+    .stream::-webkit-scrollbar { width: 9px; }
+    .stream::-webkit-scrollbar-thumb { background: var(--hairline-strong); border-radius: 4px; }
+    .stream-empty {
+      margin: auto; max-width: 340px; text-align: center; color: var(--ink-48); font-size: 14px; line-height: 1.6;
+    }
+
+    .card {
+      border: 1px solid var(--hairline); border-left: 3px solid var(--hairline-strong);
+      border-radius: 10px; padding: 10px 12px; background: #fcfcfd;
+    }
+    .card.playing { border-left-color: var(--primary); background: var(--primary-soft); }
+    .card-meta { display: flex; align-items: center; gap: 8px; margin-bottom: 5px; font-size: 11px; }
+    .card-tag { font-weight: 700; color: var(--ink-80); }
+    .card-tag .aid { color: var(--primary); margin-right: 4px; }
+    .card-time { color: var(--ink-48); }
+    .card-body { font-size: 14px; line-height: 1.55; color: var(--ink-80); white-space: pre-wrap; }
+
+    .ask { align-self: flex-end; max-width: 82%; }
+    .ask .bubble { background: var(--ink); color: #fff; border-radius: 14px 14px 4px 14px; padding: 9px 13px; font-size: 14px; }
+    .ask .who { text-align: right; font-size: 10px; color: var(--ink-48); margin-top: 4px; }
+
+    .sys { align-self: center; max-width: 90%; text-align: center; font-size: 12px; color: var(--ink-48); padding: 2px 8px; }
+
+    .composer { border-top: 1px solid var(--hairline); padding: 10px 12px 12px; background: var(--canvas); }
+    .chips { display: flex; flex-wrap: wrap; gap: 6px; margin-bottom: 9px; }
+    .chip {
+      font-size: 12px; padding: 5px 11px; border-radius: 999px; background: var(--parchment);
+      border: 1px solid var(--hairline-strong); color: var(--ink-80); white-space: nowrap;
+      max-width: 100%; overflow: hidden; text-overflow: ellipsis;
+    }
+    .chip .chip-key { margin-right: 5px; font-size: 10px; font-weight: 700; color: var(--ink-48); }
+    .chip:hover:not(:disabled) { background: var(--primary-soft); border-color: var(--primary); color: var(--primary); }
+    .input-row { display: flex; align-items: center; gap: 8px; }
+    .input-row .field {
+      flex: 1; display: flex; align-items: center; gap: 8px; background: var(--parchment);
+      border: 1px solid var(--hairline-strong); border-radius: 11px; padding: 7px 10px;
+    }
+    .input-row input { flex: 1; border: 0; background: transparent; font: inherit; color: var(--ink); outline: none; }
+    .input-row input::placeholder { color: var(--ink-28); }
+    .mic { display: grid; place-items: center; width: 30px; height: 30px; border-radius: 8px; border: 1px solid var(--hairline-strong); background: var(--canvas); color: var(--ink-80); }
+    .mic.recording { color: #fff; background: #e11d48; border-color: #e11d48; animation: micpulse 1s ease-in-out infinite; }
+    @keyframes micpulse { 0%,100% { box-shadow: 0 0 0 0 rgba(225,29,72,0.5); } 50% { box-shadow: 0 0 0 5px rgba(225,29,72,0); } }
+    .send { display: grid; place-items: center; width: 40px; height: 40px; border-radius: 11px; border: 1px solid var(--primary); background: var(--primary); color: #fff; }
+    .shortcuts { margin-top: 9px; display: flex; flex-wrap: wrap; gap: 8px 14px; font-size: 11px; color: var(--ink-48); }
+    .shortcuts kbd {
+      font: inherit; font-size: 10px; font-weight: 700; background: var(--parchment);
+      border: 1px solid var(--hairline-strong); border-bottom-width: 2px; border-radius: 5px; padding: 1px 5px; color: var(--ink-80);
+    }
+
+    #settingsPanel {
+      position: fixed; top: 54px; right: 14px; width: 300px; z-index: 20;
+      background: var(--canvas); border: 1px solid var(--hairline-strong); border-radius: 14px;
+      box-shadow: var(--shadow); padding: 14px; overflow-y: auto;
+    }
+    #settingsPanel[hidden] { display: none; }
+    #settingsPanel h4 { margin: 0 0 10px; font-size: 13px; font-weight: 700; }
+    .set-row { display: flex; align-items: center; justify-content: space-between; gap: 10px; padding: 7px 0; }
+    .set-row + .set-row { border-top: 1px solid var(--hairline); }
+    .set-row .label { min-width: 0; font-size: 13px; color: var(--ink-80); }
+    .set-row .value { font-size: 12px; color: var(--ink-48); }
+    .set-toggle { padding: 4px 12px; border-radius: 999px; border: 1px solid var(--hairline-strong); background: var(--parchment); color: var(--ink-80); font-size: 12px; font-weight: 600; }
+    .set-toggle.on { background: var(--ink); border-color: var(--ink); color: #fff; }
+    .set-toggle[aria-disabled="true"] { opacity: 0.45; cursor: not-allowed; }
+    #featureToggleList + .set-row { border-top: 1px solid var(--hairline); }
+    /* 선택지 이름이 길어도(영어 등) 패널 밖으로 나가지 않게 폭을 줄 안에 묶고, 넘치는 글자는 말줄임으로 자른다. */
+    .set-select { flex: 0 1 auto; min-width: 0; max-width: 60%; text-overflow: ellipsis; padding: 4px 8px; border-radius: 8px; border: 1px solid var(--hairline-strong); background: var(--parchment); color: var(--ink-80); font: inherit; font-size: 12px; font-weight: 600; }
+    .set-select[aria-disabled="true"] { opacity: 0.45; cursor: not-allowed; }
+    #captionLanguageNote, #slideTextBackendNote, #questionPresetNote { margin-top: 0; }
+    #questionPresetSection { border-top: 1px solid var(--hairline); margin-top: 7px; }
+    #devSettingsSection { border-top: 1px solid var(--hairline-strong); margin-top: 12px; padding-top: 12px; }
+    #devSettingsSection[hidden] { display: none; }
+    .set-mini { padding: 3px 9px; border-radius: 8px; border: 1px solid var(--hairline-strong); background: var(--parchment); color: var(--ink-80); font-size: 11px; font-weight: 600; }
+    .preset-row { display: flex; align-items: center; gap: 6px; padding: 3px 0; }
+    .preset-key { flex: none; width: 44px; font-size: 11px; font-weight: 700; color: var(--ink-48); }
+    .preset-input { flex: 1; min-width: 0; padding: 4px 7px; border-radius: 7px; border: 1px solid var(--hairline-strong); background: var(--parchment); color: var(--ink); font: inherit; font-size: 12px; }
+    .preset-input::placeholder { color: var(--ink-28); }
+    .preset-remove { flex: none; width: 24px; height: 24px; border-radius: 6px; border: 1px solid var(--hairline-strong); background: var(--canvas); color: var(--ink-48); font-size: 13px; line-height: 1; }
+    .set-note { margin-top: 10px; font-size: 11px; color: var(--ink-48); line-height: 1.5; }
+    .set-status { margin-top: 10px; display: grid; grid-template-columns: auto 1fr; gap: 4px 12px; font-size: 12px; }
+    .set-status b { font-weight: 600; color: var(--ink-48); }
+    .set-status span { color: var(--ink-80); }
+
+    #prepOverlay {
+      position: fixed; inset: 0; background: rgba(0,0,0,.72); color: #fff;
+      display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 8px;
+      font-size: 18px; z-index: 30;
+    }
+    #prepOverlay[hidden] { display: none; }
+
+    dialog#permModal {
+      background: var(--canvas); color: var(--ink); border: 1px solid var(--hairline);
+      border-radius: 18px; padding: 24px; max-width: 440px;
+    }
+    dialog#permModal::backdrop { background: rgba(0,0,0,.4); }
+    dialog#archiveModal {
+      width: min(680px, 90vw); max-height: 82vh; overflow-y: auto; padding: 18px 20px;
+      border: 1px solid var(--hairline-strong); border-radius: 14px; box-shadow: var(--shadow); background: var(--canvas);
+    }
+    dialog#archiveModal::backdrop { background: rgba(0,0,0,.4); }
+    dialog#archiveModal button { padding: 6px 12px; border-radius: 9px; border: 1px solid var(--hairline-strong); background: var(--canvas); color: var(--ink); }
+    .archive-head { display: flex; align-items: center; justify-content: space-between; gap: 10px; }
+    .archive-head h3 { margin: 0; font-size: 16px; font-weight: 600; }
+    .archive-actions { display: flex; gap: 6px; }
+    .archive-status { margin: 8px 0; font-size: 12px; color: var(--ink-48); }
+    .archive-list { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 6px; }
+    .archive-list button { width: 100%; text-align: left; line-height: 1.5; }
+    .archive-list[hidden] { display: none; }
+    #archiveDetail h4 { margin: 12px 0 6px; font-size: 15px; }
+    #archiveDetail h5 { margin: 14px 0 4px; font-size: 13px; color: var(--ink-80); }
+    .archive-text { white-space: pre-wrap; word-break: break-word; margin: 0; padding: 10px; border-radius: 9px;
+      background: var(--parchment); font-family: inherit; font-size: 13px; line-height: 1.6; max-height: 40vh; overflow-y: auto; }
+    dialog#permModal h3 { margin: 0 0 8px; font-size: 16px; font-weight: 600; }
+    dialog#permModal p { margin: 0 0 16px; color: var(--ink-80); white-space: pre-line; }
+    dialog#permModal .btns { display: flex; gap: 8px; justify-content: flex-end; flex-wrap: wrap; }
+    dialog#permModal button { padding: 7px 14px; border-radius: 9px; background: var(--primary); color: #fff; border: 1px solid var(--primary); }
+    dialog#permModal button.secondary { background: var(--canvas); color: var(--ink); border-color: var(--hairline-strong); }
+    .sr-only { position: absolute; width: 1px; height: 1px; overflow: hidden; clip: rect(0 0 0 0); white-space: nowrap; }
+  </style>
+</head>
+<body>
+  <div id="srAnnounce" class="sr-only" aria-live="polite" aria-atomic="true"></div>
+
+  <div class="app">
+
+    <header>
+      <button class="icon-btn" id="panelCollapseBtn" type="button" title="패널 접기 (Ctrl+B)" aria-label="SEEON 패널 접기, 단축키 Control B" data-ui-text-title="panel.collapseTitle" data-ui-text-aria-label="panel.collapseAriaLabel">
+        <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M6 6l6 6-6 6M13 6l6 6-6 6"/></svg>
+      </button>
+      <div class="brand">
+        <span class="logo" id="brandLogo">SEE-ON</span>
+        <span class="tag">SCREEN NARRATION</span>
+      </div>
+
+      <div class="live" id="live">
+        <span class="live-dot"></span>
+        <span class="live-state" id="liveState" data-ui-text="capture.idle">대기 중</span>
+      </div>
+      <button class="capture-btn" id="toggleBtn" disabled data-ui-text="capture.start">회의 캡처 시작</button>
+      <button class="ghost-btn" id="pauseBtn" disabled data-ui-text="capture.pause">일시정지</button>
+      <button class="ghost-btn" id="meetReloadBtn" type="button" title="Meet 화면 새로고침 — 회의 밖이면 Meet 첫 화면으로 (Ctrl/Cmd+R)" aria-label="Meet 화면 새로고침, 회의 밖이면 Meet 첫 화면으로 돌아가요, 단축키 Ctrl 또는 Cmd R" data-ui-text="meetReload.button" data-ui-text-title="meetReload.buttonTitle" data-ui-text-aria-label="meetReload.buttonAriaLabel">Meet 새로고침</button>
+      <button class="ghost-btn" id="archiveBtn" type="button" title="지난 회의 요약·스크립트 보기" aria-haspopup="dialog" data-ui-text="archive.button" data-ui-text-title="archive.buttonTitle">지난 회의</button>
+      <span class="live-state" id="meetHint"></span>
+      <span class="feature-off-badge" id="featureOffBadge" title="설정 패널이나 Ctrl+Q(페이지 전환)·Ctrl+W(화자)·Ctrl+0(요약)으로 켤 수 있어요" data-ui-text-title="feature.offBadgeTitle" hidden></span>
+
+      <div class="header-spacer"></div>
+
+      <div class="mode-cluster">
+        <div class="mode-field">
+          <span class="mode-label" data-ui-text="mode.insertionLabel">삽입 방식</span>
+          <div class="toggle" id="modeToggle" data-axis="concurrent" role="group" aria-label="삽입 방식 전환" data-ui-text-aria-label="mode.insertionAriaLabel">
+            <button class="opt" type="button" data-axis="delayed" data-ui-text="mode.cross">교차</button>
+            <button class="opt active" type="button" data-axis="concurrent" data-ui-text="mode.concurrent">동시</button>
+            <span class="thumb"></span>
+          </div>
+        </div>
+        <div class="mode-field" id="segmentField" hidden>
+          <span class="mode-label" data-ui-text="mode.crossProfileLabel">교차 프로필</span>
+          <div class="segment" id="modeSegment">
+            <button type="button" data-mode="listening" data-ui-text="mode.quality">품질</button>
+            <button type="button" data-mode="delayed" data-ui-text="mode.balanced">균형</button>
+            <button type="button" data-mode="realtime_sic" data-ui-text="mode.performance">성능</button>
+          </div>
+        </div>
+      </div>
+
+      <button class="icon-btn" id="settingsBtn" title="사용자 설정" aria-label="사용자 설정" aria-expanded="false" aria-controls="settingsPanel" data-ui-text-title="settings.title" data-ui-text-aria-label="settings.title">
+        <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 1 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 1 1-2.83-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 1 1 2.83-2.83l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 1 1 2.83 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z"/></svg>
+      </button>
+    </header>
+
+    <div class="stream" id="logStream">
+      <div class="stream-empty" id="streamEmpty">
+        <span data-ui-text="stream.emptyBefore">왼쪽 Meet 창에서 회의에 참여한 뒤</span> <b data-ui-text="capture.start">회의 캡처 시작</b><span data-ui-text="stream.emptyAfter">을 누르세요.</span><br />
+        <span data-ui-text="stream.emptyDetail">지금까지 나온 화면 해설과 내가 던진 질문이 여기에 실시간으로 쌓입니다.</span>
+      </div>
+    </div>
+
+    <div class="composer">
+      <div class="chips" id="cmdChips" role="group" aria-label="질문 프리셋" data-ui-text-aria-label="question.chipsAriaLabel"></div>
+      <div class="input-row">
+        <div class="field">
+          <input type="text" id="cmdInput" placeholder="화면에 대해 무엇이든 물어보세요" data-ui-text-placeholder="question.inputPlaceholder" />
+          <button class="mic" id="cmdMic" title="음성 질문 (Ctrl+M)" aria-label="음성 질문, 단축키 Control M" aria-pressed="false" data-ui-text-title="question.micTitle" data-ui-text-aria-label="question.micAriaLabel">
+            <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><rect x="9" y="2" width="6" height="12" rx="3"/><path d="M5 10a7 7 0 0 0 14 0M12 17v4"/></svg>
+          </button>
+        </div>
+        <button class="send" id="cmdSend" title="전송" aria-label="전송" data-ui-text-title="question.send" data-ui-text-aria-label="question.send">
+          <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M5 12h14M13 6l6 6-6 6"/></svg>
+        </button>
+      </div>
+      <div class="shortcuts">
+        <span><kbd>Ctrl</kbd>+<kbd>1~9</kbd> <span data-ui-text="shortcut.questionPreset">질문 프리셋</span></span>
+        <span><kbd>Ctrl</kbd>+<kbd>M</kbd> <span data-ui-text="shortcut.voiceQuestion">음성 질문</span></span>
+        <span><kbd>Ctrl</kbd>+<kbd>Q</kbd>·<kbd>W</kbd>·<kbd>0</kbd> <span data-ui-text="shortcut.featureToggle">페이지 전환·화자·요약 켜기·끄기</span></span>
+        <span><kbd>Ctrl</kbd>+<kbd>B</kbd> <span data-ui-text="shortcut.panelToggle">패널 접기·펼치기</span></span>
+        <span><span data-ui-text="shortcut.onWindows">윈도</span> <kbd>F11</kbd> · <span data-ui-text="shortcut.onMac">맥</span> <kbd>Control</kbd>+<kbd>Cmd</kbd>+<kbd>F</kbd> <span data-ui-text="shortcut.fullScreen">전체 화면</span></span>
+        <span data-ui-text="shortcut.macControl">맥도 Control 키</span>
+      </div>
+    </div>
+  </div>
+
+  <nav id="panelRail" aria-label="접힌 SEEON 패널" data-ui-text-aria-label="panel.railAriaLabel">
+    <button class="icon-btn" id="panelExpandBtn" type="button" title="패널 펼치기 (Ctrl+B)" aria-label="SEEON 패널 펼치기, 단축키 Control B" data-ui-text-title="panel.expandTitle" data-ui-text-aria-label="panel.expandAriaLabel">
+      <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M18 6l-6 6 6 6M11 6l-6 6 6 6"/></svg>
+    </button>
+    <span class="live" id="railLive" role="img" aria-label="대기 중" title="대기 중" data-ui-text-aria-label="capture.idle" data-ui-text-title="capture.idle"><span class="live-dot"></span></span>
+  </nav>
+
+  <div id="settingsPanel" hidden>
+    <h4 data-ui-text="settings.title">사용자 설정</h4>
+    <div id="featureToggleList" role="group" aria-label="기능 켜기·끄기" data-ui-text-aria-label="settings.featureGroupAriaLabel"></div>
+    <div class="set-row">
+      <label class="label" for="captionLanguageSelect" data-ui-text="settings.captionLanguage">캡션 언어</label>
+      <select id="captionLanguageSelect" class="set-select" aria-describedby="captionLanguageNote"></select>
+    </div>
+    <div class="set-note" id="captionLanguageNote" data-ui-text="settings.captionLanguageNote">해설·질문 답·요약을 들려줄 언어예요. 회의 말은 한국어·영어를 자동으로 알아들어요. 회의 캡처 중에는 바꿀 수 없어요.</div>
+    <div id="questionPresetSection" role="group" aria-labelledby="questionPresetTitle">
+      <div class="set-row">
+        <span class="label" id="questionPresetTitle" data-ui-text="settings.questionPresetTitle">질문 프리셋 (Ctrl+1~9)</span>
+        <button type="button" class="set-mini" id="questionPresetResetBtn" data-ui-text="settings.questionPresetReset">기본값으로</button>
+      </div>
+      <div id="questionPresetList"></div>
+      <div class="set-note" id="questionPresetNote" data-ui-text="settings.questionPresetNote">고친 칸은 바로 저장돼요. 칸을 비우거나 ×로 지우면 뒤 번호가 하나씩 당겨져요. 9개까지 넣을 수 있어요.</div>
+    </div>
+    <div class="set-note" id="modeNote"></div>
+    <!-- 점검용 항목은 개발자 모드(로고 5번)를 열 때만 보인다. 스크린리더 사용자가 설정을 위에서부터 들을 때 고를 것만 듣게 한다. -->
+    <section id="devSettingsSection" role="group" aria-labelledby="devSettingsTitle" hidden>
+      <h4 id="devSettingsTitle" data-ui-text="settings.devSectionTitle">개발자 진단</h4>
+      <div class="set-row">
+        <span class="label" data-ui-text="settings.captionPipeline">캡션 파이프라인</span>
+        <input type="checkbox" id="pipeChk" checked />
+      </div>
+      <div class="set-row">
+        <label class="label" for="slideTextBackendSelect" data-ui-text="settings.slideTextBackend">화면 글자 읽기</label>
+        <select id="slideTextBackendSelect" class="set-select" aria-describedby="slideTextBackendNote"></select>
+      </div>
+      <div class="set-note" id="slideTextBackendNote" data-ui-text="settings.slideTextBackendNote">OCR 은 글자 인식 서버로 읽고, 응답이 없으면 VLM 으로 읽어요. 회의 캡처 중에는 바꿀 수 없어요.</div>
+      <div class="set-status">
+        <b data-ui-text="status.capture">캡처</b><span id="stCapture">off</span>
+        <b data-ui-text="status.resolution">해상도</b><span id="stRes">–</span>
+        <b data-ui-text="status.narration">화면 해설 내레이션</b><span id="stDelay">–</span>
+        <b data-ui-text="status.buffer">버퍼</b><span id="stBuffer">–</span>
+        <b data-ui-text="status.gpuServer">GPU 서버</b><span id="stGpuTunnel">–</span>
+      </div>
+    </section>
+  </div>
+
+  <div id="prepOverlay" hidden>
+    <div data-ui-text="prep.collecting">회의 소리를 모으는 중입니다</div>
+    <div id="prepRemain"></div>
+  </div>
+
+  <dialog id="archiveModal" aria-labelledby="archiveTitle">
+    <div class="archive-head">
+      <h3 id="archiveTitle" data-ui-text="archive.title">지난 회의</h3>
+      <div class="archive-actions">
+        <button type="button" id="archiveFolderBtn" class="secondary" data-ui-text="archive.openFolder">폴더 열기</button>
+        <button type="button" id="archiveCloseBtn" class="secondary" data-ui-text="common.close">닫기</button>
+      </div>
+    </div>
+    <p id="archiveStatus" class="archive-status" aria-live="polite"></p>
+    <ul id="archiveList" class="archive-list"></ul>
+    <section id="archiveDetail" hidden>
+      <button type="button" id="archiveBackBtn" class="secondary" data-ui-text="archive.backToList">목록으로</button>
+      <h4 id="archiveDetailTitle" tabindex="-1"></h4>
+      <h5 data-ui-text="archive.summaryHeading">회의 요약</h5>
+      <pre id="archiveSummary" class="archive-text" tabindex="0"></pre>
+      <h5 data-ui-text="archive.scriptHeading">대화 스크립트</h5>
+      <pre id="archiveScript" class="archive-text" tabindex="0"></pre>
+    </section>
+  </dialog>
+
+  <dialog id="permModal">
+    <h3 id="permTitle"></h3>
+    <p id="permMessage"></p>
+    <div class="btns" id="permBtns"></div>
+  </dialog>
+
+  <script type="module" src="./main.js"></script>
+</body>
+</html>

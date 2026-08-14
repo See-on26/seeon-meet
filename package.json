@@ -1,0 +1,31 @@
+{
+  "name": "electron-seeon-meet",
+  "version": "0.1.0",
+  "description": "실시간 화상회의(Google Meet) 시각 정보 음성 안내 — 캡션 체인 런타임",
+  "main": "src/main/index.js",
+  "scripts": {
+    "start": "electron .",
+    "debug": "electron . --remote-debugging-port=9222",
+    "smoke": "SEEON_SMOKE=1 electron .",
+    "mock": "node tools/mock-gpu-server.js",
+    "test": "node --test test/*.test.mjs",
+    "check:renderer": "node tools/check-esm.mjs src/renderer/app/main.js",
+    "eval:detection": "node tools/detection-eval/run-detection-eval.mjs",
+    "setup:kiwi": "node tools/kiwi/fetch-kiwi-model.mjs",
+    "predist:win": "npm run setup:kiwi",
+    "dist:win": "electron-builder --config electron-builder.config.js --win nsis --x64 --publish never",
+    "predist:mac:dir": "npm run setup:kiwi",
+    "dist:mac:dir": "electron-builder --config electron-builder.config.js --mac --dir --publish never",
+    "dist:win:kit": "node tools/windows-kit/build-windows-kit.mjs"
+  },
+  "dependencies": {
+    "@anthropic-ai/bedrock-sdk": "^0.32.0",
+    "kiwi-nlp": "0.24.0",
+    "ssh2": "^1.17.0"
+  },
+  "devDependencies": {
+    "electron": "^43.0.0",
+    "electron-builder": "^26.15.3",
+    "puppeteer-core": "^24.23.0"
+  }
+}
