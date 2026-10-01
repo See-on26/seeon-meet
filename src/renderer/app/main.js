@@ -13,7 +13,7 @@ import { CONTEXT_TOKEN_BUDGET } from '../core/mode/context-budget.js';
 import { DelayBuffer, isCaptionDroppable, EXCESS_DROP_MS } from '../core/audio-renderer/delay-buffer.js';
 import { StreamDelaySource } from '../core/audio-renderer/stream-delay-source.js';
 import { NarrationScheduler } from '../core/audio-renderer/narration-scheduler.js';
-import { GapCandidateStore } from '../core/audio-renderer/gap-candidate-store.js';
+import { GapCandidateStore, resolveGapSearchFromMs } from '../core/audio-renderer/gap-candidate-store.js';
 import { CaptionNarrator } from '../core/audio-renderer/caption-narrator.js';
 import { NarrationMixer } from '../core/audio-renderer/narration-mixer.js';
 
@@ -35,6 +35,7 @@ import { showModal } from './modal.js';
 
 import { RoiStore, SPEAKER_VERDICT_MAP } from '../core/roi/roi-store.js';
 import { MeetCaptureSession } from '../core/capture/meet-capture-session.js';
+import { wallToVideoTimeMs, resolveSpeechEndWallTs } from '../core/capture/video-time.js';
 
 const $ = (id) => document.getElementById(id);
 
@@ -471,6 +472,8 @@ const pointingLocator = new PointingLocator({ rowCount: 18, colCount: 32, cellCh
 const LOCAL_EMBED_MATCH_THRESHOLD = 0.02;
 const histogramGate = new SlideHistogramGate({});
 const slideRegistry = new SlideEmbeddingRegistry({});
+// 슬라이드 전환을 확정한 영상 시각. 체류 판정 후 생성하는 모드에서도 원 사건 시각을 잃지 않게 보관한다.
+const slideEventVideoTimeMap = new Map();
 
 const slideDwellGate = new SlideDwellGate({
   onSatisfied: ({ label, isRevisit }) => {
@@ -636,6 +639,7 @@ async function confirmSlideCandidate({ isFirst, imageData }) {
   const isRevisit = Boolean(decision.isRevisit);
 
   lastScreenTransitionAt = performance.now();
+  slideEventVideoTimeMap.set(decision.label, captureSource.videoTimeMs);
   console.log(`[slide] ${isRevisit ? '재방문' : (isFirst ? '첫' : '새')} 슬라이드 ${decision.label} (거리=${distance} src=${source}) → 체류 ${DWELL_MS}ms 판정`);
   markDebug({
     stage: DEBUG_STAGE_MAP.slide, verdict: DEBUG_VERDICT_MAP.info,
@@ -674,6 +678,7 @@ async function requestPageTransitionNarration(decision) {
   }
   const result = await window.seeon.sendPipelineFrame({
     ts, buffer, slideLabel: decision.label, wordBudget, isRevisit: Boolean(decision.isRevisit),
+    eventVideoTimeMs: slideEventVideoTimeMap.get(decision.label) ?? captureSource.videoTimeMs,
   }).catch(() => null);
 }
 
@@ -736,12 +741,14 @@ async function pollSpeakerIdentity() {
         speakerName: domVerdict.speaker.name,
         position: domVerdict.speaker.position,
         participantId: domVerdict.speaker.participantId || '',
+        eventVideoTimeMs: captureSource.videoTimeMs,
       });
     } else {
       const buffer = await captureRegionJpeg(region);
       if (!buffer) return;
       result = await window.seeon.sendPipelineSpeaker({
         ts: Date.now(), source: SPEAKER_SOURCE_MAP.vlm, buffer, wordBudget,
+        eventVideoTimeMs: captureSource.videoTimeMs,
       });
     }
   } catch (error) {
@@ -788,13 +795,14 @@ let lastResolvedSpeakerAt = 0;
 
 const candidateScheduler = new DeixisCandidateScheduler({ onDecide: runDeixisDecision });
 const deixisDetector = new DeixisDetector({
-  onDeixis: ({ text, trigger }) => {
+  onDeixis: ({ text, trigger, eventWallTs }) => {
     const { region, pointingOrderHint } = getPointingSequence();
     console.log(`[deixis] 🗣 발화 지시 "${trigger}" → look-ahead 대기`);
-
+    const nowVideoTimeMs = captureSource.videoTimeMs;
     candidateScheduler.submit({
       source: CANDIDATE_SOURCE_MAP.speech, utterance: text, trigger, region, pointingOrderHint,
-      captureTs: performance.now(), videoTimeMs: captureSource.videoTimeMs,
+      captureTs: performance.now(), videoTimeMs: nowVideoTimeMs,
+      eventVideoTimeMs: wallToVideoTimeMs({ wallTs: eventWallTs, nowVideoTimeMs }) ?? nowVideoTimeMs,
     });
   },
 });
@@ -860,7 +868,7 @@ const SCREEN_DEPENDENCY_LABEL_MAP = {
 };
 
 async function runDeixisDecision({ source, utterance, triggerList, region, pointingOrderHint,
-  captureTs, videoTimeMs }) {
+  captureTs, videoTimeMs, eventVideoTimeMs = null }) {
   const label = triggerList.join(', ') || '필기/포인터';
   const mode = getCurrentMode();
   const { beforeMs, afterMs } = getModePolicy({ mode }) || {};
@@ -928,7 +936,7 @@ async function runDeixisDecision({ source, utterance, triggerList, region, point
   const result = await window.seeon.sendPipelineDeixis({
     ts, buffer, utterance, recentTranscript, beforeTranscript: before, afterTranscript: after,
     hasPointingRegion: Boolean(region), pointingOrderHint, slideLabel: slideRegistry.currentLabel(),
-    wordBudgetMap,
+    wordBudgetMap, eventVideoTimeMs,
   }).catch(() => null);
 
   const isNarrated = Boolean(result?.isOk && result.isGrounded);
@@ -966,7 +974,10 @@ function handleAsrTranscript({ text, ts, endTs, segmentList = [] }) {
     });
 
     transcriptWindow.push({ text: trimmed, ts: performance.now() });
-    deixisDetector.handleTranscript({ text: trimmed, captureTs: endTs });
+    deixisDetector.handleTranscript({
+      text: trimmed, captureTs: endTs,
+      eventWallTs: resolveSpeechEndWallTs({ chunkStartTs: ts, chunkEndTs: endTs, segmentList }),
+    });
   }
 
   const candidateCount = collectGapCandidateList({
@@ -987,10 +998,10 @@ function handleAsrTranscript({ text, ts, endTs, segmentList = [] }) {
 
 const CAPTION_SOURCE_TRANSITION = 'page-transition';
 
-function handleCaption({ text, source }) {
+function handleCaption({ text, source, eventVideoTimeMs = null }) {
   appendLogCard({ source, text });
   if (source === CAPTION_SOURCE_TRANSITION) lastScreenNarration = text;
-  return captureSource.videoTimeMs;
+  return Number.isFinite(eventVideoTimeMs) ? eventVideoTimeMs : captureSource.videoTimeMs;
 }
 
 const COMMAND_DEDUPE_MS = 400;
@@ -1028,6 +1039,7 @@ async function askQuestion({ command = null, questionText = null }) {
     : '';
   const result = await window.seeon.sendPipelineCommand({
     ts, buffer, command, questionText, recentTranscript, wordBudget,
+    eventVideoTimeMs: captureSource.videoTimeMs,
   }).catch(() => null);
   if (!result?.isGrounded && questionText) {
     showNotice('화면에서 답을 찾지 못했어요');
@@ -1075,7 +1087,12 @@ async function resolveInsertionTimeMs({ payload, captionCaptureMs }) {
   const narrationType = toNarrationType({ source: payload.source });
   const gapList = gapCandidateStore.getCandidateList({
     triggerVideoTimeMs: captionCaptureMs,
-    fromVideoTimeMs: delayBuffer.getDelayedTimeMs() + GAP_SAFETY_MS,
+    fromVideoTimeMs: resolveGapSearchFromMs({
+      eventVideoTimeMs: captionCaptureMs,
+      delayedTimeMs: delayBuffer.getDelayedTimeMs(),
+      safetyMs: GAP_SAFETY_MS,
+      isBeforeAllowed: narrationType === NARRATION_TYPE_MAP.speakerIdentity,
+    }),
     toVideoTimeMs: captureSource.videoTimeMs,
   });
   if (!gapList.length) {
@@ -1286,6 +1303,7 @@ async function attemptStartExperiment() {
     roiChangeSuppressUntil = 0;
     histogramGate.reset();
     slideRegistry.reset();
+    slideEventVideoTimeMap.clear();
     slideDwellGate.reset();
     isConfirmingSlide = false;
     hasWarnedLocalEmbedding = false;
@@ -1346,7 +1364,7 @@ function stopExperiment() {
     }],
     ['포인팅 로컬라이저', () => pointingLocator.reset()],
     ['슬라이드 히스토그램 게이트', () => histogramGate.reset()],
-    ['슬라이드 레지스트리', () => slideRegistry.reset()],
+    ['슬라이드 레지스트리', () => { slideRegistry.reset(); slideEventVideoTimeMap.clear(); }],
     ['전환 체류 게이트', () => slideDwellGate.reset()],
     ['ROI 스토어', () => roiStore.reset()],
     ['발화자 힌트', () => { lastResolvedSpeakerName = ''; lastResolvedSpeakerAt = 0; }],

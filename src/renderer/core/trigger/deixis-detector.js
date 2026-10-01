@@ -187,13 +187,15 @@ export class DeixisDetector {
     this.lastFiredAt = -Infinity;
   }
 
-  handleTranscript({ text, captureTs }) {
+  handleTranscript({ text, captureTs, eventWallTs = null }) {
     const result = detectDeixis(text);
     if (!result.isDeixis) return null;
     if (!this.activeKindSet.has(result.kind)) return null;
     if (captureTs - this.lastFiredAt < this.cooldownMs) return null;
     this.lastFiredAt = captureTs;
-    const deixisEvent = { text: text.trim(), trigger: result.trigger, kind: result.kind, captureTs };
+    const deixisEvent = {
+      text: text.trim(), trigger: result.trigger, kind: result.kind, captureTs, eventWallTs,
+    };
     this.onDeixis?.(deixisEvent);
     return deixisEvent;
   }

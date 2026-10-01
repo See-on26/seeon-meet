@@ -24,7 +24,7 @@ export class DeixisCandidateScheduler {
   }
 
   submit({ source, utterance = '', trigger = '', region = null, pointingOrderHint = '',
-    captureTs, videoTimeMs }) {
+    captureTs, videoTimeMs, eventVideoTimeMs = null }) {
     if (this.pending) {
       this.absorb({ utterance, trigger, region, pointingOrderHint });
       return;
@@ -32,7 +32,7 @@ export class DeixisCandidateScheduler {
     if (captureTs - this.lastDecidedAt < this.cooldownMs) return;
     this.pending = {
       source, utterance, triggerList: trigger ? [trigger] : [],
-      region, pointingOrderHint, captureTs, videoTimeMs,
+      region, pointingOrderHint, captureTs, videoTimeMs, eventVideoTimeMs,
     };
     this.timerHandle = this.setTimer(() => this.fire(), this.lookaheadMs);
   }
