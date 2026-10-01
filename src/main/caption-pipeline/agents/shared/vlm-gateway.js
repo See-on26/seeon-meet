@@ -83,15 +83,29 @@ async function requestFallbackContent({ config, jpegBuffer, jpegBufferList, prom
   return text;
 }
 
-async function runFallback({ request, label, reason, isBypass, now, gpuError = null }) {
+// 리스너(디버그 기록)가 실패해도 VLM 결과는 그대로 돌려준다.
+function notifyFallback(event) {
+  try {
+    fallbackListener?.(event);
+  } catch (listenerError) {
+    console.warn(`[vlm] 폴백 리스너 오류(무시): ${listenerError.message}`);
+  }
+}
+
+async function runFallback({ request, label, reason, isBypass, now }) {
   const startedAt = now();
   try {
     const text = await requestFallbackContent(request);
-    fallbackListener?.({ label, reason, isBypass, elapsedMs: now() - startedAt });
-    return text;
+    notifyFallback({
+      label, reason, isBypass, isSucceeded: true, elapsedMs: now() - startedAt, errorMessage: '',
+    });
+    return { isOk: true, text };
   } catch (fallbackError) {
-    const gpuReason = gpuError ? `${gpuError.message}; ` : '';
-    throw new Error(`${gpuReason}${fallbackError.message}`);
+    notifyFallback({
+      label, reason, isBypass, isSucceeded: false, elapsedMs: now() - startedAt,
+      errorMessage: fallbackError.message,
+    });
+    return { isOk: false, error: fallbackError };
   }
 }
 
@@ -103,14 +117,25 @@ async function requestVlmContent({ config, jpegBuffer, jpegBufferList, prompt, l
   };
   const canFallback = Boolean(config.isVlmFallbackEnabled && config.bedrockApiKey);
   if (canFallback && now() < gpuBypassUntil) {
-    return runFallback({ request, label, reason: 'GPU 우회 중', isBypass: true, now });
+    const bypass = await runFallback({ request, label, reason: 'GPU 우회 중', isBypass: true, now });
+    if (bypass.isOk) return bypass.text;
+    // 폴백이 막혔으면 우회를 풀고 GPU 로 돌아간다. 둘 다 막힌 채 우회 창이 끝날 때까지 실패만 내지 않기 위해서다.
+    gpuBypassUntil = 0;
+    try {
+      return await requestGpuVlmContent(request);
+    } catch (gpuError) {
+      throw new Error(`${bypass.error.message}; ${gpuError.message}`);
+    }
   }
   try {
     return await requestGpuVlmContent(request);
   } catch (gpuError) {
     if (!canFallback) throw gpuError;
+    const fallback = await runFallback({ request, label, reason: gpuError.message, isBypass: false, now });
+    if (!fallback.isOk) throw new Error(`${gpuError.message}; ${fallback.error.message}`);
+    // 폴백이 실제로 될 때만 GPU 우회 창을 연다.
     gpuBypassUntil = now() + GPU_BYPASS_MS;
-    return runFallback({ request, label, reason: gpuError.message, isBypass: false, now, gpuError });
+    return fallback.text;
   }
 }
 

@@ -98,12 +98,16 @@ function registerPipeline({ getViewerView }) {
     getViewerView()?.webContents.send('pipeline-event', { type: 'debug', ...entry });
   }
 
-  setVlmFallbackListener(({ label, reason, isBypass, elapsedMs }) => {
-    console.warn(`[pipeline] VLM 폴백(${config.vlmFallbackModelId}) [${label}] ${isBypass ? 'GPU 우회 중' : reason} (${elapsedMs}ms)`);
+  setVlmFallbackListener(({ label, reason, isBypass, isSucceeded, elapsedMs, errorMessage }) => {
+    const situation = isBypass ? 'GPU 우회 중' : reason;
+    console.warn(`[pipeline] VLM 폴백(${config.vlmFallbackModelId}) [${label}] ${situation}`
+      + ` → ${isSucceeded ? '성공' : `실패: ${errorMessage}`} (${elapsedMs}ms)`);
     markDebug({
-      stage: DEBUG_STAGE_MAP.vlmFallback, verdict: DEBUG_VERDICT_MAP.info,
-      reason: isBypass ? 'GPU 우회 중 — Bedrock 으로 처리' : 'GPU VLM 실패 — Bedrock 으로 재시도',
-      detail: `${label} · ${reason} · ${elapsedMs}ms · 모델=${config.vlmFallbackModelId}`,
+      stage: DEBUG_STAGE_MAP.vlmFallback,
+      verdict: isSucceeded ? DEBUG_VERDICT_MAP.info : DEBUG_VERDICT_MAP.fail,
+      reason: `${isBypass ? 'GPU 우회 중' : 'GPU VLM 실패'} — Bedrock 폴백 ${isSucceeded ? '성공' : '실패'}`,
+      detail: `${label} · ${situation}${isSucceeded ? '' : ` · ${errorMessage}`}`
+        + ` · ${elapsedMs}ms · 모델=${config.vlmFallbackModelId}`,
     });
   });
 

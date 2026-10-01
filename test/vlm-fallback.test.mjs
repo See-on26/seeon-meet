@@ -126,3 +126,37 @@ test('설정: 폴백 기본 켜짐, 모델 기본값은 Haiku 4.5', () => {
   assert.equal(config.vlmFallbackModelId, 'anthropic.claude-haiku-4-5-20251001-v1:0');
   assert.equal(readPipelineConfig({ SEEON_VLM_FALLBACK_ENABLED: 'false' }).isVlmFallbackEnabled, false);
 });
+
+test('폴백이 실패하면 우회 창을 열지 않는다 (다음 호출은 GPU 를 다시 시도)', async () => {
+  installFetch({ gpu: () => jsonResponse(503, {}), bedrock: () => jsonResponse(400, { message: 'bad model' }) });
+  await assert.rejects(requestVlmContent({ config: baseConfig, jpegBuffer, prompt: 'p', label: 't' }));
+  await assert.rejects(requestVlmContent({ config: baseConfig, jpegBuffer, prompt: 'p', label: 't' }));
+  assert.equal(callList.filter((call) => call.url === GPU_URL).length, 2);
+});
+
+test('우회 중 폴백이 실패하면 같은 호출에서 GPU 를 다시 시도한다', async () => {
+  installFetch({ gpu: () => jsonResponse(503, {}), bedrock: bedrockOk });
+  await requestVlmContent({ config: baseConfig, jpegBuffer, prompt: 'p', label: 't' });
+  installFetch({
+    gpu: () => jsonResponse(200, { choices: [{ message: { content: 'GPU 복구 답' } }] }),
+    bedrock: () => jsonResponse(403, { message: 'denied' }),
+  });
+  const text = await requestVlmContent({ config: baseConfig, jpegBuffer, prompt: 'p', label: 't' });
+  assert.equal(text, 'GPU 복구 답');
+});
+
+test('리스너가 예외를 던져도 폴백 결과는 돌려준다', async () => {
+  setVlmFallbackListener(() => { throw new Error('webContents destroyed'); });
+  installFetch({ gpu: () => jsonResponse(503, {}), bedrock: bedrockOk });
+  assert.equal(await requestVlmContent({ config: baseConfig, jpegBuffer, prompt: 'p', label: 't' }), '폴백 답');
+});
+
+test('폴백 실패도 리스너에 isSucceeded=false 로 알린다', async () => {
+  const eventList = [];
+  setVlmFallbackListener((event) => eventList.push(event));
+  installFetch({ gpu: () => jsonResponse(503, {}), bedrock: () => jsonResponse(400, { message: 'bad model' }) });
+  await assert.rejects(requestVlmContent({ config: baseConfig, jpegBuffer, prompt: 'p', label: 't' }));
+  assert.equal(eventList.length, 1);
+  assert.equal(eventList[0].isSucceeded, false);
+  assert.match(eventList[0].errorMessage, /HTTP 400/);
+});
