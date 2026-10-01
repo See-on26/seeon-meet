@@ -47,3 +47,21 @@ test('원 사건 시각이 없으면 재생 헤드+안전 마진', () => {
     eventVideoTimeMs: null, delayedTimeMs: 10000, safetyMs: 2000, isBeforeAllowed: false,
   }), 12000);
 });
+
+test('트리거가 든 세그먼트의 끝을 쓴다', () => {
+  const segmentList = [
+    { startSec: 0, endSec: 2.0, text: '여기를 보시면' },
+    { startSec: 2.5, endSec: 9.5, text: '매출이 꾸준히 늘었습니다' },
+  ];
+  assert.equal(resolveSpeechEndWallTs({ chunkStartTs: 1000, chunkEndTs: 11000, segmentList, trigger: '여기' }), 3000);
+});
+
+test('트리거가 어느 세그먼트에도 없으면 마지막 세그먼트 끝', () => {
+  const segmentList = [{ startSec: 0, endSec: 2.0, text: '가' }, { startSec: 2.5, endSec: 9.5, text: '나' }];
+  assert.equal(resolveSpeechEndWallTs({ chunkStartTs: 1000, chunkEndTs: 11000, segmentList, trigger: '여기' }), 10500);
+});
+
+test('세그먼트 시각은 청크 범위 안으로 자른다', () => {
+  const segmentList = [{ startSec: 0, endSec: 30, text: '여기' }];
+  assert.equal(resolveSpeechEndWallTs({ chunkStartTs: 1000, chunkEndTs: 3500, segmentList, trigger: '여기' }), 3500);
+});

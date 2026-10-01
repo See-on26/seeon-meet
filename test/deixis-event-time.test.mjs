@@ -33,3 +33,15 @@ test('후보 스케줄러는 원 사건 영상 시각을 결정까지 운반한�
   fireTimer();
   assert.equal(decisionList[0].eventVideoTimeMs, 8500);
 });
+
+test('발화 끝 시각을 트리거로 계산하도록 resolver 를 받는다', () => {
+  const eventList = [];
+  const triggerList = [];
+  const detector = new DeixisDetector({ onDeixis: (event) => eventList.push(event) });
+  detector.handleTranscript({
+    text: '여기를 보시면 매출이 늘었습니다', captureTs: 5000,
+    resolveEventWallTs: ({ trigger }) => { triggerList.push(trigger); return 4321; },
+  });
+  assert.deepEqual(triggerList, ['여기']);
+  assert.equal(eventList[0].eventWallTs, 4321);
+});

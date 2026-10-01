@@ -980,7 +980,9 @@ function handleAsrTranscript({ text, ts, endTs, segmentList = [] }) {
     transcriptWindow.push({ text: trimmed, ts: performance.now() });
     deixisDetector.handleTranscript({
       text: trimmed, captureTs: endTs,
-      eventWallTs: resolveSpeechEndWallTs({ chunkStartTs: ts, chunkEndTs: endTs, segmentList }),
+      resolveEventWallTs: ({ trigger }) => resolveSpeechEndWallTs({
+        chunkStartTs: ts, chunkEndTs: endTs, segmentList, trigger,
+      }),
     });
   }
 

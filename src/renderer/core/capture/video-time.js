@@ -5,11 +5,22 @@ export function wallToVideoTimeMs({ wallTs, nowWallTs = Date.now(), nowVideoTime
   return Math.max(0, nowVideoTimeMs - (nowWallTs - wallTs));
 }
 
-// 트리거가 든 발화가 끝난 벽시계 시각. 세그먼트 시각이 없으면 청크 끝으로 대신한다.
-export function resolveSpeechEndWallTs({ chunkStartTs, chunkEndTs, segmentList = [] }) {
-  const lastSegment = segmentList[segmentList.length - 1];
-  if (lastSegment && Number.isFinite(lastSegment.endSec) && Number.isFinite(chunkStartTs)) {
-    return chunkStartTs + lastSegment.endSec * 1000;
+function clampToChunk({ wallTs, chunkStartTs, chunkEndTs }) {
+  let clamped = wallTs;
+  if (Number.isFinite(chunkStartTs)) clamped = Math.max(clamped, chunkStartTs);
+  if (Number.isFinite(chunkEndTs)) clamped = Math.min(clamped, chunkEndTs);
+  return clamped;
+}
+
+// 트리거가 든 세그먼트가 끝난 벽시계 시각. 트리거를 못 찾으면 마지막 세그먼트,
+// 세그먼트 시각이 없으면 청크 끝으로 대신한다. ASR 타임스탬프가 청크 밖으로 넘치면 청크 안으로 자른다.
+export function resolveSpeechEndWallTs({ chunkStartTs, chunkEndTs, segmentList = [], trigger = '' }) {
+  const timedList = segmentList.filter((segment) => Number.isFinite(segment?.endSec));
+  const triggerSegment = trigger
+    ? timedList.find((segment) => String(segment.text || '').includes(trigger)) : null;
+  const segment = triggerSegment || timedList[timedList.length - 1];
+  if (segment && Number.isFinite(chunkStartTs)) {
+    return clampToChunk({ wallTs: chunkStartTs + segment.endSec * 1000, chunkStartTs, chunkEndTs });
   }
   return Number.isFinite(chunkEndTs) ? chunkEndTs : null;
 }
