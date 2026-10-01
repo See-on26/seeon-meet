@@ -58,3 +58,29 @@ test('전사가 준비되지 않았으면 막지 않고 unchecked', () => {
     assert.match(verdict.reason, new RegExp(status));
   }
 });
+
+test('value_to_meaning 은 앞뒤 발화(맥락)에 있는 값도 인정한다', () => {
+  const verdict = isValuePresent({
+    value: '30%', slideText: '재구매율 그래프', utterance: '많이 늘었습니다',
+    contextText: '올해 재구매율이 30%였고요', slideTextStatus: ready, subKind: 'value_to_meaning',
+  });
+  assert.equal(verdict.verdict, VALUE_PRESENCE_VERDICT_MAP.present);
+});
+
+test('발화가 한글 수사로 전사됐으면 값→의미는 막지 않는다', () => {
+  assert.equal(isValuePresent({
+    value: '73%', slideText: '재구매율 그래프', utterance: '칠십삼 퍼센트입니다',
+    slideTextStatus: ready, subKind: 'value_to_meaning',
+  }).verdict, VALUE_PRESENCE_VERDICT_MAP.unchecked);
+  assert.equal(isValuePresent({
+    value: '2배', slideText: '매출 그래프', utterance: '두 배 늘었습니다',
+    slideTextStatus: ready, subKind: 'value_to_meaning',
+  }).verdict, VALUE_PRESENCE_VERDICT_MAP.unchecked);
+});
+
+test('claim_to_value 는 맥락·한글 수사가 있어도 화면만 본다', () => {
+  assert.equal(isValuePresent({
+    value: '30%', slideText: '재구매율 그래프', utterance: '두 배 늘었습니다', contextText: '30%',
+    slideTextStatus: ready, subKind: 'claim_to_value',
+  }).verdict, VALUE_PRESENCE_VERDICT_MAP.absent);
+});

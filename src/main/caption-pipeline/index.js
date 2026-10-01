@@ -690,7 +690,8 @@ function registerPipeline({ getViewerView }) {
         const slideText = slideTextStore.get(slideLabel);
         const valueVerdict = isValuePresent({
           value: slotMap.value, slideText: slideText.text, slideTextStatus: slideText.status,
-          utterance, subKind: selectedCandidate?.subKind || INTERPRETATION_KIND_MAP.valueToMeaning,
+          utterance, contextText: [beforeText, afterText].filter(Boolean).join(' '),
+          subKind: selectedCandidate?.subKind || INTERPRETATION_KIND_MAP.valueToMeaning,
         });
         const verdictByValueMap = {
           [VALUE_PRESENCE_VERDICT_MAP.present]: DEBUG_VERDICT_MAP.pass,

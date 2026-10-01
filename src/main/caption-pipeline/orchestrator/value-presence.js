@@ -23,13 +23,22 @@ function containsNumberCore({ haystack, core }) {
   return pattern.test(haystack);
 }
 
+// ASR 이 수를 한글로 적으면("칠십삼 퍼센트", "두 배") 숫자로 정규화된 값과 글자로 대조할 수 없다.
+const SINO_NUMERAL_PATTERN = /[일이삼사오육칠팔구십백천만억]+\s*(?:퍼센트|프로|배|명|건|개|원|위|년|세|단계|점|초|분|시간)/;
+const NATIVE_NUMERAL_PATTERN = /(?:한|두|세|네|다섯|여섯|일곱|여덟|아홉|열|스무|서른|마흔|쉰)\s*(?:배|명|건|개|가지|번|단계|곳|살)/;
+
+function hasSpokenKoreanNumber(text) {
+  return SINO_NUMERAL_PATTERN.test(text) || NATIVE_NUMERAL_PATTERN.test(text);
+}
+
 function normalizeForSearch(text) {
   return String(text || '').replace(/(\d),(\d)/g, '$1$2');
 }
 
-// 값 슬롯의 숫자가 화면 글자(값→의미는 발화도 포함)에 실제로 있는지 본다.
+// 값 슬롯의 숫자가 화면 글자(값→의미는 트리거 발화와 앞뒤 발화도 포함)에 실제로 있는지 본다.
 // 전사가 준비되지 않았거나 아라비아 숫자가 없으면 판단할 수 없으므로 막지 않는다.
-function isValuePresent({ value, slideText = '', utterance = '', subKind, slideTextStatus }) {
+function isValuePresent({ value, slideText = '', utterance = '', contextText = '', subKind,
+  slideTextStatus }) {
   const coreList = extractNumberCoreList(value);
   if (!coreList.length) {
     return { verdict: VALUE_PRESENCE_VERDICT_MAP.unchecked, reason: 'no-arabic-number' };
@@ -37,10 +46,13 @@ function isValuePresent({ value, slideText = '', utterance = '', subKind, slideT
   if (slideTextStatus !== SLIDE_TEXT_STATUS_MAP.ready) {
     return { verdict: VALUE_PRESENCE_VERDICT_MAP.unchecked, reason: `slide-text-${slideTextStatus}` };
   }
-  const sourceList = subKind === INTERPRETATION_KIND_MAP.claimToValue
-    ? [slideText] : [slideText, utterance];
+  const isScreenOnly = subKind === INTERPRETATION_KIND_MAP.claimToValue;
+  const sourceList = isScreenOnly ? [slideText] : [slideText, utterance, contextText];
   const haystack = sourceList.map(normalizeForSearch).join('\n');
   const missingList = coreList.filter((core) => !containsNumberCore({ haystack, core }));
+  if (missingList.length && !isScreenOnly && hasSpokenKoreanNumber(`${utterance} ${contextText}`)) {
+    return { verdict: VALUE_PRESENCE_VERDICT_MAP.unchecked, reason: 'spoken-korean-numeral' };
+  }
   if (missingList.length) {
     return { verdict: VALUE_PRESENCE_VERDICT_MAP.absent, reason: `missing:${missingList.join(',')}` };
   }
