@@ -9,7 +9,7 @@ const { DEBUG_STAGE_MAP, DEBUG_VERDICT_MAP } = require('./contracts/debug-events
 const { createAgentFieldMap } = require('./agents');
 const { createUnifiedRouter, ROUTER_MODE_MAP } = require('./router/unified-router');
 const { createDeixisJudgeClient } = require('./router/deixis-judge');
-const { resolveCandidateList } = require('./orchestrator/arbiter');
+const { selectGeneratableCandidate } = require('./orchestrator/candidate-selector');
 const { createDescribedStore } = require('./orchestrator/described-store');
 const { createScreenRegistry } = require('./orchestrator/screen-registry');
 const { createSlideTopicRegistry, SLIDE_TOPIC_VERDICT_MAP } = require('./orchestrator/slide-topic-registry');
@@ -28,26 +28,13 @@ const ASR_DRAIN_POLL_MS = 100;
 
 const PIPELINE_STAGE_MAP = { frame: 'frame', judge: 'judge', vlm: 'vlm', caption: 'caption', tts: 'tts', asr: 'asr' };
 
-const GENERATABLE_TYPE_LIST = [
-  NARRATION_TYPE_MAP.deixis, NARRATION_TYPE_MAP.interpretation, NARRATION_TYPE_MAP.visualDescription,
-];
-
-const RECENT_NARRATION_LIMIT = 8;
+const RECENT_NARRATION_LIMIT = 4;
 
 const SPEECH_AXIS_SOURCE_LIST = [
   NARRATION_TYPE_MAP.deixis,
   NARRATION_TYPE_MAP.interpretation,
   NARRATION_TYPE_MAP.visualDescription,
 ];
-
-function selectGeneratableCandidate({ candidateList }) {
-  const generatableList = candidateList.filter(
-    (candidate) => GENERATABLE_TYPE_LIST.includes(candidate.type),
-  );
-  if (!generatableList.length) return null;
-  const { resolvedList } = resolveCandidateList({ candidateList: generatableList });
-  return resolvedList[0] || null;
-}
 
 async function appendErrorRecordSafely({ appendRecord, record }) {
   try {
@@ -585,7 +572,18 @@ function registerPipeline({ getViewerView }) {
         if (isRouterMode) {
           const routed = await routerClient.route({ utterance, before: beforeText, after: afterText });
           judgeReason = routed.blockedReason;
-          selectedCandidate = selectGeneratableCandidate({ candidateList: routed.candidateList });
+          const { selected, excludedList } = selectGeneratableCandidate({
+            candidateList: routed.candidateList, isScaleEnabled: config.isScaleEnabled,
+          });
+          selectedCandidate = selected;
+          if (excludedList.length) {
+            markDebug({
+              stage: DEBUG_STAGE_MAP.router, verdict: DEBUG_VERDICT_MAP.skip, ts,
+              narrationType: NARRATION_TYPE_MAP.visualDescription,
+              reason: '척도 보류 — 척도 후보 제외',
+              detail: `제외=[${excludedList.map((c) => `${c.type}/${c.subKind || '-'}`).join(', ')}] 발화="${utterance}"`,
+            });
+          }
           markDebug({
             stage: DEBUG_STAGE_MAP.router, ts,
             verdict: selectedCandidate ? DEBUG_VERDICT_MAP.pass : DEBUG_VERDICT_MAP.skip,
