@@ -48,8 +48,18 @@ const USER_COMMAND_MAP = {
   graphAxis: 'graph_axis',
 };
 
+// 재생 우선순위·기능 토글·즉답 분기가 함께 쓰는 재생 분류. main 이 정하고 렌더러는 읽기만 한다.
+const NARRATION_CLASS_MAP = {
+  userCommand: 'user_command',
+  pageTransition: 'page_transition',
+  deixis: 'deixis',
+  speechBased: 'speech_based',
+  silenceBased: 'silence_based',
+  speakerIdentity: 'speaker_identity',
+};
+
 module.exports = {
   NARRATION_TYPE_MAP, PAGE_TRANSITION_KIND_MAP, DEIXIS_FORM_MAP,
   DEIXIS_REFERENCE_MAP, INTERPRETATION_KIND_MAP, VISUAL_DESCRIPTION_KIND_MAP,
-  SPEAKER_IDENTITY_KIND_MAP, SPEAKER_SOURCE_MAP, USER_COMMAND_MAP,
+  SPEAKER_IDENTITY_KIND_MAP, SPEAKER_SOURCE_MAP, USER_COMMAND_MAP, NARRATION_CLASS_MAP,
 };
