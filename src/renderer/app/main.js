@@ -1,5 +1,5 @@
 import {
-  CROP_JPEG_QUALITY, NARRATION_TYPE_MAP,
+  CROP_JPEG_QUALITY, NARRATION_TYPE_MAP, NARRATION_CLASS_MAP,
   PAGE_TRANSITION_KIND_MAP, USER_COMMAND_KEY_MAP, USER_COMMAND_MAP, SUMMARY_TOGGLE_KEY,
   MEET_MEETING_URL_PATTERN, SPEAKER_SOURCE_MAP, DEBUG_STAGE_MAP, DEBUG_VERDICT_MAP,
 } from '../core/constants.js';
@@ -16,6 +16,9 @@ import { NarrationScheduler } from '../core/audio-renderer/narration-scheduler.j
 import { GapCandidateStore, resolveGapSearchFromMs } from '../core/audio-renderer/gap-candidate-store.js';
 import { CaptionNarrator } from '../core/audio-renderer/caption-narrator.js';
 import { NarrationMixer } from '../core/audio-renderer/narration-mixer.js';
+import {
+  TransitionOrderGate, LEADER_STATUS_MAP, resolveFollowerInsertMs,
+} from '../core/audio-renderer/transition-order-gate.js';
 
 import { AudioMeter } from '../core/trigger/audio-meter.js';
 import { AsrSegmenter } from '../core/trigger/asr-segmenter.js';
@@ -474,6 +477,7 @@ const histogramGate = new SlideHistogramGate({});
 const slideRegistry = new SlideEmbeddingRegistry({});
 // 슬라이드 전환을 확정한 영상 시각. 체류 판정 후 생성하는 모드에서도 원 사건 시각을 잃지 않게 보관한다.
 const slideEventVideoTimeMap = new Map();
+const transitionOrderGate = new TransitionOrderGate();
 
 const slideDwellGate = new SlideDwellGate({
   onSatisfied: ({ label, isRevisit }) => {
@@ -1124,22 +1128,51 @@ async function resolveInsertionTimeMs({ payload, captionCaptureMs }) {
   return chosen.videoTimeMs;
 }
 
-async function emitCaption(payload) {
+// 사진 단독 묘사처럼 전환 고지에 딸려 오는 캡션.
+function isTransitionFollower(payload) {
+  return payload.source !== CAPTION_SOURCE_TRANSITION
+    && payload.narrationClass === NARRATION_CLASS_MAP.pageTransition
+    && Boolean(payload.slideLabel);
+}
+
+async function emitCaption(payload, { leaderHandle = null } = {}) {
+  const isFollower = isTransitionFollower(payload);
+  const leader = isFollower ? await transitionOrderGate.waitLeader({ slideLabel: payload.slideLabel }) : null;
+  if (isFollower && leader.status === LEADER_STATUS_MAP.cancelled) {
+    markDebug({
+      stage: DEBUG_STAGE_MAP.slide, verdict: DEBUG_VERDICT_MAP.skip,
+      narrationType: NARRATION_TYPE_MAP.visualDescription,
+      reason: '전환 고지 취소 — 딸린 사진 묘사도 버림',
+      detail: `슬라이드 ${payload.slideLabel} "${payload.text}"`,
+    });
+    return;
+  }
   const captionCaptureMs = handleCaption(payload);
-  if (!payload.wavData) return;
+  if (!payload.wavData) {
+    leaderHandle?.settle({ status: LEADER_STATUS_MAP.unscheduled });
+    return;
+  }
   const wavArrayBuffer = payload.wavData.buffer.slice(
     payload.wavData.byteOffset, payload.wavData.byteOffset + payload.wavData.byteLength);
-  const insertVideoTimeMs = await resolveInsertionTimeMs({ payload, captionCaptureMs });
+  const insertVideoTimeMs = isFollower
+    ? resolveFollowerInsertMs({ eventVideoTimeMs: captionCaptureMs, leader })
+    : await resolveInsertionTimeMs({ payload, captionCaptureMs });
+  leaderHandle?.settle({ status: LEADER_STATUS_MAP.scheduled, insertVideoTimeMs });
+  if (insertVideoTimeMs === null) return;
   scheduleNarration({ wavArrayBuffer, captionCaptureMs: insertVideoTimeMs });
 }
 
-function emitCaptionSafely(payload) {
-  emitCaption(payload).catch((error) => console.warn('[caption] 발행 실패(무시):', error.message));
+function emitCaptionSafely(payload, { leaderHandle = null } = {}) {
+  emitCaption(payload, { leaderHandle }).catch((error) => {
+    leaderHandle?.settle({ status: LEADER_STATUS_MAP.unscheduled });
+    console.warn('[caption] 발행 실패(무시):', error.message);
+  });
 }
 
 function applyCaption(payload) {
   const isTransition = payload.source === CAPTION_SOURCE_TRANSITION;
   if (!isTransition || !payload.slideLabel) { emitCaptionSafely(payload); return; }
+  const leaderHandle = transitionOrderGate.registerLeader({ slideLabel: payload.slideLabel });
   const state = slideDwellGate.getState({ label: payload.slideLabel });
   if (state === DWELL_STATE_MAP.waiting) {
     console.log(`[slide] 고지 보류 — 슬라이드 ${payload.slideLabel} 체류 판정 대기 중`);
@@ -1147,7 +1180,8 @@ function applyCaption(payload) {
   slideDwellGate.whenResolved({
     label: payload.slideLabel,
     callback: (isSatisfied) => {
-      if (isSatisfied) { emitCaptionSafely(payload); return; }
+      if (isSatisfied) { emitCaptionSafely(payload, { leaderHandle }); return; }
+      leaderHandle.settle({ status: LEADER_STATUS_MAP.cancelled });
       markDebug({
         stage: DEBUG_STAGE_MAP.slide, verdict: DEBUG_VERDICT_MAP.skip,
         narrationType: NARRATION_TYPE_MAP.pageTransition,
@@ -1304,6 +1338,7 @@ async function attemptStartExperiment() {
     histogramGate.reset();
     slideRegistry.reset();
     slideEventVideoTimeMap.clear();
+    transitionOrderGate.reset();
     slideDwellGate.reset();
     isConfirmingSlide = false;
     hasWarnedLocalEmbedding = false;
@@ -1364,7 +1399,9 @@ function stopExperiment() {
     }],
     ['포인팅 로컬라이저', () => pointingLocator.reset()],
     ['슬라이드 히스토그램 게이트', () => histogramGate.reset()],
-    ['슬라이드 레지스트리', () => { slideRegistry.reset(); slideEventVideoTimeMap.clear(); }],
+    ['슬라이드 레지스트리', () => {
+      slideRegistry.reset(); slideEventVideoTimeMap.clear(); transitionOrderGate.reset();
+    }],
     ['전환 체류 게이트', () => slideDwellGate.reset()],
     ['ROI 스토어', () => roiStore.reset()],
     ['발화자 힌트', () => { lastResolvedSpeakerName = ''; lastResolvedSpeakerAt = 0; }],
