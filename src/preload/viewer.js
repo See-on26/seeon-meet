@@ -47,6 +47,9 @@ contextBridge.exposeInMainWorld('seeon', {
     return ipcRenderer.invoke('save-slide-frame', { slideLabel, kind, buffer: new Uint8Array(buffer), sessionId });
   },
   markSlideFrame(entry) { ipcRenderer.send('pipeline-slide-mark', entry); },
+  requestSlideText({ slideLabel, buffer }) {
+    return ipcRenderer.invoke('pipeline-slide-text', { slideLabel, buffer: new Uint8Array(buffer) });
+  },
   sendPipelineDeixis({ ts, buffer, utterance, recentTranscript, beforeTranscript = '', afterTranscript = '', hasPointingRegion = false, pointingOrderHint = '', slideLabel = null, wordBudgetMap = null, eventVideoTimeMs = null }) {
     return ipcRenderer.invoke('pipeline-deixis',
       { ts, buffer: new Uint8Array(buffer), utterance, recentTranscript, beforeTranscript, afterTranscript, hasPointingRegion, pointingOrderHint, slideLabel, wordBudgetMap, eventVideoTimeMs });

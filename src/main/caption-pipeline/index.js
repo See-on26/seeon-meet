@@ -22,6 +22,8 @@ const { createGapInferenceAgent } = require('./output/gap-inference-agent');
 const { createRecordStore, RECORD_KIND_MAP } = require('./instrumentation/record-store');
 const { createSessionStore } = require('./instrumentation/session-store');
 const { setVlmFallbackListener } = require('./agents/shared/vlm-gateway');
+const { createSlideTextAgent } = require('./agents/slide-text-agent');
+const { createSlideTextStore } = require('./orchestrator/slide-text-store');
 const { OUT_DIR } = require('../paths');
 
 const ASR_DRAIN_TIMEOUT_MS = 8000;
@@ -101,6 +103,19 @@ function registerPipeline({ getViewerView }) {
       reason: isBypass ? 'GPU 우회 중 — Bedrock 으로 처리' : 'GPU VLM 실패 — Bedrock 으로 재시도',
       detail: `${label} · ${reason} · ${elapsedMs}ms · 모델=${config.vlmFallbackModelId}`,
     });
+  });
+
+  const slideTextAgent = createSlideTextAgent({ config });
+  const slideTextStore = createSlideTextStore({
+    transcribe: ({ jpegBuffer }) => slideTextAgent.transcribe({ jpegBuffer }),
+    onSettled: ({ slideLabel, status, textLength, errorMessage }) => {
+      markDebug({
+        stage: DEBUG_STAGE_MAP.valueCheck,
+        verdict: status === 'failed' ? DEBUG_VERDICT_MAP.fail : DEBUG_VERDICT_MAP.info,
+        reason: `슬라이드 텍스트 전사 ${status}`,
+        detail: `슬라이드=${slideLabel} 글자수=${textLength}${errorMessage ? ` · ${errorMessage}` : ''}`,
+      });
+    },
   });
 
   async function sendCaption({ ts, text, source, slideLabel = null, isDedupeExempt = false,
@@ -184,6 +199,7 @@ function registerPipeline({ getViewerView }) {
     slideTopicRegistry.reset();
     speakerRegistry.reset();
     narrationHistory.reset();
+    slideTextStore.reset();
     const { sessionId } = sessionStore.startSession({ mode });
     console.log(`[pipeline] ■ 캡처 세션 시작 (모드=${mode}, ${sessionId}) — 중복 이력·화면 레지스트리 초기화`);
     markDebug({
@@ -409,6 +425,11 @@ function registerPipeline({ getViewerView }) {
       });
       return { isOk: false, message: error.message };
     }
+  });
+
+  ipcMain.handle('pipeline-slide-text', async (_event, { slideLabel, buffer }) => {
+    const isStarted = slideTextStore.ensure({ slideLabel, jpegBuffer: Buffer.from(buffer) });
+    return { isOk: true, isStarted };
   });
 
   ipcMain.handle('embed-frame', async (_event, { buffer }) => {

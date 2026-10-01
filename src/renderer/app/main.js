@@ -637,6 +637,9 @@ async function confirmSlideCandidate({ isFirst, imageData }) {
   }
   if (!decision.isNew && !decision.isRevisit) return;
   const isRevisit = Boolean(decision.isRevisit);
+  if (decision.isNew && buffer) {
+    window.seeon.requestSlideText({ slideLabel: decision.label, buffer }).catch(() => {});
+  }
 
   lastScreenTransitionAt = performance.now();
   slideEventVideoTimeMap.set(decision.label, captureSource.videoTimeMs);
