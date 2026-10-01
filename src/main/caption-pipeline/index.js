@@ -2,6 +2,7 @@ const { ipcMain } = require('electron');
 const { readPipelineConfig } = require('./config');
 const {
   NARRATION_TYPE_MAP, VISUAL_DESCRIPTION_KIND_MAP, SPEAKER_SOURCE_MAP, NARRATION_CLASS_MAP,
+  INTERPRETATION_KIND_MAP,
 } = require('./contracts/narration-types');
 const { toNarrationClass } = require('./contracts/narration-class');
 const { buildSpeakerIdentityFromDom } = require('./agents/speaker-identity-agent');
@@ -24,6 +25,7 @@ const { createSessionStore } = require('./instrumentation/session-store');
 const { setVlmFallbackListener } = require('./agents/shared/vlm-gateway');
 const { createSlideTextAgent } = require('./agents/slide-text-agent');
 const { createSlideTextStore } = require('./orchestrator/slide-text-store');
+const { isValuePresent, VALUE_PRESENCE_VERDICT_MAP } = require('./orchestrator/value-presence');
 const { OUT_DIR } = require('../paths');
 
 const ASR_DRAIN_TIMEOUT_MS = 8000;
@@ -679,6 +681,31 @@ function registerPipeline({ getViewerView }) {
           detail: `발화="${utterance}" 세부=${selectedCandidate?.subKind || '-'} (${Date.now() - startedAt}ms)`,
         });
         return { isOk: true, isGrounded: false };
+      }
+      if (narrationType === NARRATION_TYPE_MAP.interpretation && slotMap?.value) {
+        const slideText = slideTextStore.get(slideLabel);
+        const valueVerdict = isValuePresent({
+          value: slotMap.value, slideText: slideText.text, slideTextStatus: slideText.status,
+          utterance, subKind: selectedCandidate?.subKind || INTERPRETATION_KIND_MAP.valueToMeaning,
+        });
+        const verdictByValueMap = {
+          [VALUE_PRESENCE_VERDICT_MAP.present]: DEBUG_VERDICT_MAP.pass,
+          [VALUE_PRESENCE_VERDICT_MAP.absent]: DEBUG_VERDICT_MAP.skip,
+          [VALUE_PRESENCE_VERDICT_MAP.unchecked]: DEBUG_VERDICT_MAP.info,
+        };
+        markDebug({
+          stage: DEBUG_STAGE_MAP.valueCheck, verdict: verdictByValueMap[valueVerdict.verdict], ts, narrationType,
+          reason: `값 존재 검사 ${valueVerdict.verdict}`,
+          detail: `값="${slotMap.value}" 슬라이드=${slideLabel || '-'} 전사=${slideText.status}`
+            + `${valueVerdict.reason ? ` · ${valueVerdict.reason}` : ''} → "${text}"`,
+        });
+        if (valueVerdict.verdict === VALUE_PRESENCE_VERDICT_MAP.absent) {
+          await appendRecord({
+            kind: RECORD_KIND_MAP.deixis, ts, utterance, caption: text, isGrounded: false, slideLabel,
+            narrationType, subKind: selectedCandidate?.subKind || null, skipReason: 'value-absent',
+          });
+          return { isOk: true, isGrounded: false };
+        }
       }
       markDebug({
         stage: DEBUG_STAGE_MAP.vlm, verdict: DEBUG_VERDICT_MAP.pass, ts, narrationType,
