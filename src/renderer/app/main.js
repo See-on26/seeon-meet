@@ -589,7 +589,7 @@ function samplePointingFrame() {
   const imageData = context.getImageData(0, 0, POINTING_SAMPLE_WIDTH, POINTING_SAMPLE_HEIGHT);
   pointingLocator.sample({ imageData, ts });
   detectSlideTransition({ imageData, ts });
-  submitPointingMotionCandidate();
+  attachPointingMotion();
 }
 
 function detectSlideTransition({ imageData, ts }) {
@@ -807,7 +807,7 @@ const deixisDetector = new DeixisDetector({
   },
 });
 
-function submitPointingMotionCandidate() {
+function attachPointingMotion() {
   const now = performance.now();
   const motion = pointingLocator.locate({ nowTs: now });
   if (!motion.hasRegion) return;
@@ -815,12 +815,11 @@ function submitPointingMotionCandidate() {
   lastPointingMotionAt = now;
   const { region, pointingOrderHint } = getPointingSequence();
   saveAnnotationSnapshot();
-  console.log(`[deixis] ✍ 포인팅 모션 감지 changedRatio=${(motion.changedRatio ?? 0).toFixed(3)} → 후보`);
-  candidateScheduler.submit({
-    source: CANDIDATE_SOURCE_MAP.pointing, trigger: '필기/포인터',
+  const isAttached = candidateScheduler.attachPointing({
     region: region || motion.rect, pointingOrderHint,
-    captureTs: now, videoTimeMs: captureSource.videoTimeMs,
   });
+  console.log(`[deixis] ✍ 포인팅 모션 changedRatio=${(motion.changedRatio ?? 0).toFixed(3)}`
+    + ` → ${isAttached ? '대기 중인 발화 후보에 영역 첨부' : '대기 후보 없음 (포인터는 트리거가 아니다)'}`);
 }
 
 async function saveSlideFrameWithMark({ slideLabel, frameKind, buffer }) {
@@ -862,14 +861,12 @@ function describeBeforeWindow({ mode, anchorTs }) {
 
 const SCREEN_DEPENDENCY_LABEL_MAP = {
   [SCREEN_DEPENDENCY_REASON_MAP.speechTrigger]: '발화 지시가 트리거',
-  [SCREEN_DEPENDENCY_REASON_MAP.deicticReference]: '인접 발화가 지시 표현으로만 가리킴 — 화면을 봐야 안다',
-  [SCREEN_DEPENDENCY_REASON_MAP.noAdjacentSpeech]: '인접 발화 없음 — 설명할 내용이 없다',
-  [SCREEN_DEPENDENCY_REASON_MAP.spokenReference]: '발화가 대상을 특정함 — 말로 충분하다',
+  [SCREEN_DEPENDENCY_REASON_MAP.unsupportedSource]: '발화가 아닌 출처 — 트리거로 쓰지 않는다',
 };
 
 async function runDeixisDecision({ source, utterance, triggerList, region, pointingOrderHint,
   captureTs, videoTimeMs, eventVideoTimeMs = null }) {
-  const label = triggerList.join(', ') || '필기/포인터';
+  const label = triggerList.join(', ') || '-';
   const mode = getCurrentMode();
   const { beforeMs, afterMs } = getModePolicy({ mode }) || {};
 
@@ -895,7 +892,7 @@ async function runDeixisDecision({ source, utterance, triggerList, region, point
       detail: `버린 발화 ${droppedCount}건 · 남은 맥락 ${tokenCount}토큰 (예산 ${CONTEXT_TOKEN_BUDGET})`,
     });
   }
-  const screenVerdict = judgeScreenDependency({ source, utterance, before, after });
+  const screenVerdict = judgeScreenDependency({ source, utterance });
   if (!screenVerdict.isScreenDependent) {
     console.log(`[deixis] 화면 의존성 없음 → 스킵 label="${label}" (${screenVerdict.reason})`);
     markDebug({

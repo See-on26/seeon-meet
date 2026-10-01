@@ -1,6 +1,6 @@
+// 지시 후보는 발화에서만 생긴다. 포인터 움직임은 대기 중인 발화 후보에 영역을 붙이는 데에만 쓴다.
 export const CANDIDATE_SOURCE_MAP = {
   speech: 'speech',
-  pointing: 'pointing',
 };
 
 const DEFAULT_LOOKAHEAD_MS = 2500;
@@ -42,6 +42,13 @@ export class DeixisCandidateScheduler {
     if (trigger && !this.pending.triggerList.includes(trigger)) this.pending.triggerList.push(trigger);
     if (!this.pending.region && region) this.pending.region = region;
     if (!this.pending.pointingOrderHint && pointingOrderHint) this.pending.pointingOrderHint = pointingOrderHint;
+  }
+
+  attachPointing({ region = null, pointingOrderHint = '' }) {
+    if (!this.pending) return false;
+    if (!this.pending.region && region) this.pending.region = region;
+    if (!this.pending.pointingOrderHint && pointingOrderHint) this.pending.pointingOrderHint = pointingOrderHint;
+    return true;
   }
 
   fire() {

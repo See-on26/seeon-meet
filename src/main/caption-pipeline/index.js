@@ -557,6 +557,19 @@ function registerPipeline({ getViewerView }) {
       });
       return { isOk: true, isGrounded: false };
     }
+    if (!utterance || !utterance.trim()) {
+      await appendRecord({
+        kind: RECORD_KIND_MAP.deixis, ts, utterance: '', caption: '', isGrounded: false,
+        slideLabel, skipReason: 'no-utterance',
+      });
+      markDebug({
+        stage: DEBUG_STAGE_MAP.router, verdict: DEBUG_VERDICT_MAP.skip, ts,
+        narrationType: NARRATION_TYPE_MAP.deixis,
+        reason: '트리거 발화 없음 — 포인터만으로는 해설하지 않는다',
+        detail: `슬라이드=${slideLabel || '-'}`,
+      });
+      return { isOk: true, isGrounded: false };
+    }
 
     const describedElementList = [
       ...describedStore.getDescribed(slideLabel),
