@@ -59,4 +59,37 @@ function isValuePresent({ value, slideText = '', utterance = '', contextText = '
   return { verdict: VALUE_PRESENCE_VERDICT_MAP.present, reason: '' };
 }
 
-module.exports = { isValuePresent, VALUE_PRESENCE_VERDICT_MAP };
+// 저장된 전사는 슬라이드 확정 순간의 화면이라, 클릭마다 항목이 나타나는 슬라이드나
+// 출력 상한에 잘린 긴 표에서는 실제로 화면에 있는 값도 없다고 나온다.
+// 없다고 나올 때만 지금 요청에 쓰인 화면을 다시 전사해 한 번 더 확인한다.
+async function verifyValuePresence({ value, subKind, utterance = '', contextText = '', slideText = '',
+  slideTextStatus, retranscribe }) {
+  const storedVerdict = isValuePresent({
+    value, subKind, utterance, contextText, slideText, slideTextStatus,
+  });
+  if (storedVerdict.verdict !== VALUE_PRESENCE_VERDICT_MAP.absent) {
+    return { ...storedVerdict, isRetranscribed: false };
+  }
+  let fresh = null;
+  try {
+    fresh = await retranscribe();
+  } catch (error) {
+    return {
+      verdict: VALUE_PRESENCE_VERDICT_MAP.unchecked, reason: `retranscribe-failed:${error.message}`,
+      isRetranscribed: true,
+    };
+  }
+  if (!fresh?.hasText) {
+    return { verdict: VALUE_PRESENCE_VERDICT_MAP.unchecked, reason: 'retranscribe-empty', isRetranscribed: true };
+  }
+  const freshVerdict = isValuePresent({
+    value, subKind, utterance, contextText, slideText: fresh.text,
+    slideTextStatus: SLIDE_TEXT_STATUS_MAP.ready,
+  });
+  return {
+    ...freshVerdict, reason: `retranscribed${freshVerdict.reason ? `:${freshVerdict.reason}` : ''}`,
+    isRetranscribed: true,
+  };
+}
+
+module.exports = { isValuePresent, verifyValuePresence, VALUE_PRESENCE_VERDICT_MAP };

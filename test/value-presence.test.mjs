@@ -84,3 +84,46 @@ test('claim_to_value 는 맥락·한글 수사가 있어도 화면만 본다', (
     slideTextStatus: ready, subKind: 'claim_to_value',
   }).verdict, VALUE_PRESENCE_VERDICT_MAP.absent);
 });
+
+const { verifyValuePresence } = require('../src/main/caption-pipeline/orchestrator/value-presence.js');
+
+test('저장된 전사에 값이 없으면 지금 화면을 다시 전사해 확인한다 (나중에 나타난 수치)', async () => {
+  let retranscribeCount = 0;
+  const verdict = await verifyValuePresence({
+    value: '45%', subKind: 'claim_to_value', utterance: '많이 올랐죠',
+    slideText: '분기별 점유율', slideTextStatus: ready,
+    retranscribe: async () => { retranscribeCount += 1; return { text: '분기별 점유율\n3분기 45%', hasText: true }; },
+  });
+  assert.equal(verdict.verdict, VALUE_PRESENCE_VERDICT_MAP.present);
+  assert.equal(verdict.isRetranscribed, true);
+  assert.equal(retranscribeCount, 1);
+});
+
+test('다시 전사해도 없으면 absent', async () => {
+  const verdict = await verifyValuePresence({
+    value: '45%', subKind: 'claim_to_value', slideText: '분기별 점유율', slideTextStatus: ready,
+    retranscribe: async () => ({ text: '분기별 점유율 30%', hasText: true }),
+  });
+  assert.equal(verdict.verdict, VALUE_PRESENCE_VERDICT_MAP.absent);
+});
+
+test('다시 전사가 실패하거나 글자가 없으면 막지 않는다', async () => {
+  const failed = await verifyValuePresence({
+    value: '45%', subKind: 'claim_to_value', slideText: '점유율', slideTextStatus: ready,
+    retranscribe: async () => { throw new Error('VLM down'); },
+  });
+  assert.equal(failed.verdict, VALUE_PRESENCE_VERDICT_MAP.unchecked);
+  const empty = await verifyValuePresence({
+    value: '45%', subKind: 'claim_to_value', slideText: '점유율', slideTextStatus: ready,
+    retranscribe: async () => ({ text: '', hasText: false }),
+  });
+  assert.equal(empty.verdict, VALUE_PRESENCE_VERDICT_MAP.unchecked);
+});
+
+test('처음부터 present·unchecked 면 다시 전사하지 않는다', async () => {
+  let retranscribeCount = 0;
+  const retranscribe = async () => { retranscribeCount += 1; return { text: '', hasText: false }; };
+  await verifyValuePresence({ value: '73%', subKind: 'claim_to_value', slideText, slideTextStatus: ready, retranscribe });
+  await verifyValuePresence({ value: '80%', subKind: 'claim_to_value', slideText: '', slideTextStatus: 'pending', retranscribe });
+  assert.equal(retranscribeCount, 0);
+});

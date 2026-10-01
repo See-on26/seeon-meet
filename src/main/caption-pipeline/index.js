@@ -25,7 +25,7 @@ const { createSessionStore } = require('./instrumentation/session-store');
 const { setVlmFallbackListener } = require('./agents/shared/vlm-gateway');
 const { createSlideTextAgent } = require('./agents/slide-text-agent');
 const { createSlideTextStore } = require('./orchestrator/slide-text-store');
-const { isValuePresent, VALUE_PRESENCE_VERDICT_MAP } = require('./orchestrator/value-presence');
+const { verifyValuePresence, VALUE_PRESENCE_VERDICT_MAP } = require('./orchestrator/value-presence');
 const { OUT_DIR } = require('../paths');
 
 const ASR_DRAIN_TIMEOUT_MS = 8000;
@@ -688,10 +688,11 @@ function registerPipeline({ getViewerView }) {
       }
       if (narrationType === NARRATION_TYPE_MAP.interpretation && slotMap?.value) {
         const slideText = slideTextStore.get(slideLabel);
-        const valueVerdict = isValuePresent({
+        const valueVerdict = await verifyValuePresence({
           value: slotMap.value, slideText: slideText.text, slideTextStatus: slideText.status,
           utterance, contextText: [beforeText, afterText].filter(Boolean).join(' '),
           subKind: selectedCandidate?.subKind || INTERPRETATION_KIND_MAP.valueToMeaning,
+          retranscribe: () => slideTextAgent.transcribe({ jpegBuffer: Buffer.from(buffer) }),
         });
         const verdictByValueMap = {
           [VALUE_PRESENCE_VERDICT_MAP.present]: DEBUG_VERDICT_MAP.pass,
