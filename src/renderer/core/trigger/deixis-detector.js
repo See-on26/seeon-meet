@@ -12,7 +12,7 @@ export const DEIXIS_KIND_MAP = {
 
 export const FEATURE1_KIND_LIST = [DEIXIS_KIND_MAP.demonstrative, DEIXIS_KIND_MAP.pointing];
 
-export const ACTIVE_KIND_LIST = [...FEATURE1_KIND_LIST, DEIXIS_KIND_MAP.data];
+export const ACTIVE_KIND_LIST = [...FEATURE1_KIND_LIST, DEIXIS_KIND_MAP.data, DEIXIS_KIND_MAP.color];
 
 const STRONG_DEICTIC_LIST = [
   '이거', '이건', '이게', '이걸', '이것',
@@ -48,9 +48,12 @@ const NON_REFERENT_FOLLOW_LIST = [
 ];
 
 const COLOR_LIST = [
-  '빨간', '빨강', '파란', '파랑', '노란', '노랑', '초록', '주황', '보라',
-  '분홍', '핑크', '검은', '흰', '회색', '남색', '하늘색', '갈색', '보라색',
+  '빨간', '빨강', '붉은', '파란', '파랑', '푸른', '노란', '노랑', '초록', '연두', '주황', '보라',
+  '분홍', '핑크', '검은', '검정', '하얀', '흰', '회색', '남색', '하늘색', '갈색', '보라색',
 ];
+
+// "빨간 쪽", "파란 선"처럼 색 바로 뒤에 오는 지시 대상 낱말.
+const COLOR_REFERENT_LIST = ['쪽', '선', '것', '거', '걸', '게', '줄', '칸', '면'];
 
 const LOOK_CUE_LIST = ['보세요', '보시죠', '보시면', '보면', '보십시오', '봐주세요', '보이시', '볼까요', '주목', '짚어'];
 
@@ -85,7 +88,7 @@ const COLLOQUIAL_DIRECTION_PATTERN = new RegExp(
   `(?:^|\\s)(?:${COLLOQUIAL_DIRECTION_LIST.join('|')})(?=\\s|$)`,
 );
 const COLOR_PATTERN = new RegExp(
-  `(?:${COLOR_LIST.join('|')})색?\\s*(?:${POINTING_NOUN_GROUP}|${PARTICLE_GROUP})`,
+  `(?:${COLOR_LIST.join('|')})색?\\s*(?:${POINTING_NOUN_GROUP}|${COLOR_REFERENT_LIST.join('|')}|${PARTICLE_GROUP})`,
 );
 const ORDINAL_PATTERN = new RegExp(
   `(?:(?:${NATIVE_ORDINAL_LIST.join('|')})\\s*번째|\\d+\\s*번(?:째)?)`,
@@ -107,70 +110,54 @@ function findPointingNoun(text) {
   return POINTING_NOUN_LIST.find((noun) => text.includes(noun)) || null;
 }
 
-export function detectDeixis(text) {
+function matchStrongDeictic(text) {
+  return STRONG_DEICTIC_LIST.find((word) => text.includes(word)) || null;
+}
+
+function matchPattern(pattern) {
+  return (text) => text.match(pattern)?.[0] || null;
+}
+
+function matchColloquialDirection(text) {
+  return text.match(COLLOQUIAL_DIRECTION_PATTERN)?.[0].trim() || null;
+}
+
+function matchModifierNoun(text) {
+  const match = text.match(DEICTIC_MODIFIER_NOUN_PATTERN);
+  if (!match) return null;
+  const isNonReferentFollow = NON_REFERENT_FOLLOW_LIST.some((word) => match[1].startsWith(word));
+  return isNonReferentFollow ? null : match[0].trim();
+}
+
+function matchLookCuePointing(text) {
+  const pointingNoun = findPointingNoun(text);
+  return pointingNoun && LOOK_CUE_LIST.some((cue) => text.includes(cue)) ? pointingNoun : null;
+}
+
+const DEIXIS_MATCHER_LIST = [
+  { kind: DEIXIS_KIND_MAP.demonstrative, match: matchStrongDeictic },
+  { kind: DEIXIS_KIND_MAP.demonstrative, match: matchPattern(DEMONSTRATIVE_NOUN_PATTERN) },
+  { kind: DEIXIS_KIND_MAP.demonstrative, match: matchColloquialDirection },
+  { kind: DEIXIS_KIND_MAP.demonstrative, match: matchModifierNoun },
+  { kind: DEIXIS_KIND_MAP.color, match: matchPattern(COLOR_PATTERN) },
+  { kind: DEIXIS_KIND_MAP.ordinal, match: matchPattern(ORDINAL_PATTERN) },
+  { kind: DEIXIS_KIND_MAP.position, match: matchPattern(POSITION_PATTERN) },
+  { kind: DEIXIS_KIND_MAP.sequence, match: matchPattern(SEQUENCE_PATTERN) },
+  { kind: DEIXIS_KIND_MAP.superlative, match: matchPattern(SUPERLATIVE_PATTERN) },
+  { kind: DEIXIS_KIND_MAP.data, match: matchPattern(DATA_CUE_PATTERN) },
+  { kind: DEIXIS_KIND_MAP.data, match: matchPattern(QUANTITY_CUE_PATTERN) },
+  { kind: DEIXIS_KIND_MAP.pointing, match: matchLookCuePointing },
+  { kind: DEIXIS_KIND_MAP.attention, match: matchPattern(ATTENTION_CUE_PATTERN) },
+];
+
+// activeKindSet 이 주어지면 그 종류만 검사한다. 비활성 종류가 먼저 걸려 뒤의 활성 종류를 놓치지 않게 하기 위해서다.
+export function detectDeixis(text, { activeKindSet = null } = {}) {
   const trimmed = (text || '').trim();
   if (!trimmed) return { isDeixis: false, trigger: null, kind: null };
-
-  for (const word of STRONG_DEICTIC_LIST) {
-    if (trimmed.includes(word)) {
-      return { isDeixis: true, trigger: word, kind: DEIXIS_KIND_MAP.demonstrative };
-    }
-  }
-  const demonstrativeMatch = trimmed.match(DEMONSTRATIVE_NOUN_PATTERN);
-  if (demonstrativeMatch) {
-    return { isDeixis: true, trigger: demonstrativeMatch[0], kind: DEIXIS_KIND_MAP.demonstrative };
-  }
-  const colloquialDirectionMatch = trimmed.match(COLLOQUIAL_DIRECTION_PATTERN);
-  if (colloquialDirectionMatch) {
-    return {
-      isDeixis: true, trigger: colloquialDirectionMatch[0].trim(), kind: DEIXIS_KIND_MAP.demonstrative,
-    };
-  }
-
-  const modifierNounMatch = trimmed.match(DEICTIC_MODIFIER_NOUN_PATTERN);
-  const isNonReferentFollow = modifierNounMatch
-    && NON_REFERENT_FOLLOW_LIST.some((word) => modifierNounMatch[1].startsWith(word));
-  if (modifierNounMatch && !isNonReferentFollow) {
-    return {
-      isDeixis: true, trigger: modifierNounMatch[0].trim(), kind: DEIXIS_KIND_MAP.demonstrative,
-    };
-  }
-  const colorMatch = trimmed.match(COLOR_PATTERN);
-  if (colorMatch) {
-    return { isDeixis: true, trigger: colorMatch[0], kind: DEIXIS_KIND_MAP.color };
-  }
-  const ordinalMatch = trimmed.match(ORDINAL_PATTERN);
-  if (ordinalMatch) {
-    return { isDeixis: true, trigger: ordinalMatch[0], kind: DEIXIS_KIND_MAP.ordinal };
-  }
-  const positionMatch = trimmed.match(POSITION_PATTERN);
-  if (positionMatch) {
-    return { isDeixis: true, trigger: positionMatch[0], kind: DEIXIS_KIND_MAP.position };
-  }
-  const sequenceMatch = trimmed.match(SEQUENCE_PATTERN);
-  if (sequenceMatch) {
-    return { isDeixis: true, trigger: sequenceMatch[0], kind: DEIXIS_KIND_MAP.sequence };
-  }
-  const superlativeMatch = trimmed.match(SUPERLATIVE_PATTERN);
-  if (superlativeMatch) {
-    return { isDeixis: true, trigger: superlativeMatch[0], kind: DEIXIS_KIND_MAP.superlative };
-  }
-  const dataMatch = trimmed.match(DATA_CUE_PATTERN);
-  if (dataMatch) {
-    return { isDeixis: true, trigger: dataMatch[0], kind: DEIXIS_KIND_MAP.data };
-  }
-  const quantityMatch = trimmed.match(QUANTITY_CUE_PATTERN);
-  if (quantityMatch) {
-    return { isDeixis: true, trigger: quantityMatch[0], kind: DEIXIS_KIND_MAP.data };
-  }
-
-  const pointingNoun = findPointingNoun(trimmed);
-  if (pointingNoun && LOOK_CUE_LIST.some((cue) => trimmed.includes(cue))) {
-    return { isDeixis: true, trigger: pointingNoun, kind: DEIXIS_KIND_MAP.pointing };
-  }
-  const attentionMatch = trimmed.match(ATTENTION_CUE_PATTERN);
-  if (attentionMatch) {
-    return { isDeixis: true, trigger: attentionMatch[0], kind: DEIXIS_KIND_MAP.attention };
+  for (const matcher of DEIXIS_MATCHER_LIST) {
+    if (activeKindSet && !activeKindSet.has(matcher.kind)) continue;
+    const trigger = matcher.match(trimmed);
+    if (trigger) return { isDeixis: true, trigger, kind: matcher.kind };
   }
   return { isDeixis: false, trigger: null, kind: null };
 }
@@ -188,9 +175,8 @@ export class DeixisDetector {
   }
 
   handleTranscript({ text, captureTs, eventWallTs = null }) {
-    const result = detectDeixis(text);
+    const result = detectDeixis(text, { activeKindSet: this.activeKindSet });
     if (!result.isDeixis) return null;
-    if (!this.activeKindSet.has(result.kind)) return null;
     if (captureTs - this.lastFiredAt < this.cooldownMs) return null;
     this.lastFiredAt = captureTs;
     const deixisEvent = {
