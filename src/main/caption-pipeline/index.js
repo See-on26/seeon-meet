@@ -1,8 +1,9 @@
 const { ipcMain } = require('electron');
 const { readPipelineConfig } = require('./config');
 const {
-  NARRATION_TYPE_MAP, VISUAL_DESCRIPTION_KIND_MAP, SPEAKER_SOURCE_MAP,
+  NARRATION_TYPE_MAP, VISUAL_DESCRIPTION_KIND_MAP, SPEAKER_SOURCE_MAP, NARRATION_CLASS_MAP,
 } = require('./contracts/narration-types');
+const { toNarrationClass } = require('./contracts/narration-class');
 const { buildSpeakerIdentityFromDom } = require('./agents/speaker-identity-agent');
 const { DEBUG_STAGE_MAP, DEBUG_VERDICT_MAP } = require('./contracts/debug-events');
 const { createAgentFieldMap } = require('./agents');
@@ -106,7 +107,15 @@ function registerPipeline({ getViewerView }) {
   }
 
   async function sendCaption({ ts, text, source, slideLabel = null, isDedupeExempt = false,
-    rationale = null, slotMap = null, hasPointingRegion = false, isRateLimitExempt = true }) {
+    rationale = null, slotMap = null, hasPointingRegion = false, isRateLimitExempt = true,
+    narrationClass = null, eventVideoTimeMs = null }) {
+    if (!narrationClass) {
+      markDebug({
+        stage: DEBUG_STAGE_MAP.session, verdict: DEBUG_VERDICT_MAP.fail, narrationType: source, ts,
+        reason: '재생 분류 누락 — deixis 로 취급', detail: `source=${source} "${text}"`,
+      });
+    }
+    const resolvedClass = narrationClass || NARRATION_CLASS_MAP.deixis;
     if (!isRateLimitExempt) {
       const rate = narrationHistory.findRateLimited({
         source, ts, hasPointingRegion, sourceGroupList: SPEECH_AXIS_SOURCE_LIST,
@@ -166,6 +175,8 @@ function registerPipeline({ getViewerView }) {
     });
     getViewerView()?.webContents.send('pipeline-event', {
       type: 'caption', ts, text, source, slideLabel, wavData, rationale,
+      narrationClass: resolvedClass,
+      eventVideoTimeMs: Number.isFinite(eventVideoTimeMs) ? eventVideoTimeMs : null,
     });
     return { isEmitted: true };
   }
@@ -213,7 +224,7 @@ function registerPipeline({ getViewerView }) {
     }).catch(() => {});
   });
 
-  ipcMain.handle('pipeline-frame', async (_event, { ts, buffer, slideLabel, wordBudget, isRevisit }) => {
+  ipcMain.handle('pipeline-frame', async (_event, { ts, buffer, slideLabel, wordBudget, isRevisit, eventVideoTimeMs = null }) => {
     let stage = PIPELINE_STAGE_MAP.vlm;
     const startedAt = Date.now();
     describedStore.setCurrentSlide(slideLabel);
@@ -294,6 +305,7 @@ function registerPipeline({ getViewerView }) {
         console.log(`[pipeline]   복귀 축약 고지 (${Date.now() - startedAt}ms) "${truncateForLog(revisitNarration)}"`);
         const revisitSent = await sendCaption({
           ts, text: revisitNarration, source: 'page-transition', slideLabel,
+          narrationClass: NARRATION_CLASS_MAP.pageTransition, eventVideoTimeMs,
           rationale: {
             subKind: result.subKind,
             summary: `이전 화면으로 복귀 · 화면유형=${result.screenType} 슬라이드=${slideLabel}`,
@@ -335,6 +347,7 @@ function registerPipeline({ getViewerView }) {
       });
       const sent = await sendCaption({
         ts, text: narration, source: 'page-transition', slideLabel,
+        narrationClass: NARRATION_CLASS_MAP.pageTransition, eventVideoTimeMs,
         rationale: {
           subKind: result.subKind,
           summary: `화면 전환 감지 · 화면유형=${result.screenType} 주제="${result.pageTopic}"`,
@@ -364,6 +377,7 @@ function registerPipeline({ getViewerView }) {
             });
             await sendCaption({
               ts, text: visual.text, source: NARRATION_TYPE_MAP.visualDescription, slideLabel,
+              narrationClass: NARRATION_CLASS_MAP.pageTransition, eventVideoTimeMs,
               rationale: {
                 subKind: VISUAL_DESCRIPTION_KIND_MAP.reaction,
                 summary: '사진이 단독으로 제시된 화면 (전환 고지에 이어지는 묘사)',
@@ -411,7 +425,7 @@ function registerPipeline({ getViewerView }) {
 
   ipcMain.handle('pipeline-speaker', async (_event, {
     ts, buffer, wordBudget, source = SPEAKER_SOURCE_MAP.vlm,
-    speakerName = '', position = '', participantId = '',
+    speakerName = '', position = '', participantId = '', eventVideoTimeMs = null,
   }) => {
     const stage = PIPELINE_STAGE_MAP.vlm;
     const startedAt = Date.now();
@@ -458,6 +472,7 @@ function registerPipeline({ getViewerView }) {
 
       const sent = await sendCaption({
         ts, text: result.text, source: NARRATION_TYPE_MAP.speakerIdentity, isDedupeExempt: true,
+        narrationClass: NARRATION_CLASS_MAP.speakerIdentity, eventVideoTimeMs,
         rationale: {
           subKind: result.subKind,
           summary: `${isDomPath ? '회의앱 DOM의 발화 표시' : '참가자 타일 테두리 강조'}로 발화자 변경 감지`
@@ -524,7 +539,7 @@ function registerPipeline({ getViewerView }) {
     }
   });
 
-  ipcMain.handle('pipeline-deixis', async (_event, { ts, buffer, utterance, recentTranscript, beforeTranscript, afterTranscript, hasPointingRegion, pointingOrderHint, slideLabel, wordBudgetMap }) => {
+  ipcMain.handle('pipeline-deixis', async (_event, { ts, buffer, utterance, recentTranscript, beforeTranscript, afterTranscript, hasPointingRegion, pointingOrderHint, slideLabel, wordBudgetMap, eventVideoTimeMs = null }) => {
     let stage = PIPELINE_STAGE_MAP.judge;
     const startedAt = Date.now();
     const hasAnySpeech = [utterance, beforeTranscript, afterTranscript, recentTranscript]
@@ -636,6 +651,7 @@ function registerPipeline({ getViewerView }) {
       const sent = await sendCaption({
         ts, text, source: narrationType, slideLabel, slotMap,
         hasPointingRegion, isRateLimitExempt: false,
+        narrationClass: toNarrationClass({ narrationType }), eventVideoTimeMs,
         rationale: {
           utterance,
           subKind: selectedCandidate?.subKind || null,
@@ -658,7 +674,7 @@ function registerPipeline({ getViewerView }) {
   });
 
   ipcMain.handle('pipeline-command', async (_event, { ts, buffer, command = null,
-    questionText = null, recentTranscript = '', wordBudget }) => {
+    questionText = null, recentTranscript = '', wordBudget, eventVideoTimeMs = null }) => {
     const stage = PIPELINE_STAGE_MAP.vlm;
     const startedAt = Date.now();
     const subKind = command || 'free_question';
@@ -685,6 +701,7 @@ function registerPipeline({ getViewerView }) {
 
       await sendCaption({
         ts, text, source: NARRATION_TYPE_MAP.userCommand, isDedupeExempt: true,
+        narrationClass: NARRATION_CLASS_MAP.userCommand, eventVideoTimeMs,
         rationale: {
           subKind,
           summary: command ? '사용자가 단축키로 직접 요청한 답변' : '사용자가 직접 물은 자유 질문',
