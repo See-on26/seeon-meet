@@ -21,6 +21,7 @@ const { createTtsClient } = require('./output/tts-client');
 const { createGapInferenceAgent } = require('./output/gap-inference-agent');
 const { createRecordStore, RECORD_KIND_MAP } = require('./instrumentation/record-store');
 const { createSessionStore } = require('./instrumentation/session-store');
+const { setVlmFallbackListener } = require('./agents/shared/vlm-gateway');
 const { OUT_DIR } = require('../paths');
 
 const ASR_DRAIN_TIMEOUT_MS = 8000;
@@ -92,6 +93,15 @@ function registerPipeline({ getViewerView }) {
     appendRecord({ kind: RECORD_KIND_MAP.debug, ...entry }).catch(() => {});
     getViewerView()?.webContents.send('pipeline-event', { type: 'debug', ...entry });
   }
+
+  setVlmFallbackListener(({ label, reason, isBypass, elapsedMs }) => {
+    console.warn(`[pipeline] VLM 폴백(${config.vlmFallbackModelId}) [${label}] ${isBypass ? 'GPU 우회 중' : reason} (${elapsedMs}ms)`);
+    markDebug({
+      stage: DEBUG_STAGE_MAP.vlmFallback, verdict: DEBUG_VERDICT_MAP.info,
+      reason: isBypass ? 'GPU 우회 중 — Bedrock 으로 처리' : 'GPU VLM 실패 — Bedrock 으로 재시도',
+      detail: `${label} · ${reason} · ${elapsedMs}ms · 모델=${config.vlmFallbackModelId}`,
+    });
+  });
 
   async function sendCaption({ ts, text, source, slideLabel = null, isDedupeExempt = false,
     rationale = null, slotMap = null, hasPointingRegion = false, isRateLimitExempt = true,
