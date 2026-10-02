@@ -1,4 +1,4 @@
-const { app } = require('electron');
+const { app, ipcMain, Menu } = require('electron');
 const { loadEnvFile } = require('./env');
 
 loadEnvFile();
@@ -11,6 +11,8 @@ const { registerSummary } = require('./summary');
 const { registerCommandShortcut } = require('./shortcut');
 const { registerViewerDisplayMedia } = require('./meeting/session');
 const window = require('./window');
+const { reloadMeetView, registerMeetReload } = require('./meeting/meet-reload');
+const { buildAppMenuTemplate, MEET_RELOAD_ACCELERATOR } = require('./app-menu');
 
 app.whenReady().then(() => {
   fs.mkdirSync(FRAMES_DIR, { recursive: true });
@@ -28,6 +30,13 @@ app.whenReady().then(() => {
   registerCommandShortcut({
     getViewerView: window.getViewerView, getMeetView: window.getMeetView,
   });
+  registerMeetReload({ ipcMain, getMeetView: window.getMeetView, getViewerView: window.getViewerView });
+  Menu.setApplicationMenu(Menu.buildFromTemplate(buildAppMenuTemplate({
+    onReloadMeet: () => reloadMeetView({
+      getMeetView: window.getMeetView, getViewerView: window.getViewerView, reason: 'shortcut',
+    }),
+  })));
+  console.log(`[meet] Meet 화면 새로고침 단축키 등록 — ${MEET_RELOAD_ACCELERATOR}`);
 
   if (process.env.SEEON_SMOKE) {
     window.getViewerView().webContents.once('did-finish-load', () => console.log('[smoke] viewer loaded'));

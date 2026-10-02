@@ -1050,6 +1050,21 @@ function toggleSummaryEnabled() {
 }
 window.seeon.onSummaryToggle(toggleSummaryEnabled);
 
+// 화면 공유가 검게 보일 때 Meet 화면만 다시 불러온다. 회의 중이었다면 다시 참여해야 한다.
+$('meetReloadBtn').addEventListener('click', () => {
+  window.seeon.reloadMeet().catch(() => showNotice('Meet 화면을 새로고침하지 못했어요'));
+});
+window.seeon.onMeetReloaded(({ reason }) => {
+  showNotice(captureSource.isActive
+    ? 'Meet 화면을 새로고침했어요. 회의에 다시 참여한 뒤, 캡처가 멈췄다면 다시 시작해 주세요'
+    : 'Meet 화면을 새로고침했어요. 회의에 다시 참여해 주세요');
+  markDebug({
+    stage: DEBUG_STAGE_MAP.session, verdict: DEBUG_VERDICT_MAP.info,
+    reason: 'Meet 화면 새로고침',
+    detail: `경로=${reason} · 캡처=${captureSource.isActive ? '진행 중' : '꺼짐'}`,
+  });
+});
+
 document.addEventListener('keydown', (event) => {
   if (!(event.ctrlKey || event.metaKey) || event.shiftKey || event.altKey) return;
 
