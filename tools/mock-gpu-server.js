@@ -17,6 +17,9 @@ const MOCK_PAGE_TRANSITION = {
   narration: '2분기 매출 요약, 매출 추이 표', describedElementList: ['매출 추이 표'],
 };
 
+const SLIDE_TEXT_PROMPT_MARKER = '그대로 옮겨 적어라';
+const MOCK_SLIDE_TEXT = '2분기 매출 요약\n2분기 매출 | 120억 원\n전년 동기 대비 | 15% 성장';
+
 const SLIDE_RECAPTION_PROMPT_MARKER = '요약본의 재료';
 const MOCK_SLIDE_RECAPTION = {
   title: '2분기 매출 요약',
@@ -78,6 +81,7 @@ async function startMockServerList({ vlmPort = 8801, asrPort = 8802, ttsPort = 8
     let content;
 
     if (body.includes(SLIDE_RECAPTION_PROMPT_MARKER)) content = JSON.stringify(MOCK_SLIDE_RECAPTION);
+    else if (body.includes(SLIDE_TEXT_PROMPT_MARKER)) content = MOCK_SLIDE_TEXT;
     else if (body.includes(GROUNDING_PROMPT_MARKER)) content = MOCK_GROUNDING_CAPTION;
     else if (body.includes(PAGE_TRANSITION_PROMPT_MARKER)) content = JSON.stringify(MOCK_PAGE_TRANSITION);
     else content = JSON.stringify(MOCK_FACT_SHEET);

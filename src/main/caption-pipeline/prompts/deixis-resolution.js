@@ -37,9 +37,7 @@ function buildGroundingPrompt({ utterance, recentTranscript, maxChars,
     hasPointingRegion
       ? '이 이미지는 회의 공유화면에서 발표자가 방금 필기하거나 포인터로 가리킨 영역을 확대한 것이다.'
       : '이 이미지는 회의에서 공유 중인 화면이다.',
-    trimmedUtterance
-      ? `발표자가 방금 이렇게 말하며 화면의 무언가를 가리켰다: "${trimmedUtterance}"`
-      : '발표자가 발화 없이 필기·포인터로 이 영역을 표시했다.',
+    `발표자가 방금 이렇게 말하며 화면의 무언가를 가리켰다: "${trimmedUtterance}"`,
     recentTranscript
       ? `발표자의 인접 발화(트리거 직전 1분 이내 + 직후 발화)는 다음과 같다: ${recentTranscript}`
       : '',

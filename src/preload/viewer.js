@@ -27,16 +27,17 @@ contextBridge.exposeInMainWorld('seeon', {
     ipcRenderer.send('show-in-folder', filePath);
   },
   sendPipelineAudio(args) { return ipcRenderer.invoke('pipeline-audio', args); },
-  sendPipelineFrame({ ts, buffer, slideLabel, wordBudget = null, isRevisit = false }) {
+  sendPipelineFrame({ ts, buffer, slideLabel, wordBudget = null, isRevisit = false, eventVideoTimeMs = null }) {
     return ipcRenderer.invoke('pipeline-frame',
-      { ts, buffer: new Uint8Array(buffer), slideLabel, wordBudget, isRevisit });
+      { ts, buffer: new Uint8Array(buffer), slideLabel, wordBudget, isRevisit, eventVideoTimeMs });
   },
   sendPipelineSpeaker({
     ts, source, buffer = null, speakerName = '', position = '', participantId = '', wordBudget = null,
+    eventVideoTimeMs = null,
   }) {
     return ipcRenderer.invoke('pipeline-speaker', {
       ts, source, buffer: buffer ? new Uint8Array(buffer) : null,
-      speakerName, position, participantId, wordBudget,
+      speakerName, position, participantId, wordBudget, eventVideoTimeMs,
     });
   },
   embedFrame({ buffer }) {
@@ -46,13 +47,16 @@ contextBridge.exposeInMainWorld('seeon', {
     return ipcRenderer.invoke('save-slide-frame', { slideLabel, kind, buffer: new Uint8Array(buffer), sessionId });
   },
   markSlideFrame(entry) { ipcRenderer.send('pipeline-slide-mark', entry); },
-  sendPipelineDeixis({ ts, buffer, utterance, recentTranscript, beforeTranscript = '', afterTranscript = '', hasPointingRegion = false, pointingOrderHint = '', slideLabel = null, wordBudgetMap = null }) {
-    return ipcRenderer.invoke('pipeline-deixis',
-      { ts, buffer: new Uint8Array(buffer), utterance, recentTranscript, beforeTranscript, afterTranscript, hasPointingRegion, pointingOrderHint, slideLabel, wordBudgetMap });
+  requestSlideText({ slideLabel, buffer }) {
+    return ipcRenderer.invoke('pipeline-slide-text', { slideLabel, buffer: new Uint8Array(buffer) });
   },
-  sendPipelineCommand({ ts, buffer, command = null, questionText = null, recentTranscript = '', wordBudget = null }) {
+  sendPipelineDeixis({ ts, buffer, utterance, recentTranscript, beforeTranscript = '', afterTranscript = '', hasPointingRegion = false, pointingOrderHint = '', slideLabel = null, wordBudgetMap = null, eventVideoTimeMs = null }) {
+    return ipcRenderer.invoke('pipeline-deixis',
+      { ts, buffer: new Uint8Array(buffer), utterance, recentTranscript, beforeTranscript, afterTranscript, hasPointingRegion, pointingOrderHint, slideLabel, wordBudgetMap, eventVideoTimeMs });
+  },
+  sendPipelineCommand({ ts, buffer, command = null, questionText = null, recentTranscript = '', wordBudget = null, eventVideoTimeMs = null }) {
     return ipcRenderer.invoke('pipeline-command',
-      { ts, buffer: new Uint8Array(buffer), command, questionText, recentTranscript, wordBudget });
+      { ts, buffer: new Uint8Array(buffer), command, questionText, recentTranscript, wordBudget, eventVideoTimeMs });
   },
   inferInsertionGap(args) { return ipcRenderer.invoke('pipeline-gap', args); },
   onUserCommand(callback) { ipcRenderer.on('user-command', (_e, payload) => callback(payload)); },

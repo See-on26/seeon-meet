@@ -23,6 +23,15 @@ export const NARRATION_TYPE_MAP = {
   speakerIdentity: 'speaker_identity',
 };
 
+export const NARRATION_CLASS_MAP = {
+  userCommand: 'user_command',
+  pageTransition: 'page_transition',
+  deixis: 'deixis',
+  speechBased: 'speech_based',
+  silenceBased: 'silence_based',
+  speakerIdentity: 'speaker_identity',
+};
+
 export const PAGE_TRANSITION_KIND_MAP = {
   slide: 'slide',
   document: 'document',
@@ -99,6 +108,8 @@ export const DEBUG_STAGE_MAP = {
   gap: 'gap',
   tts: 'tts',
   asr: 'asr',
+  valueCheck: 'value_check',
+  vlmFallback: 'vlm_fallback',
 };
 
 export const DEBUG_VERDICT_MAP = { pass: 'pass', skip: 'skip', fail: 'fail', info: 'info' };

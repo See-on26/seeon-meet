@@ -1,5 +1,16 @@
 const DEFAULT_MAX_ENTRY = 300;
 const DEFAULT_LIMIT = 10;
+const DEFAULT_BEFORE_ALLOWANCE_MS = 3000;
+
+// 틈은 원 사건 이후에서 찾는다. 화자 식별만 발화 직전 고지를 위해 원 사건 3초 전까지 허용한다.
+// 이미 재생된 구간은 고를 수 없으므로 재생 헤드+안전 마진보다 앞설 수 없다.
+export function resolveGapSearchFromMs({ eventVideoTimeMs, delayedTimeMs, safetyMs,
+  isBeforeAllowed, beforeAllowanceMs = DEFAULT_BEFORE_ALLOWANCE_MS }) {
+  const playheadFloorMs = delayedTimeMs + safetyMs;
+  if (!Number.isFinite(eventVideoTimeMs)) return playheadFloorMs;
+  const eventFloorMs = isBeforeAllowed ? eventVideoTimeMs - beforeAllowanceMs : eventVideoTimeMs;
+  return Math.max(playheadFloorMs, eventFloorMs);
+}
 
 export class GapCandidateStore {
   constructor({ maxEntry = DEFAULT_MAX_ENTRY } = {}) {

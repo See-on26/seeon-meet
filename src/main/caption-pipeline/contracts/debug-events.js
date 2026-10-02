@@ -11,6 +11,8 @@ const DEBUG_STAGE_MAP = {
   gap: 'gap',
   tts: 'tts',
   asr: 'asr',
+  valueCheck: 'value_check',
+  vlmFallback: 'vlm_fallback',
 };
 
 const DEBUG_VERDICT_MAP = { pass: 'pass', skip: 'skip', fail: 'fail', info: 'info' };

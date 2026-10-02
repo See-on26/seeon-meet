@@ -145,7 +145,7 @@ function createNarrationHistory({
     return entryList.map(({ text, source, ts }) => ({ text, source, ts }));
   }
 
-  function getRecentTextList({ limit = 8 } = {}) {
+  function getRecentTextList({ limit = 4 } = {}) {
     return entryList.slice(-limit).map((entry) => entry.text);
   }
 

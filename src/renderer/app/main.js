@@ -1,5 +1,5 @@
 import {
-  CROP_JPEG_QUALITY, NARRATION_TYPE_MAP,
+  CROP_JPEG_QUALITY, NARRATION_TYPE_MAP, NARRATION_CLASS_MAP,
   PAGE_TRANSITION_KIND_MAP, USER_COMMAND_KEY_MAP, USER_COMMAND_MAP, SUMMARY_TOGGLE_KEY,
   MEET_MEETING_URL_PATTERN, SPEAKER_SOURCE_MAP, DEBUG_STAGE_MAP, DEBUG_VERDICT_MAP,
 } from '../core/constants.js';
@@ -13,9 +13,12 @@ import { CONTEXT_TOKEN_BUDGET } from '../core/mode/context-budget.js';
 import { DelayBuffer, isCaptionDroppable, EXCESS_DROP_MS } from '../core/audio-renderer/delay-buffer.js';
 import { StreamDelaySource } from '../core/audio-renderer/stream-delay-source.js';
 import { NarrationScheduler } from '../core/audio-renderer/narration-scheduler.js';
-import { GapCandidateStore } from '../core/audio-renderer/gap-candidate-store.js';
+import { GapCandidateStore, resolveGapSearchFromMs } from '../core/audio-renderer/gap-candidate-store.js';
 import { CaptionNarrator } from '../core/audio-renderer/caption-narrator.js';
 import { NarrationMixer } from '../core/audio-renderer/narration-mixer.js';
+import {
+  TransitionOrderGate, LEADER_STATUS_MAP, resolveFollowerInsertMs,
+} from '../core/audio-renderer/transition-order-gate.js';
 
 import { AudioMeter } from '../core/trigger/audio-meter.js';
 import { AsrSegmenter } from '../core/trigger/asr-segmenter.js';
@@ -35,6 +38,7 @@ import { showModal } from './modal.js';
 
 import { RoiStore, SPEAKER_VERDICT_MAP } from '../core/roi/roi-store.js';
 import { MeetCaptureSession } from '../core/capture/meet-capture-session.js';
+import { wallToVideoTimeMs, resolveSpeechEndWallTs } from '../core/capture/video-time.js';
 
 const $ = (id) => document.getElementById(id);
 
@@ -471,6 +475,9 @@ const pointingLocator = new PointingLocator({ rowCount: 18, colCount: 32, cellCh
 const LOCAL_EMBED_MATCH_THRESHOLD = 0.02;
 const histogramGate = new SlideHistogramGate({});
 const slideRegistry = new SlideEmbeddingRegistry({});
+// 슬라이드 전환을 확정한 영상 시각. 체류 판정 후 생성하는 모드에서도 원 사건 시각을 잃지 않게 보관한다.
+const slideEventVideoTimeMap = new Map();
+const transitionOrderGate = new TransitionOrderGate();
 
 const slideDwellGate = new SlideDwellGate({
   onSatisfied: ({ label, isRevisit }) => {
@@ -586,7 +593,7 @@ function samplePointingFrame() {
   const imageData = context.getImageData(0, 0, POINTING_SAMPLE_WIDTH, POINTING_SAMPLE_HEIGHT);
   pointingLocator.sample({ imageData, ts });
   detectSlideTransition({ imageData, ts });
-  submitPointingMotionCandidate();
+  attachPointingMotion();
 }
 
 function detectSlideTransition({ imageData, ts }) {
@@ -634,8 +641,12 @@ async function confirmSlideCandidate({ isFirst, imageData }) {
   }
   if (!decision.isNew && !decision.isRevisit) return;
   const isRevisit = Boolean(decision.isRevisit);
+  if (decision.isNew && buffer) {
+    window.seeon.requestSlideText({ slideLabel: decision.label, buffer }).catch(() => {});
+  }
 
   lastScreenTransitionAt = performance.now();
+  slideEventVideoTimeMap.set(decision.label, captureSource.videoTimeMs);
   console.log(`[slide] ${isRevisit ? '재방문' : (isFirst ? '첫' : '새')} 슬라이드 ${decision.label} (거리=${distance} src=${source}) → 체류 ${DWELL_MS}ms 판정`);
   markDebug({
     stage: DEBUG_STAGE_MAP.slide, verdict: DEBUG_VERDICT_MAP.info,
@@ -674,6 +685,7 @@ async function requestPageTransitionNarration(decision) {
   }
   const result = await window.seeon.sendPipelineFrame({
     ts, buffer, slideLabel: decision.label, wordBudget, isRevisit: Boolean(decision.isRevisit),
+    eventVideoTimeMs: slideEventVideoTimeMap.get(decision.label) ?? captureSource.videoTimeMs,
   }).catch(() => null);
 }
 
@@ -736,12 +748,14 @@ async function pollSpeakerIdentity() {
         speakerName: domVerdict.speaker.name,
         position: domVerdict.speaker.position,
         participantId: domVerdict.speaker.participantId || '',
+        eventVideoTimeMs: captureSource.videoTimeMs,
       });
     } else {
       const buffer = await captureRegionJpeg(region);
       if (!buffer) return;
       result = await window.seeon.sendPipelineSpeaker({
         ts: Date.now(), source: SPEAKER_SOURCE_MAP.vlm, buffer, wordBudget,
+        eventVideoTimeMs: captureSource.videoTimeMs,
       });
     }
   } catch (error) {
@@ -788,18 +802,19 @@ let lastResolvedSpeakerAt = 0;
 
 const candidateScheduler = new DeixisCandidateScheduler({ onDecide: runDeixisDecision });
 const deixisDetector = new DeixisDetector({
-  onDeixis: ({ text, trigger }) => {
+  onDeixis: ({ text, trigger, eventWallTs }) => {
     const { region, pointingOrderHint } = getPointingSequence();
     console.log(`[deixis] 🗣 발화 지시 "${trigger}" → look-ahead 대기`);
-
+    const nowVideoTimeMs = captureSource.videoTimeMs;
     candidateScheduler.submit({
       source: CANDIDATE_SOURCE_MAP.speech, utterance: text, trigger, region, pointingOrderHint,
-      captureTs: performance.now(), videoTimeMs: captureSource.videoTimeMs,
+      captureTs: performance.now(), videoTimeMs: nowVideoTimeMs,
+      eventVideoTimeMs: wallToVideoTimeMs({ wallTs: eventWallTs, nowVideoTimeMs }) ?? nowVideoTimeMs,
     });
   },
 });
 
-function submitPointingMotionCandidate() {
+function attachPointingMotion() {
   const now = performance.now();
   const motion = pointingLocator.locate({ nowTs: now });
   if (!motion.hasRegion) return;
@@ -807,12 +822,11 @@ function submitPointingMotionCandidate() {
   lastPointingMotionAt = now;
   const { region, pointingOrderHint } = getPointingSequence();
   saveAnnotationSnapshot();
-  console.log(`[deixis] ✍ 포인팅 모션 감지 changedRatio=${(motion.changedRatio ?? 0).toFixed(3)} → 후보`);
-  candidateScheduler.submit({
-    source: CANDIDATE_SOURCE_MAP.pointing, trigger: '필기/포인터',
+  const isAttached = candidateScheduler.attachPointing({
     region: region || motion.rect, pointingOrderHint,
-    captureTs: now, videoTimeMs: captureSource.videoTimeMs,
   });
+  console.log(`[deixis] ✍ 포인팅 모션 changedRatio=${(motion.changedRatio ?? 0).toFixed(3)}`
+    + ` → ${isAttached ? '대기 중인 발화 후보에 영역 첨부' : '대기 후보 없음 (포인터는 트리거가 아니다)'}`);
 }
 
 async function saveSlideFrameWithMark({ slideLabel, frameKind, buffer }) {
@@ -854,14 +868,12 @@ function describeBeforeWindow({ mode, anchorTs }) {
 
 const SCREEN_DEPENDENCY_LABEL_MAP = {
   [SCREEN_DEPENDENCY_REASON_MAP.speechTrigger]: '발화 지시가 트리거',
-  [SCREEN_DEPENDENCY_REASON_MAP.deicticReference]: '인접 발화가 지시 표현으로만 가리킴 — 화면을 봐야 안다',
-  [SCREEN_DEPENDENCY_REASON_MAP.noAdjacentSpeech]: '인접 발화 없음 — 설명할 내용이 없다',
-  [SCREEN_DEPENDENCY_REASON_MAP.spokenReference]: '발화가 대상을 특정함 — 말로 충분하다',
+  [SCREEN_DEPENDENCY_REASON_MAP.unsupportedSource]: '발화가 아닌 출처 — 트리거로 쓰지 않는다',
 };
 
 async function runDeixisDecision({ source, utterance, triggerList, region, pointingOrderHint,
-  captureTs, videoTimeMs }) {
-  const label = triggerList.join(', ') || '필기/포인터';
+  captureTs, videoTimeMs, eventVideoTimeMs = null }) {
+  const label = triggerList.join(', ') || '-';
   const mode = getCurrentMode();
   const { beforeMs, afterMs } = getModePolicy({ mode }) || {};
 
@@ -887,7 +899,7 @@ async function runDeixisDecision({ source, utterance, triggerList, region, point
       detail: `버린 발화 ${droppedCount}건 · 남은 맥락 ${tokenCount}토큰 (예산 ${CONTEXT_TOKEN_BUDGET})`,
     });
   }
-  const screenVerdict = judgeScreenDependency({ source, utterance, before, after });
+  const screenVerdict = judgeScreenDependency({ source, utterance });
   if (!screenVerdict.isScreenDependent) {
     console.log(`[deixis] 화면 의존성 없음 → 스킵 label="${label}" (${screenVerdict.reason})`);
     markDebug({
@@ -928,7 +940,7 @@ async function runDeixisDecision({ source, utterance, triggerList, region, point
   const result = await window.seeon.sendPipelineDeixis({
     ts, buffer, utterance, recentTranscript, beforeTranscript: before, afterTranscript: after,
     hasPointingRegion: Boolean(region), pointingOrderHint, slideLabel: slideRegistry.currentLabel(),
-    wordBudgetMap,
+    wordBudgetMap, eventVideoTimeMs,
   }).catch(() => null);
 
   const isNarrated = Boolean(result?.isOk && result.isGrounded);
@@ -966,7 +978,12 @@ function handleAsrTranscript({ text, ts, endTs, segmentList = [] }) {
     });
 
     transcriptWindow.push({ text: trimmed, ts: performance.now() });
-    deixisDetector.handleTranscript({ text: trimmed, captureTs: endTs });
+    deixisDetector.handleTranscript({
+      text: trimmed, captureTs: endTs,
+      resolveEventWallTs: ({ trigger }) => resolveSpeechEndWallTs({
+        chunkStartTs: ts, chunkEndTs: endTs, segmentList, trigger,
+      }),
+    });
   }
 
   const candidateCount = collectGapCandidateList({
@@ -987,10 +1004,10 @@ function handleAsrTranscript({ text, ts, endTs, segmentList = [] }) {
 
 const CAPTION_SOURCE_TRANSITION = 'page-transition';
 
-function handleCaption({ text, source }) {
+function handleCaption({ text, source, eventVideoTimeMs = null }) {
   appendLogCard({ source, text });
   if (source === CAPTION_SOURCE_TRANSITION) lastScreenNarration = text;
-  return captureSource.videoTimeMs;
+  return Number.isFinite(eventVideoTimeMs) ? eventVideoTimeMs : captureSource.videoTimeMs;
 }
 
 const COMMAND_DEDUPE_MS = 400;
@@ -1028,6 +1045,7 @@ async function askQuestion({ command = null, questionText = null }) {
     : '';
   const result = await window.seeon.sendPipelineCommand({
     ts, buffer, command, questionText, recentTranscript, wordBudget,
+    eventVideoTimeMs: captureSource.videoTimeMs,
   }).catch(() => null);
   if (!result?.isGrounded && questionText) {
     showNotice('화면에서 답을 찾지 못했어요');
@@ -1090,7 +1108,12 @@ async function resolveInsertionTimeMs({ payload, captionCaptureMs }) {
   const narrationType = toNarrationType({ source: payload.source });
   const gapList = gapCandidateStore.getCandidateList({
     triggerVideoTimeMs: captionCaptureMs,
-    fromVideoTimeMs: delayBuffer.getDelayedTimeMs() + GAP_SAFETY_MS,
+    fromVideoTimeMs: resolveGapSearchFromMs({
+      eventVideoTimeMs: captionCaptureMs,
+      delayedTimeMs: delayBuffer.getDelayedTimeMs(),
+      safetyMs: GAP_SAFETY_MS,
+      isBeforeAllowed: narrationType === NARRATION_TYPE_MAP.speakerIdentity,
+    }),
     toVideoTimeMs: captureSource.videoTimeMs,
   });
   if (!gapList.length) {
@@ -1122,22 +1145,51 @@ async function resolveInsertionTimeMs({ payload, captionCaptureMs }) {
   return chosen.videoTimeMs;
 }
 
-async function emitCaption(payload) {
+// 사진 단독 묘사처럼 전환 고지에 딸려 오는 캡션.
+function isTransitionFollower(payload) {
+  return payload.source !== CAPTION_SOURCE_TRANSITION
+    && payload.narrationClass === NARRATION_CLASS_MAP.pageTransition
+    && Boolean(payload.slideLabel);
+}
+
+async function emitCaption(payload, { leaderHandle = null } = {}) {
+  const isFollower = isTransitionFollower(payload);
+  const leader = isFollower ? await transitionOrderGate.waitLeader({ slideLabel: payload.slideLabel }) : null;
+  if (isFollower && leader.status === LEADER_STATUS_MAP.cancelled) {
+    markDebug({
+      stage: DEBUG_STAGE_MAP.slide, verdict: DEBUG_VERDICT_MAP.skip,
+      narrationType: NARRATION_TYPE_MAP.visualDescription,
+      reason: '전환 고지 취소 — 딸린 사진 묘사도 버림',
+      detail: `슬라이드 ${payload.slideLabel} "${payload.text}"`,
+    });
+    return;
+  }
   const captionCaptureMs = handleCaption(payload);
-  if (!payload.wavData) return;
+  if (!payload.wavData) {
+    leaderHandle?.settle({ status: LEADER_STATUS_MAP.unscheduled });
+    return;
+  }
   const wavArrayBuffer = payload.wavData.buffer.slice(
     payload.wavData.byteOffset, payload.wavData.byteOffset + payload.wavData.byteLength);
-  const insertVideoTimeMs = await resolveInsertionTimeMs({ payload, captionCaptureMs });
+  const insertVideoTimeMs = isFollower
+    ? resolveFollowerInsertMs({ eventVideoTimeMs: captionCaptureMs, leader })
+    : await resolveInsertionTimeMs({ payload, captionCaptureMs });
+  leaderHandle?.settle({ status: LEADER_STATUS_MAP.scheduled, insertVideoTimeMs });
+  if (insertVideoTimeMs === null) return;
   scheduleNarration({ wavArrayBuffer, captionCaptureMs: insertVideoTimeMs });
 }
 
-function emitCaptionSafely(payload) {
-  emitCaption(payload).catch((error) => console.warn('[caption] 발행 실패(무시):', error.message));
+function emitCaptionSafely(payload, { leaderHandle = null } = {}) {
+  emitCaption(payload, { leaderHandle }).catch((error) => {
+    leaderHandle?.settle({ status: LEADER_STATUS_MAP.unscheduled });
+    console.warn('[caption] 발행 실패(무시):', error.message);
+  });
 }
 
 function applyCaption(payload) {
   const isTransition = payload.source === CAPTION_SOURCE_TRANSITION;
   if (!isTransition || !payload.slideLabel) { emitCaptionSafely(payload); return; }
+  const leaderHandle = transitionOrderGate.registerLeader({ slideLabel: payload.slideLabel });
   const state = slideDwellGate.getState({ label: payload.slideLabel });
   if (state === DWELL_STATE_MAP.waiting) {
     console.log(`[slide] 고지 보류 — 슬라이드 ${payload.slideLabel} 체류 판정 대기 중`);
@@ -1145,7 +1197,8 @@ function applyCaption(payload) {
   slideDwellGate.whenResolved({
     label: payload.slideLabel,
     callback: (isSatisfied) => {
-      if (isSatisfied) { emitCaptionSafely(payload); return; }
+      if (isSatisfied) { emitCaptionSafely(payload, { leaderHandle }); return; }
+      leaderHandle.settle({ status: LEADER_STATUS_MAP.cancelled });
       markDebug({
         stage: DEBUG_STAGE_MAP.slide, verdict: DEBUG_VERDICT_MAP.skip,
         narrationType: NARRATION_TYPE_MAP.pageTransition,
@@ -1301,6 +1354,8 @@ async function attemptStartExperiment() {
     roiChangeSuppressUntil = 0;
     histogramGate.reset();
     slideRegistry.reset();
+    slideEventVideoTimeMap.clear();
+    transitionOrderGate.reset();
     slideDwellGate.reset();
     isConfirmingSlide = false;
     hasWarnedLocalEmbedding = false;
@@ -1361,7 +1416,9 @@ function stopExperiment() {
     }],
     ['포인팅 로컬라이저', () => pointingLocator.reset()],
     ['슬라이드 히스토그램 게이트', () => histogramGate.reset()],
-    ['슬라이드 레지스트리', () => slideRegistry.reset()],
+    ['슬라이드 레지스트리', () => {
+      slideRegistry.reset(); slideEventVideoTimeMap.clear(); transitionOrderGate.reset();
+    }],
     ['전환 체류 게이트', () => slideDwellGate.reset()],
     ['ROI 스토어', () => roiStore.reset()],
     ['발화자 힌트', () => { lastResolvedSpeakerName = ''; lastResolvedSpeakerAt = 0; }],
