@@ -408,7 +408,10 @@ function handleClickModeButton({ mode }) {
   renderModeButtons();
 
   candidateScheduler.setLookaheadMs({ lookaheadMs: computeLookaheadMs({ mode }) });
-  asrSegmenter.setSegmentMs({ segmentMs: getModePolicy({ mode })?.asrSegmentMs });
+  const modePolicy = getModePolicy({ mode });
+  asrSegmenter.setSegmentMs({
+    segmentMs: modePolicy?.asrSegmentMs, minSegmentMs: modePolicy?.asrMinSegmentMs,
+  });
   const isDelayStarted = applyDelayBufferForMode();
   applyNarrationPlayerForMode();
   console.log(`[mode] ${previousMode} → ${currentMode} (${describeModeOutput({ mode })})`);
@@ -1305,7 +1308,9 @@ async function attemptStartExperiment() {
     const holdMs = computeContextHoldMs({ mode: getCurrentMode() });
     candidateScheduler.setLookaheadMs({ lookaheadMs });
 
-    asrSegmenter.setSegmentMs({ segmentMs: contextPolicy?.asrSegmentMs });
+    asrSegmenter.setSegmentMs({
+      segmentMs: contextPolicy?.asrSegmentMs, minSegmentMs: contextPolicy?.asrMinSegmentMs,
+    });
 
     lastScreenTransitionAt = performance.now();
     experimentSeq += 1;
@@ -1315,7 +1320,8 @@ async function attemptStartExperiment() {
       detail: `모드=${getCurrentMode()} · 시작 시점 = 회의 시작 시점(0초)`
         + ` · 앞 맥락 ${describeBeforeWindow({ mode: getCurrentMode(), anchorTs: lastScreenTransitionAt })}`
         + ` · 뒤 맥락 ${Math.round((contextPolicy?.afterMs ?? 0) / 1000)}초`
-        + ` (ASR 청크 ${contextPolicy?.asrSegmentMs}ms + look-ahead ${lookaheadMs}ms + 보류 ${holdMs}ms)`,
+        + ` (ASR 청크 ${contextPolicy?.asrSegmentMs}ms(무음 절단 ${contextPolicy?.asrMinSegmentMs}ms 이후)`
+        + ` + look-ahead ${lookaheadMs}ms + 보류 ${holdMs}ms)`,
     });
 
     const { audioTrack } = await captureSource.start();

@@ -40,8 +40,10 @@ export class AsrSegmenter {
     this.resolveFinalFlush = null;
   }
 
-  setSegmentMs({ segmentMs }) {
+  setSegmentMs({ segmentMs, minSegmentMs = null }) {
     if (Number.isFinite(segmentMs) && segmentMs > 0) this.segmentMs = segmentMs;
+    if (Number.isFinite(minSegmentMs) && minSegmentMs > 0) this.minSegmentMs = minSegmentMs;
+    this.minSegmentMs = Math.min(this.minSegmentMs, this.segmentMs);
   }
 
   start(stream) {

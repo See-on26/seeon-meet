@@ -34,6 +34,10 @@ const ASR_SEGMENT_REALTIME_MS = 2500;
 const ASR_SEGMENT_DELAYED_MS = 3000;
 const ASR_SEGMENT_LISTENING_MS = 10000;
 
+// 무음 절단 최소 길이. 최대 길이와 같으면 무음 판정보다 타이머가 먼저 끊어 말 도중에 잘린다.
+const ASR_MIN_SEGMENT_REALTIME_MS = 1500;
+const ASR_MIN_SEGMENT_CROSS_MS = 2500;
+
 export const PIPELINE_LATENCY_MARGIN_MS = 2000;
 
 export const MODE_POLICY_MAP = {
@@ -42,6 +46,7 @@ export const MODE_POLICY_MAP = {
     contextAnchor: CONTEXT_ANCHOR_MAP.screenTransition,
     beforeMs: CONTEXT_BEFORE_MS, afterMs: CONTEXT_AFTER_LISTENING_MS,
     asrSegmentMs: ASR_SEGMENT_LISTENING_MS,
+    asrMinSegmentMs: ASR_MIN_SEGMENT_CROSS_MS,
     isSwitchableFrom: false, isSpeculative: false, isMixed: false,
   },
   [MODE_MAP.delayed]: {
@@ -49,6 +54,7 @@ export const MODE_POLICY_MAP = {
     contextAnchor: CONTEXT_ANCHOR_MAP.screenTransition,
     beforeMs: CONTEXT_BEFORE_MS, afterMs: CONTEXT_AFTER_DELAYED_MS,
     asrSegmentMs: ASR_SEGMENT_DELAYED_MS,
+    asrMinSegmentMs: ASR_MIN_SEGMENT_CROSS_MS,
     isSwitchableFrom: false, isSpeculative: false, isMixed: false,
   },
   [MODE_MAP.realtimeSic]: {
@@ -56,6 +62,7 @@ export const MODE_POLICY_MAP = {
     contextAnchor: CONTEXT_ANCHOR_MAP.window,
     beforeMs: CONTEXT_BEFORE_MS, afterMs: CONTEXT_AFTER_REALTIME_MS,
     asrSegmentMs: ASR_SEGMENT_REALTIME_MS,
+    asrMinSegmentMs: ASR_MIN_SEGMENT_REALTIME_MS,
     isSwitchableFrom: true, isSpeculative: true, isMixed: false,
   },
   [MODE_MAP.realtimeMix]: {
@@ -63,6 +70,7 @@ export const MODE_POLICY_MAP = {
     contextAnchor: CONTEXT_ANCHOR_MAP.window,
     beforeMs: CONTEXT_BEFORE_MS, afterMs: CONTEXT_AFTER_REALTIME_MS,
     asrSegmentMs: ASR_SEGMENT_REALTIME_MS,
+    asrMinSegmentMs: ASR_MIN_SEGMENT_REALTIME_MS,
     isSwitchableFrom: true, isSpeculative: true, isMixed: true,
   },
 };
