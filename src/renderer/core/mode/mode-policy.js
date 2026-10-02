@@ -38,6 +38,12 @@ const ASR_SEGMENT_LISTENING_MS = 10000;
 const ASR_MIN_SEGMENT_REALTIME_MS = 1500;
 const ASR_MIN_SEGMENT_CROSS_MS = 2500;
 
+// 지시 후보의 look-ahead 가 끝났는데 문장이 안 끝났으면 더 기다리는 상한.
+// 동시·성능 모드는 look-ahead(2초)가 다음 청크 도착(약 3초)보다 짧아 뒤 조각을 놓친다.
+// 균형·품질 모드는 보류 시간이 뒤 맥락을 이미 모으므로 기다리지 않는다.
+const SENTENCE_WAIT_REALTIME_MS = 1500;
+const SENTENCE_WAIT_CROSS_MS = 0;
+
 export const PIPELINE_LATENCY_MARGIN_MS = 2000;
 
 export const MODE_POLICY_MAP = {
@@ -47,6 +53,7 @@ export const MODE_POLICY_MAP = {
     beforeMs: CONTEXT_BEFORE_MS, afterMs: CONTEXT_AFTER_LISTENING_MS,
     asrSegmentMs: ASR_SEGMENT_LISTENING_MS,
     asrMinSegmentMs: ASR_MIN_SEGMENT_CROSS_MS,
+    sentenceWaitMs: SENTENCE_WAIT_CROSS_MS,
     isSwitchableFrom: false, isSpeculative: false, isMixed: false,
   },
   [MODE_MAP.delayed]: {
@@ -55,6 +62,7 @@ export const MODE_POLICY_MAP = {
     beforeMs: CONTEXT_BEFORE_MS, afterMs: CONTEXT_AFTER_DELAYED_MS,
     asrSegmentMs: ASR_SEGMENT_DELAYED_MS,
     asrMinSegmentMs: ASR_MIN_SEGMENT_CROSS_MS,
+    sentenceWaitMs: SENTENCE_WAIT_CROSS_MS,
     isSwitchableFrom: false, isSpeculative: false, isMixed: false,
   },
   [MODE_MAP.realtimeSic]: {
@@ -63,6 +71,7 @@ export const MODE_POLICY_MAP = {
     beforeMs: CONTEXT_BEFORE_MS, afterMs: CONTEXT_AFTER_REALTIME_MS,
     asrSegmentMs: ASR_SEGMENT_REALTIME_MS,
     asrMinSegmentMs: ASR_MIN_SEGMENT_REALTIME_MS,
+    sentenceWaitMs: SENTENCE_WAIT_REALTIME_MS,
     isSwitchableFrom: true, isSpeculative: true, isMixed: false,
   },
   [MODE_MAP.realtimeMix]: {
@@ -71,6 +80,7 @@ export const MODE_POLICY_MAP = {
     beforeMs: CONTEXT_BEFORE_MS, afterMs: CONTEXT_AFTER_REALTIME_MS,
     asrSegmentMs: ASR_SEGMENT_REALTIME_MS,
     asrMinSegmentMs: ASR_MIN_SEGMENT_REALTIME_MS,
+    sentenceWaitMs: SENTENCE_WAIT_REALTIME_MS,
     isSwitchableFrom: true, isSpeculative: true, isMixed: true,
   },
 };
@@ -111,6 +121,10 @@ export function computeLookaheadMs({ mode }) {
   const policy = getModePolicy({ mode });
   if (!policy) return 0;
   return Math.min(policy.afterMs, LOOKAHEAD_MAX_MS);
+}
+
+export function computeSentenceWaitMs({ mode }) {
+  return getModePolicy({ mode })?.sentenceWaitMs ?? 0;
 }
 
 export function computeContextHoldMs({ mode }) {
