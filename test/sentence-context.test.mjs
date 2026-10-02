@@ -6,21 +6,21 @@ import { MODE_MAP, computeSentenceWaitMs } from '../src/renderer/core/mode/mode-
 const LOOKAHEAD_MS = 2000;
 const SENTENCE_WAIT_MS = 1500;
 
-function makeScheduler({ sentenceWaitMs = SENTENCE_WAIT_MS } = {}) {
+function makeScheduler({ sentenceWaitMs = SENTENCE_WAIT_MS, getLastSpeechWallTs = null } = {}) {
   const decisionList = [];
   const timerList = [];
   const scheduler = new DeixisCandidateScheduler({
     onDecide: (decision) => decisionList.push(decision),
-    lookaheadMs: LOOKAHEAD_MS, sentenceWaitMs,
+    lookaheadMs: LOOKAHEAD_MS, sentenceWaitMs, getLastSpeechWallTs,
     setTimer: (fn, ms) => { timerList.push({ fn, ms, isCleared: false }); return timerList.length - 1; },
     clearTimer: (handle) => { timerList[handle].isCleared = true; },
   });
   return { scheduler, decisionList, timerList };
 }
 
-function submitSpeech(scheduler, { utterance, trigger = utterance, leadText = '' }) {
+function submitSpeech(scheduler, { utterance, trigger = utterance, leadText = '', chunkEndWallTs = null }) {
   scheduler.submit({
-    source: CANDIDATE_SOURCE_MAP.speech, utterance, trigger, leadText,
+    source: CANDIDATE_SOURCE_MAP.speech, utterance, trigger, leadText, chunkEndWallTs,
     captureTs: 1000, videoTimeMs: 9000, eventVideoTimeMs: 8500,
   });
 }
@@ -85,6 +85,31 @@ test('트리거 조각이 이미 문장 끝이면 추가 대기 없이 판정한
   assert.equal(decisionList.length, 1);
   assert.equal(timerList.length, 1);
   assert.equal(decisionList[0].utterance, '여기가 핵심입니다');
+});
+
+test('트리거 조각이 끝난 뒤 말소리가 없었으면 문장이 안 끝나도 추가 대기 없이 판정한다', () => {
+  const { scheduler, timerList, decisionList } = makeScheduler({ getLastSpeechWallTs: () => 900 });
+  submitSpeech(scheduler, { utterance: '여기 질문을 보시면', chunkEndWallTs: 1000 });
+  timerList[0].fn();
+  assert.equal(decisionList.length, 1);
+  assert.equal(timerList.length, 1);
+  assert.equal(decisionList[0].isSentenceWaited, false);
+});
+
+test('트리거 조각이 끝난 뒤에도 말소리가 이어졌으면 문장 끝을 더 기다린다', () => {
+  const { scheduler, timerList, decisionList } = makeScheduler({ getLastSpeechWallTs: () => 1800 });
+  submitSpeech(scheduler, { utterance: '5배', chunkEndWallTs: 1000 });
+  timerList[0].fn();
+  assert.equal(decisionList.length, 0);
+  assert.equal(timerList[1].ms, SENTENCE_WAIT_MS);
+});
+
+test('트리거 조각이 끝난 시각을 모르면 말소리가 이어진 것으로 보고 기다린다', () => {
+  const { scheduler, timerList, decisionList } = makeScheduler({ getLastSpeechWallTs: () => 0 });
+  submitSpeech(scheduler, { utterance: '5배' });
+  timerList[0].fn();
+  assert.equal(decisionList.length, 0);
+  assert.equal(timerList.length, 2);
 });
 
 test('추가 대기가 0 이면 문장이 안 끝나도 look-ahead 끝에 판정한다', () => {

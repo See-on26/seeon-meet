@@ -804,9 +804,13 @@ const SPEAKER_HINT_TTL_MS = 8000;
 let lastResolvedSpeakerName = '';
 let lastResolvedSpeakerAt = 0;
 
-const candidateScheduler = new DeixisCandidateScheduler({ onDecide: runDeixisDecision });
+function getLastSpeechWallTs() {
+  return lastAudioActiveAt ? Date.now() - (performance.now() - lastAudioActiveAt) : 0;
+}
+
+const candidateScheduler = new DeixisCandidateScheduler({ onDecide: runDeixisDecision, getLastSpeechWallTs });
 const deixisDetector = new DeixisDetector({
-  onDeixis: ({ text, trigger, eventWallTs }) => {
+  onDeixis: ({ text, trigger, captureTs, eventWallTs }) => {
     const { region, pointingOrderHint } = getPointingSequence();
     console.log(`[deixis] 🗣 발화 지시 "${trigger}" → look-ahead 대기`);
     const nowVideoTimeMs = captureSource.videoTimeMs;
@@ -815,7 +819,7 @@ const deixisDetector = new DeixisDetector({
       source: CANDIDATE_SOURCE_MAP.speech, utterance: text, trigger, region, pointingOrderHint,
       captureTs: nowTs, videoTimeMs: nowVideoTimeMs,
       eventVideoTimeMs: wallToVideoTimeMs({ wallTs: eventWallTs, nowVideoTimeMs }) ?? nowVideoTimeMs,
-      leadText: transcriptWindow.getOpenSentenceLead({ nowTs }),
+      leadText: transcriptWindow.getOpenSentenceLead({ nowTs }), chunkEndWallTs: captureTs,
     });
   },
 });

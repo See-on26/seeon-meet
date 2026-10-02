@@ -14,11 +14,12 @@ function isSentenceComplete(text) {
 
 export class DeixisCandidateScheduler {
   constructor({ onDecide, lookaheadMs = DEFAULT_LOOKAHEAD_MS, cooldownMs = DEFAULT_COOLDOWN_MS,
-    sentenceWaitMs = 0,
+    sentenceWaitMs = 0, getLastSpeechWallTs = null,
     setTimer = (fn, ms) => setTimeout(fn, ms), clearTimer = (handle) => clearTimeout(handle) }) {
     this.onDecide = onDecide;
     this.lookaheadMs = lookaheadMs;
     this.sentenceWaitMs = sentenceWaitMs;
+    this.getLastSpeechWallTs = getLastSpeechWallTs;
     this.cooldownMs = cooldownMs;
     this.setTimer = setTimer;
     this.clearTimer = clearTimer;
@@ -36,8 +37,9 @@ export class DeixisCandidateScheduler {
   }
 
   // leadText 는 트리거 조각 앞에서 문장이 안 끝난 채 이어지던 조각이다.
+  // chunkEndWallTs 는 트리거 조각 녹음이 끝난 벽시계 시각이다.
   submit({ source, utterance = '', trigger = '', region = null, pointingOrderHint = '',
-    captureTs, videoTimeMs, eventVideoTimeMs = null, leadText = '' }) {
+    captureTs, videoTimeMs, eventVideoTimeMs = null, leadText = '', chunkEndWallTs = null }) {
     if (this.pending) {
       this.absorb({ utterance, trigger, region, pointingOrderHint });
       return;
@@ -46,7 +48,7 @@ export class DeixisCandidateScheduler {
     this.pending = {
       source, utterance, triggerList: trigger ? [trigger] : [],
       region, pointingOrderHint, captureTs, videoTimeMs, eventVideoTimeMs,
-      leadText, followList: [], isSentenceWaited: false,
+      leadText, chunkEndWallTs, followList: [], isSentenceWaited: false,
     };
     this.timerHandle = this.setTimer(() => this.handleLookaheadEnd(), this.lookaheadMs);
   }
@@ -64,10 +66,18 @@ export class DeixisCandidateScheduler {
     return true;
   }
 
+  // 트리거 조각이 끝난 뒤 말소리가 한 번도 없었으면 아직 전사 중인 뒤 조각도 없다.
+  // 알 수 없으면 이어진 것으로 본다.
+  isSpeechContinued() {
+    const { chunkEndWallTs } = this.pending;
+    if (!this.getLastSpeechWallTs || !Number.isFinite(chunkEndWallTs)) return true;
+    return this.getLastSpeechWallTs() > chunkEndWallTs;
+  }
+
   handleLookaheadEnd() {
     const { followList, utterance } = this.pending;
     const lastText = followList.length ? followList[followList.length - 1] : utterance;
-    if (this.sentenceWaitMs <= 0 || isSentenceComplete(lastText)) {
+    if (this.sentenceWaitMs <= 0 || isSentenceComplete(lastText) || !this.isSpeechContinued()) {
       this.fire();
       return;
     }
