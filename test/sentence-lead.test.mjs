@@ -44,3 +44,21 @@ test('nowTs 보다 늦게 들어온 조각은 보지 않는다', () => {
   const transcriptWindow = makeWindow([['보시는 것처럼', 1000], ['이 부분', 2000], ['나중 조각', 5000]]);
   assert.equal(transcriptWindow.getOpenSentenceLead({ nowTs: 2000 }), '보시는 것처럼');
 });
+
+test('직전 판정에서 이미 쓴 조각은 다음 트리거의 앞 조각으로 다시 가져오지 않는다', () => {
+  const transcriptWindow = makeWindow([
+    ['이 부분을 보시면', 1000],
+    ['매출이 두 배로 늘었고', 3700],
+    ['이게 핵심인데', 5500],
+  ]);
+  const lastDecidedAt = 4000;
+  assert.equal(transcriptWindow.getOpenSentenceLead({ nowTs: 5500, sinceTs: lastDecidedAt }), '');
+  assert.equal(transcriptWindow.getOpenSentenceLead({ nowTs: 5500 }), '이 부분을 보시면 매출이 두 배로 늘었고');
+});
+
+test('직전 판정 뒤에 들어온 조각만 앞 조각으로 모은다', () => {
+  const transcriptWindow = makeWindow([
+    ['이 부분을 보시면', 1000], ['매출이 늘었고', 4500], ['이게 핵심인데', 6000],
+  ]);
+  assert.equal(transcriptWindow.getOpenSentenceLead({ nowTs: 6000, sinceTs: 4000 }), '매출이 늘었고');
+});

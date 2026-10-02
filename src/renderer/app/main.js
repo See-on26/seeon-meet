@@ -814,6 +814,9 @@ function getLastSpeechWallTs() {
   });
 }
 
+// 지시 판정이 난 시각. 그 전 조각은 그 판정의 발화에 이미 들어갔다.
+let lastDeixisDecidedAt = -Infinity;
+
 const candidateScheduler = new DeixisCandidateScheduler({ onDecide: runDeixisDecision, getLastSpeechWallTs });
 const deixisDetector = new DeixisDetector({
   onDeixis: ({ text, trigger, captureTs, eventWallTs }) => {
@@ -825,7 +828,8 @@ const deixisDetector = new DeixisDetector({
       source: CANDIDATE_SOURCE_MAP.speech, utterance: text, trigger, region, pointingOrderHint,
       captureTs: nowTs, videoTimeMs: nowVideoTimeMs,
       eventVideoTimeMs: wallToVideoTimeMs({ wallTs: eventWallTs, nowVideoTimeMs }) ?? nowVideoTimeMs,
-      leadText: transcriptWindow.getOpenSentenceLead({ nowTs }), chunkEndWallTs: captureTs,
+      leadText: transcriptWindow.getOpenSentenceLead({ nowTs, sinceTs: lastDeixisDecidedAt }),
+      chunkEndWallTs: captureTs,
     });
   },
 });
@@ -890,6 +894,7 @@ const SCREEN_DEPENDENCY_LABEL_MAP = {
 async function runDeixisDecision({ source, utterance, triggerList, region, pointingOrderHint,
   captureTs, videoTimeMs, eventVideoTimeMs = null,
   triggerUtterance = utterance, leadText = '', followText = '', isSentenceWaited = false }) {
+  lastDeixisDecidedAt = performance.now();
   const label = triggerList.join(', ') || '-';
   const mode = getCurrentMode();
   if (leadText || followText) {

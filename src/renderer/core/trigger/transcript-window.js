@@ -66,13 +66,14 @@ export class TranscriptWindow {
 
   // 가장 최근 조각(방금 들어온 트리거 조각) 앞에서 문장이 끝나지 않은 채 이어지는 조각을 순서대로 이어 붙인다.
   // 종결 어미를 만나거나, 시간 창을 벗어나거나, 최대 조각 수에 닿으면 멈춘다.
-  getOpenSentenceLead({ nowTs, windowMs = DEFAULT_SENTENCE_LEAD_WINDOW_MS,
+  // sinceTs(직전 지시 판정 시각) 이전 조각은 그 판정에서 이미 썼으므로 다시 가져오지 않는다.
+  getOpenSentenceLead({ nowTs, sinceTs = -Infinity, windowMs = DEFAULT_SENTENCE_LEAD_WINDOW_MS,
     maxEntryCount = DEFAULT_SENTENCE_LEAD_MAX_ENTRY }) {
     const pastList = this.entryList.filter((entry) => entry.ts <= nowTs);
     const leadList = [];
     for (let index = pastList.length - 2; index >= 0 && leadList.length < maxEntryCount; index -= 1) {
       const entry = pastList[index];
-      if (nowTs - entry.ts > windowMs) break;
+      if (nowTs - entry.ts > windowMs || entry.ts <= sinceTs) break;
       if (classifyUtteranceEnding(entry.text) === BOUNDARY_KIND_MAP.complete) break;
       leadList.unshift(entry.text);
     }
