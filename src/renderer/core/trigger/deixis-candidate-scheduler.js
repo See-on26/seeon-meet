@@ -71,7 +71,9 @@ export class DeixisCandidateScheduler {
   isSpeechContinued() {
     const { chunkEndWallTs } = this.pending;
     if (!this.getLastSpeechWallTs || !Number.isFinite(chunkEndWallTs)) return true;
-    return this.getLastSpeechWallTs() > chunkEndWallTs;
+    const lastSpeechWallTs = this.getLastSpeechWallTs();
+    if (!Number.isFinite(lastSpeechWallTs) || lastSpeechWallTs <= 0) return true;
+    return lastSpeechWallTs > chunkEndWallTs;
   }
 
   handleLookaheadEnd() {

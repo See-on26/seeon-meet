@@ -27,6 +27,7 @@ import {
 } from '../core/trigger/utterance-boundary-detector.js';
 import { TranscriptWindow } from '../core/trigger/transcript-window.js';
 import { DeixisDetector } from '../core/trigger/deixis-detector.js';
+import { resolveLastSpeechWallTs } from '../core/trigger/speech-activity.js';
 import { DeixisCandidateScheduler, CANDIDATE_SOURCE_MAP } from '../core/trigger/deixis-candidate-scheduler.js';
 import { judgeScreenDependency, SCREEN_DEPENDENCY_REASON_MAP } from '../core/trigger/screen-dependency.js';
 import { PointingLocator, describeDirection } from '../core/trigger/pointing-locator.js';
@@ -804,8 +805,13 @@ const SPEAKER_HINT_TTL_MS = 8000;
 let lastResolvedSpeakerName = '';
 let lastResolvedSpeakerAt = 0;
 
+let lastSpeechBlindAt = 0;
+
 function getLastSpeechWallTs() {
-  return lastAudioActiveAt ? Date.now() - (performance.now() - lastAudioActiveAt) : 0;
+  return resolveLastSpeechWallTs({
+    lastActiveAt: lastAudioActiveAt, lastBlindAt: lastSpeechBlindAt,
+    nowPerf: performance.now(), nowWall: Date.now(),
+  });
 }
 
 const candidateScheduler = new DeixisCandidateScheduler({ onDecide: runDeixisDecision, getLastSpeechWallTs });
@@ -1266,7 +1272,7 @@ function isNarrationEchoWindow() {
 
 setInterval(() => {
   if (!captureSource.isActive) return;
-  if (isNarrationEchoWindow()) return;
+  if (isNarrationEchoWindow()) { lastSpeechBlindAt = performance.now(); return; }
   if (audioMeter.getLevel() > AUDIO_SPEAK_THRESHOLD) lastAudioActiveAt = performance.now();
 }, 100);
 

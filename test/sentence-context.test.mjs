@@ -112,6 +112,16 @@ test('트리거 조각이 끝난 시각을 모르면 말소리가 이어진 것�
   assert.equal(timerList.length, 2);
 });
 
+test('트리거 조각 끝 시각은 있지만 말소리 정보가 없으면 기다린다', () => {
+  for (const lastSpeechWallTs of [0, null, undefined, Number.NaN]) {
+    const { scheduler, timerList, decisionList } = makeScheduler({ getLastSpeechWallTs: () => lastSpeechWallTs });
+    submitSpeech(scheduler, { utterance: '5배', chunkEndWallTs: 1000 });
+    timerList[0].fn();
+    assert.equal(decisionList.length, 0, String(lastSpeechWallTs));
+    assert.equal(timerList.length, 2, String(lastSpeechWallTs));
+  }
+});
+
 test('추가 대기가 0 이면 문장이 안 끝나도 look-ahead 끝에 판정한다', () => {
   const { scheduler, timerList, decisionList } = makeScheduler({ sentenceWaitMs: 0 });
   submitSpeech(scheduler, { utterance: '이 부분을', leadText: '보시는 것처럼' });
