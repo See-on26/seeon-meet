@@ -4,10 +4,10 @@ After=network-online.target
 Wants=network-online.target
 
 [Service]
-User=tta
-Environment=HOME=/home/tta
-WorkingDirectory=/home/tta/gpu-server
-ExecStart=/home/tta/venv-audio/bin/uvicorn tts_server:app --host 127.0.0.1 --port 8803
+User=@GPU_USER@
+Environment=HOME=/home/@GPU_USER@
+WorkingDirectory=/home/@GPU_USER@/gpu-server
+ExecStart=/home/@GPU_USER@/venv-audio/bin/uvicorn tts_server:app --host 127.0.0.1 --port 8803
 Restart=always
 RestartSec=5
 

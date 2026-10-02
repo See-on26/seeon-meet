@@ -51,7 +51,7 @@ def synthesize(request: SynthesisRequest):
         raise HTTPException(status_code=422, detail="합성할 텍스트가 비어 있다")
     output_path = tempfile.mktemp(suffix=".wav")
     try:
-        # speed=2.0 은 실서버(<서버 이름>)의 실제 운영값이다(2026-08-07 확인).
+        # speed=2.0 은 실시간 캡션의 운영값이다.
         # 어절당 발화 초(M-1)를 재잴 때는 반드시 이 값을 기준으로 해야 한다 —
         # renderer/core/mode/mode-policy.js 의 SPEECH_MS_PER_WORD 가 여기에 종속된다.
         tts.tts_to_file(text, speaker_id_map["KR"], output_path, speed=2.0)

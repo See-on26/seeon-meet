@@ -4,10 +4,10 @@ After=network-online.target
 Wants=network-online.target
 
 [Service]
-User=tta
-Environment=HOME=/home/tta
-WorkingDirectory=/home/tta/gpu-server
-ExecStart=/home/tta/venv-vllm/bin/uvicorn embed_server:app --host 127.0.0.1 --port 8804
+User=@GPU_USER@
+Environment=HOME=/home/@GPU_USER@
+WorkingDirectory=/home/@GPU_USER@/gpu-server
+ExecStart=/home/@GPU_USER@/venv-embed/bin/uvicorn embed_server:app --host 127.0.0.1 --port 8804
 Restart=always
 RestartSec=5
 

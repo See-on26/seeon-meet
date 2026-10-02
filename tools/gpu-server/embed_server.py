@@ -1,8 +1,8 @@
 # 임베딩 서버 — 앱이 보내는 image/jpeg 프레임을 이미지 임베딩 벡터로 반환한다.
 # Stage 1 슬라이드 전환 확정용: 후보 프레임 임베딩의 코사인 거리로 새 슬라이드/재방문을 가른다.
 # 앱 계약: POST /embed, body=image/jpeg(raw) → { embedding: [float, ...] }  (L2 정규화된 벡터)
-# 실행: cd ~/gpu-server && ~/venv-vllm/bin/uvicorn embed_server:app --host 127.0.0.1 --port 8804
-#   (venv-vllm 은 torch+transformers 를 이미 갖는다. Pillow 만 없으면 `pip install pillow`)
+# 실행: cd ~/gpu-server && ~/venv-embed/bin/uvicorn embed_server:app --host 127.0.0.1 --port 8804
+#   (venv-embed 는 setup-embed.sh 가 만든다 — torch · transformers · Pillow · FastAPI)
 import io
 
 import torch
