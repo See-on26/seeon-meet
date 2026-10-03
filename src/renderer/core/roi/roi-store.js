@@ -52,6 +52,14 @@ function readSpokeAgoMs(roi) {
   return typeof roi.spokeAgoMs === 'number' ? roi.spokeAgoMs : Number.POSITIVE_INFINITY;
 }
 
+export const SELF_MIC_STATE_MAP = { on: 'on', muted: 'muted', unknown: 'unknown' };
+
+export function resolveSelfMicState(roiList) {
+  const self = Array.isArray(roiList) ? roiList.find((roi) => roi?.isSelf) : null;
+  if (!self) return SELF_MIC_STATE_MAP.unknown;
+  return self.isMuted ? SELF_MIC_STATE_MAP.muted : SELF_MIC_STATE_MAP.on;
+}
+
 export class RoiStore {
   constructor({
     materialIou = ROI_STORE_DEFAULT_MAP.materialIou,
@@ -216,6 +224,10 @@ export class RoiStore {
         spokeAgoMs: typeof roi.spokeAgoMs === 'number' ? roi.spokeAgoMs : null,
       },
     };
+  }
+
+  getSelfMicState() {
+    return resolveSelfMicState(this.latestRoiList);
   }
 
   getCurrentSpeakerName() {

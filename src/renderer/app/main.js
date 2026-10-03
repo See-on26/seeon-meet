@@ -16,6 +16,7 @@ import { NarrationScheduler } from '../core/audio-renderer/narration-scheduler.j
 import { GapCandidateStore, resolveGapSearchFromMs } from '../core/audio-renderer/gap-candidate-store.js';
 import { isImmediateCaption, NarrationHoldGate } from '../core/audio-renderer/narration-entry.js';
 import { QuestionRecorder, RECORDER_STOP_REASON_MAP } from '../core/command/question-recorder.js';
+import { MeetMicGuard } from '../core/command/meet-mic-guard.js';
 import { CaptionNarrator } from '../core/audio-renderer/caption-narrator.js';
 import { NarrationMixer } from '../core/audio-renderer/narration-mixer.js';
 import {
@@ -1577,11 +1578,19 @@ function setMicUi(isRecording) {
   mic.setAttribute('aria-pressed', String(isRecording));
 }
 
+const meetMicGuard = new MeetMicGuard({
+  getSelfMicState: () => roiStore.getSelfMicState(),
+  toggleMeetMic: () => window.seeon.toggleMeetMic().catch(() => ({ isOk: false })),
+  notify: (text) => announce(text),
+});
+
 async function beginMicQuestionSession() {
   narrationGate.hold();
+  await meetMicGuard.muteForRecording();
 }
 
 async function endMicQuestionSession() {
+  await meetMicGuard.restoreAfterRecording();
   narrationGate.release();
 }
 

@@ -66,6 +66,7 @@ contextBridge.exposeInMainWorld('seeon', {
     return ipcRenderer.invoke('pipeline-question-audio', { buffer: new Uint8Array(buffer), startTs });
   },
   onMicToggle(callback) { ipcRenderer.on('mic-toggle', () => callback()); },
+  toggleMeetMic() { return ipcRenderer.invoke('meet-mic-toggle'); },
   inferInsertionGap(args) { return ipcRenderer.invoke('pipeline-gap', args); },
   onUserCommand(callback) { ipcRenderer.on('user-command', (_e, payload) => callback(payload)); },
   onSummaryToggle(callback) { ipcRenderer.on('summary-toggle', () => callback()); },

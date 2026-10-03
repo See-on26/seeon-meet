@@ -12,6 +12,7 @@ const { registerCommandShortcut } = require('./shortcut');
 const { registerViewerDisplayMedia } = require('./meeting/session');
 const window = require('./window');
 const { reloadMeetView, registerMeetReload } = require('./meeting/meet-reload');
+const { registerMeetMicControl } = require('./meeting/meet-mic-control');
 const { buildAppMenuTemplate, MEET_RELOAD_ACCELERATOR } = require('./app-menu');
 
 app.whenReady().then(() => {
@@ -31,6 +32,7 @@ app.whenReady().then(() => {
     getViewerView: window.getViewerView, getMeetView: window.getMeetView,
   });
   registerMeetReload({ ipcMain, getMeetView: window.getMeetView, getViewerView: window.getViewerView });
+  registerMeetMicControl({ ipcMain, getMeetView: window.getMeetView });
   Menu.setApplicationMenu(Menu.buildFromTemplate(buildAppMenuTemplate({
     onReloadMeet: () => reloadMeetView({
       getMeetView: window.getMeetView, getViewerView: window.getViewerView, reason: 'shortcut',
