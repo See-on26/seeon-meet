@@ -133,3 +133,63 @@ test('질문 답만 재생 중인 자동 해설을 끊는다', () => {
   assert.equal(shouldInterrupt({ currentEntry: answer, incomingEntry: answer }), false);
   assert.equal(shouldInterrupt({ currentEntry: null, incomingEntry: answer }), false);
 });
+
+test('늦게 들어온 전환 고지는 그 뒤에 일어난 새 슬라이드 해설을 버리지 않는다', () => {
+  const queue = new NarrationQueue({ now: createClock().now });
+  queue.push({ text: '6번 지시', narrationClass: 'deixis', slideLabel: '6', eventTimeMs: 20000 });
+  queue.push({ text: '5번 전환', narrationClass: 'page_transition', slideLabel: '5', eventTimeMs: 15000 });
+  const { entry, droppedList } = queue.takeNext();
+  assert.equal(entry.text, '5번 전환');
+  assert.deepEqual(droppedList, []);
+  assert.deepEqual(takeTextList(queue), ['6번 지시']);
+});
+
+test('전환보다 먼저 일어난 지난 슬라이드 해설은 전환 뒤에 들어와도 버린다', () => {
+  const queue = new NarrationQueue({ now: createClock().now });
+  queue.push({ text: '5번 전환', narrationClass: 'page_transition', slideLabel: '5', eventTimeMs: 15000 });
+  queue.push({ text: '3번 지시', narrationClass: 'deixis', slideLabel: '3', eventTimeMs: 12000 });
+  const { entry, droppedList } = queue.takeNext();
+  assert.equal(entry.text, '5번 전환');
+  assert.deepEqual(droppedList.map((drop) => [drop.entry.text, drop.reason]), [['3번 지시', QUEUE_DROP_REASON_MAP.slideChanged]]);
+});
+
+test('빠르게 넘긴 슬라이드는 마지막 슬라이드 고지만 남기고 지난 고지·사진 묘사는 버린다', () => {
+  const queue = new NarrationQueue({ now: createClock().now });
+  queue.push({ text: '4번 전환', narrationClass: 'page_transition', slideLabel: '4', eventTimeMs: 10000 });
+  queue.push({ text: '4번 사진 묘사', narrationClass: 'page_transition', slideLabel: '4', eventTimeMs: 10000 });
+  queue.push({ text: '5번 전환', narrationClass: 'page_transition', slideLabel: '5', eventTimeMs: 13000 });
+  queue.push({ text: '6번 전환', narrationClass: 'page_transition', slideLabel: '6', eventTimeMs: 16000 });
+  const { entry, droppedList } = queue.takeNext();
+  assert.equal(entry.text, '6번 전환');
+  assert.deepEqual(droppedList.map((drop) => drop.entry.text), ['4번 전환', '4번 사진 묘사', '5번 전환']);
+  assert.equal(queue.size, 0);
+});
+
+test('같은 슬라이드의 전환 고지와 사진 묘사는 고지 → 묘사 순서를 지킨다', () => {
+  const queue = new NarrationQueue({ now: createClock().now });
+  queue.push({ text: '6번 전환', narrationClass: 'page_transition', slideLabel: '6', eventTimeMs: 16000 });
+  queue.push({ text: '6번 사진 묘사', narrationClass: 'page_transition', slideLabel: '6', eventTimeMs: 16000 });
+  assert.deepEqual(takeTextList(queue), ['6번 전환', '6번 사진 묘사']);
+});
+
+test('다시 돌아온 슬라이드도 가장 최근 고지만 남긴다', () => {
+  const queue = new NarrationQueue({ now: createClock().now });
+  queue.push({ text: '5번 전환', narrationClass: 'page_transition', slideLabel: '5', eventTimeMs: 10000 });
+  queue.push({ text: '6번 전환', narrationClass: 'page_transition', slideLabel: '6', eventTimeMs: 14000 });
+  queue.push({ text: '5번 복귀', narrationClass: 'page_transition', slideLabel: '5', eventTimeMs: 18000 });
+  const { entry, droppedList } = queue.takeNext();
+  assert.equal(entry.text, '5번 복귀');
+  assert.deepEqual(droppedList.map((drop) => drop.entry.text), ['5번 전환', '6번 전환']);
+});
+
+test('회의가 멈춰 있던 시간은 기다린 시간에 넣지 않는다', () => {
+  const clock = createClock();
+  let pausedMs = 0;
+  const queue = new NarrationQueue({ now: clock.now, getPausedMs: () => pausedMs });
+  queue.push({ text: '지시', narrationClass: 'deixis' });
+  clock.nowMs += 12000;
+  pausedMs += 10000;
+  const { entry, droppedList } = queue.takeNext();
+  assert.equal(entry.text, '지시');
+  assert.deepEqual(droppedList, []);
+});

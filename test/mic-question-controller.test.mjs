@@ -96,3 +96,59 @@ test('정지 요청은 녹음 중이면 바로, 시작 중이면 시작 직후 �
   await starting;
   assert.equal(second.recorder.cancelCount, 1);
 });
+
+test('녹음을 마치면 답이 나올 때까지 보류를 유지하고, 답 처리가 끝난 뒤 푼다', async () => {
+  const log = [];
+  const answerBlock = deferred();
+  const controller = new MicQuestionController({
+    recorder: { async start() { return true; }, toggle() {}, cancel() {} },
+    canStart: () => true,
+    beginSession: async () => log.push('begin'),
+    endSession: async ({ isAwaitingAnswer = false } = {}) => log.push(`end:${isAwaitingAnswer}`),
+    announce: () => {},
+    setUi: () => {},
+    onQuestionAudio: async () => { log.push('answer-start'); await answerBlock.promise; log.push('answer-done'); },
+    onAnswerSettled: () => log.push('settled'),
+  });
+  await controller.toggle();
+  const finishing = controller.handleFinish({ buffer: 'b', startTs: 1 });
+  await new Promise((r) => { setImmediate(r); });
+  assert.deepEqual(log, ['begin', 'end:true', 'answer-start']);
+  answerBlock.resolve();
+  await finishing;
+  assert.deepEqual(log, ['begin', 'end:true', 'answer-start', 'answer-done', 'settled']);
+});
+
+test('답 처리가 실패해도 보류를 푼다', async () => {
+  const log = [];
+  const controller = new MicQuestionController({
+    recorder: { async start() { return true; }, toggle() {}, cancel() {} },
+    canStart: () => true,
+    beginSession: async () => {},
+    endSession: async () => {},
+    announce: () => {},
+    setUi: () => {},
+    onQuestionAudio: async () => { throw new Error('asr down'); },
+    onAnswerSettled: () => log.push('settled'),
+  });
+  await controller.toggle();
+  await assert.rejects(controller.handleFinish({ buffer: 'b', startTs: 1 }));
+  assert.deepEqual(log, ['settled']);
+});
+
+test('녹음을 취소하면 답을 기다리지 않고 바로 보류를 푼다', async () => {
+  const log = [];
+  const controller = new MicQuestionController({
+    recorder: { async start() { return true; }, toggle() {}, cancel() {} },
+    canStart: () => true,
+    beginSession: async () => {},
+    endSession: async ({ isAwaitingAnswer = false } = {}) => log.push(`end:${isAwaitingAnswer}`),
+    announce: () => {},
+    setUi: () => {},
+    onQuestionAudio: async () => {},
+    onAnswerSettled: () => log.push('settled'),
+  });
+  await controller.toggle();
+  await controller.handleCancel({ reason: 'no_voice' });
+  assert.deepEqual(log, ['end:false']);
+});

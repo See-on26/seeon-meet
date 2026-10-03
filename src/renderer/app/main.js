@@ -90,7 +90,10 @@ const narrator = new CaptionNarrator({
 let narrationMixer = null;
 
 const getNarrationPlayer = () => narrationMixer || narrator;
-const narrationGate = new NarrationHoldGate({ deliver: (entry) => getNarrationPlayer()?.queueCaption(entry) });
+const narrationGate = new NarrationHoldGate({
+  deliver: (entry) => getNarrationPlayer()?.queueCaption(entry),
+  deliverList: (entryList) => getNarrationPlayer()?.queueCaptionList(entryList),
+});
 const audioMeter = new AudioMeter();
 
 function markDebug({ stage, verdict, reason, detail = '', narrationType = null }) {
@@ -1236,7 +1239,7 @@ async function emitCaption(payload, { leaderHandle = null } = {}) {
     wavArrayBuffer: payload.wavData.buffer.slice(
       payload.wavData.byteOffset, payload.wavData.byteOffset + payload.wavData.byteLength),
     narrationClass: payload.narrationClass, slideLabel: payload.slideLabel ?? null,
-    source: payload.source, text: payload.text,
+    source: payload.source, text: payload.text, ts: payload.ts, eventTimeMs: captionCaptureMs,
   };
   if (isImmediateCaption(payload)) {
     leaderHandle?.settle({ status: LEADER_STATUS_MAP.unscheduled });
@@ -1321,8 +1324,12 @@ function scheduleNarration({ entry, captionCaptureMs }) {
   narrationScheduler.schedule({ entry, captionCaptureMs });
 }
 
-// 재생 대기 줄에서 버려지거나 질문 답에 끊긴 해설. main 기록에는 재생된 해설로 남아 있다.
+// 재생 대기 줄에서 버려지거나 질문 답에 끊긴 해설. main 이 중복 억제·재설명 금지 기록을 되돌리게 알린다.
 function handleNarrationDrop({ entry, reason, waitedMs = null }) {
+  window.seeon.reportNarrationDropped({
+    ts: entry.ts, text: entry.text, slideLabel: entry.slideLabel, source: entry.source,
+    narrationClass: entry.narrationClass, reason,
+  });
   const label = QUEUE_DROP_LABEL_MAP[reason] || reason;
   const waitedText = Number.isFinite(waitedMs) ? ` · 대기 ${(waitedMs / 1000).toFixed(1)}초` : '';
   console.log(`[queue] ${label} [${entry.narrationClass}] "${entry.text}"${waitedText}`);
@@ -1717,9 +1724,17 @@ async function beginMicQuestionSession() {
   await meetMicGuard.muteForRecording();
 }
 
-async function endMicQuestionSession() {
+// 녹음을 마친 경우는 답이 나온 뒤(releaseMicAnswerHold) 보류를 푼다. 취소면 바로 푼다.
+async function endMicQuestionSession({ isAwaitingAnswer = false } = {}) {
   await meetMicGuard.restoreAfterRecording();
-  narrationGate.release();
+  if (!isAwaitingAnswer) narrationGate.release();
+}
+
+// 음성 인식·답 생성이 멈춰도 자동 해설이 계속 막히지 않게 답을 기다리는 시간에 상한을 둔다.
+const MIC_ANSWER_HOLD_MAX_MS = 20000;
+
+function askQuestionFromAudioWithinHold(event) {
+  return Promise.race([askQuestionFromAudio(event), waitFor({ ms: MIC_ANSWER_HOLD_MAX_MS })]);
 }
 
 async function askQuestionFromAudio({ buffer, startTs }) {
@@ -1748,7 +1763,8 @@ micQuestionController = new MicQuestionController({
   endSession: endMicQuestionSession,
   announce,
   setUi: setMicUi,
-  onQuestionAudio: askQuestionFromAudio,
+  onQuestionAudio: askQuestionFromAudioWithinHold,
+  onAnswerSettled: () => narrationGate.release(),
 });
 
 $('cmdMic').addEventListener('click', () => { micQuestionController.toggle(); });

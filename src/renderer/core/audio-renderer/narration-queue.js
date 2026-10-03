@@ -41,8 +41,8 @@ function isPageTransition(entry) {
   return entry.narrationClass === NARRATION_CLASS_MAP.pageTransition;
 }
 
-// 전환 고지는 순위가 가장 높아 앞 해설 하나만 기다리지만, 품질 모드 해설은 최대 12초라 시간으로 버리면 고지를 놓친다.
-// 지난 슬라이드의 고지는 다음 슬라이드 고지가 꺼내질 때 슬라이드가 달라 버려진다.
+// 전환 고지는 순위가 가장 높아 앞 해설 하나만 기다리므로 시간으로 버리지 않는다.
+// 지난 슬라이드 고지는 다른 슬라이드의 더 늦은 고지가 있을 때 버려 쌓이지 않는다(takeNext).
 function isExpirable(entry) {
   return !isImmediateCaption(entry) && !isPageTransition(entry);
 }
@@ -55,32 +55,56 @@ function isOtherSlide({ entry, slideEntry }) {
   return hasSlideLabel(entry) && String(entry.slideLabel) !== String(slideEntry.slideLabel);
 }
 
+// 전환 고지는 체류 판정·생성 시간 때문에 늦게 들어온다. 앞뒤는 들어온 순서가 아니라 사건 시각(eventTimeMs)으로 가린다.
+function isEarlierEvent({ entry, than }) {
+  if (Number.isFinite(entry.eventTimeMs) && Number.isFinite(than.eventTimeMs)) {
+    return entry.eventTimeMs < than.eventTimeMs;
+  }
+  return entry.seq < than.seq;
+}
+
+// 다른 슬라이드의 더 늦은 고지가 있으면 이 고지(딸린 사진 묘사 포함)는 이미 지나간 화면이다.
+function isSupersededTransition({ entry, transitionList }) {
+  return hasSlideLabel(entry) && transitionList.some((other) => hasSlideLabel(other)
+    && isOtherSlide({ entry: other, slideEntry: entry }) && isEarlierEvent({ entry, than: other }));
+}
+
 function compareEntry(left, right) {
   return readNarrationPriority(left) - readNarrationPriority(right) || left.seq - right.seq;
 }
 
+function pickFirst(entryList) {
+  return entryList.reduce((best, entry) => (compareEntry(entry, best) < 0 ? entry : best));
+}
+
 export class NarrationQueue {
-  constructor({ ttlMs = NARRATION_QUEUE_TTL_MS, now = () => performance.now() } = {}) {
+  // getPausedMs: 해설 때문에 회의가 멈춰 있던 누적 시간. 교차 모드는 그동안 재생 위치가 서 있어 기다린 시간에 넣지 않는다.
+  constructor({ ttlMs = NARRATION_QUEUE_TTL_MS, now = () => performance.now(), getPausedMs = () => 0 } = {}) {
     this.ttlMs = ttlMs;
     this.now = now;
+    this.getPausedMs = getPausedMs;
     this.entryList = [];
     this.nextSeq = 0;
   }
 
   push(entry) {
     const dueAt = Number.isFinite(entry.dueAt) ? entry.dueAt : this.now();
-    this.entryList.push({ ...entry, dueAt, seq: this.nextSeq });
+    this.entryList.push({ ...entry, dueAt, pausedMsAtPush: this.getPausedMs(), seq: this.nextSeq });
     this.nextSeq += 1;
+  }
+
+  readWaitedMs({ entry, nowTs }) {
+    return nowTs - entry.dueAt - (this.getPausedMs() - entry.pausedMsAtPush);
   }
 
   takeNext() {
     const nowTs = this.now();
     const droppedList = [];
+    const drop = ({ entry, reason }) => droppedList.push({ entry, reason, waitedMs: this.readWaitedMs({ entry, nowTs }) });
     let aliveList = [];
     for (const entry of this.entryList) {
-      const waitedMs = nowTs - entry.dueAt;
-      if (isExpirable(entry) && waitedMs > this.ttlMs) {
-        droppedList.push({ entry, reason: QUEUE_DROP_REASON_MAP.expired, waitedMs });
+      if (isExpirable(entry) && this.readWaitedMs({ entry, nowTs }) > this.ttlMs) {
+        drop({ entry, reason: QUEUE_DROP_REASON_MAP.expired });
       } else {
         aliveList.push(entry);
       }
@@ -90,21 +114,27 @@ export class NarrationQueue {
       return { entry: null, droppedList };
     }
 
-    const next = aliveList.reduce((best, entry) => (compareEntry(entry, best) < 0 ? entry : best));
-    aliveList = aliveList.filter((entry) => entry !== next);
-    // 전환 고지가 앞질러 나가면 그보다 먼저 들어온 지난 슬라이드 해설은 새 슬라이드 설명처럼 들린다.
-    if (isPageTransition(next) && hasSlideLabel(next)) {
-      const keptList = [];
-      for (const entry of aliveList) {
-        if (entry.seq < next.seq && !isImmediateCaption(entry) && isOtherSlide({ entry, slideEntry: next })) {
-          droppedList.push({ entry, reason: QUEUE_DROP_REASON_MAP.slideChanged, waitedMs: nowTs - entry.dueAt });
-        } else {
-          keptList.push(entry);
+    let next = pickFirst(aliveList);
+    if (isPageTransition(next)) {
+      const transitionList = aliveList.filter(isPageTransition);
+      const supersededList = transitionList.filter((entry) => isSupersededTransition({ entry, transitionList }));
+      for (const entry of supersededList) drop({ entry, reason: QUEUE_DROP_REASON_MAP.slideChanged });
+      aliveList = aliveList.filter((entry) => !supersededList.includes(entry));
+      // 남은 고지는 같은 슬라이드다. 고지 → 딸린 사진 묘사 순서는 들어온 순서로 지킨다.
+      next = pickFirst(aliveList.filter(isPageTransition));
+      // 새 슬라이드 고지보다 먼저 일어난 다른 슬라이드 해설은 고지 뒤에 들으면 새 슬라이드 설명처럼 들린다.
+      if (hasSlideLabel(next)) {
+        const keptList = [];
+        for (const entry of aliveList) {
+          const isStale = entry !== next && !isImmediateCaption(entry)
+            && isOtherSlide({ entry, slideEntry: next }) && isEarlierEvent({ entry, than: next });
+          if (isStale) drop({ entry, reason: QUEUE_DROP_REASON_MAP.slideChanged });
+          else keptList.push(entry);
         }
+        aliveList = keptList;
       }
-      aliveList = keptList;
     }
-    this.entryList = aliveList;
+    this.entryList = aliveList.filter((entry) => entry !== next);
     return { entry: next, droppedList };
   }
 

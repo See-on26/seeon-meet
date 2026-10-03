@@ -82,6 +82,17 @@ function registerPipeline({ getViewerView }) {
   const routerClient = createUnifiedRouter({ config });
   const isRouterMode = config.routerMode === ROUTER_MODE_MAP.unified;
   const describedStore = createDescribedStore();
+  // 캡션별로 재설명 금지 목록에 넣은 요소. 렌더러가 그 캡션을 재생하지 않고 버리면 되돌린다.
+  const describedByCaptionMap = new Map();
+  const DESCRIBED_BY_CAPTION_LIMIT = 100;
+
+  function addCaptionDescribed({ ts, text, slideLabel, elementList }) {
+    describedStore.addDescribed(slideLabel, elementList);
+    describedByCaptionMap.set(`${ts}|${text}`, { slideLabel, elementList });
+    if (describedByCaptionMap.size > DESCRIBED_BY_CAPTION_LIMIT) {
+      describedByCaptionMap.delete(describedByCaptionMap.keys().next().value);
+    }
+  }
   const screenRegistry = createScreenRegistry();
   const slideTopicRegistry = createSlideTopicRegistry();
   const speakerRegistry = createSpeakerRegistry();
@@ -282,6 +293,7 @@ function registerPipeline({ getViewerView }) {
 
   ipcMain.handle('pipeline-session-start', async (_event, { mode = '' } = {}) => {
     describedStore.reset();
+    describedByCaptionMap.clear();
     screenRegistry.reset();
     slideTopicRegistry.reset();
     speakerRegistry.reset();
@@ -440,11 +452,10 @@ function registerPipeline({ getViewerView }) {
         });
         return { isOk: true, narration: '', isEmitted: false };
       }
-      describedStore.addDescribed(slideLabel, result.describedElementList);
-
       const narration = result.screenType === 'ppt' && displayNumber
         ? `슬라이드 ${displayNumber}: ${result.narration}`
         : result.narration;
+      addCaptionDescribed({ ts, text: narration, slideLabel, elementList: result.describedElementList });
       await appendRecord({
         kind: RECORD_KIND_MAP.pageTransition, ts, slideLabel, screenType: result.screenType,
         narration, describedElementList: result.describedElementList,
@@ -476,7 +487,7 @@ function registerPipeline({ getViewerView }) {
             describedElementList: describedStore.getDescribed(slideLabel),
           });
           if (visual.isGrounded && visual.text) {
-            describedStore.addDescribed(slideLabel, [visual.text]);
+            addCaptionDescribed({ ts, text: visual.text, slideLabel, elementList: [visual.text] });
             await appendRecord({
               kind: RECORD_KIND_MAP.deixis, ts, utterance: '', caption: visual.text, isGrounded: true,
               slideLabel, narrationType: NARRATION_TYPE_MAP.visualDescription,
@@ -613,6 +624,23 @@ function registerPipeline({ getViewerView }) {
   });
 
   // 무발화(4-1): 발표자가 화면을 보라고 한 뒤 5초 이상 침묵하면 화면을 묘사한다. 애매하면 내지 않는다.
+  // 렌더러 재생 대기 줄이 버리거나 질문 답이 끊은 해설. 듣지 못했으므로 중복 억제·재설명 금지 기록을 되돌린다.
+  ipcMain.on('pipeline-narration-dropped', (_event, { ts, text, slideLabel = null, reason = '' } = {}) => {
+    const isForgotten = narrationHistory.forget({ ts, text });
+    const key = `${ts}|${text}`;
+    const described = describedByCaptionMap.get(key);
+    if (described) {
+      describedStore.removeDescribed(described.slideLabel, described.elementList);
+      describedByCaptionMap.delete(key);
+    }
+    markDebug({
+      stage: DEBUG_STAGE_MAP.queue, verdict: DEBUG_VERDICT_MAP.info, ts,
+      reason: '재생 안 된 해설을 중복·재설명 기록에서 지움',
+      detail: `"${text}" · 사유=${reason} · 슬라이드 ${slideLabel ?? '-'}`
+        + ` · 중복 기록 ${isForgotten ? '지움' : '없음'} · 재설명 금지 ${described ? `${described.elementList.length}개 뺌` : '없음'}`,
+    });
+  });
+
   ipcMain.handle('pipeline-silence', async (_event, {
     ts, buffer, slideLabel, recentTranscript = '', silenceMs = 0, wordBudget = null, eventVideoTimeMs = null,
   }) => {
@@ -640,7 +668,7 @@ function registerPipeline({ getViewerView }) {
             summary: `발표자가 화면을 보라고 한 뒤 ${silenceSec}초 침묵`,
           },
         });
-        if (sent.isEmitted) describedStore.addDescribed(slideLabel, [text]);
+        if (sent.isEmitted) addCaptionDescribed({ ts, text, slideLabel, elementList: [text] });
         return sent;
       },
     });
@@ -874,7 +902,7 @@ function registerPipeline({ getViewerView }) {
         detail: `발화="${utterance}" → "${text}" (${Date.now() - startedAt}ms, 예산 ${wordBudget?.minWordCount ?? '-'}~${wordBudget?.maxWordCount ?? '-'}어절)`,
       });
 
-      describedStore.addDescribed(slideLabel, [text]);
+      addCaptionDescribed({ ts, text, slideLabel, elementList: [text] });
       console.log(`[pipeline] ${narrationType} 캡션 (${Date.now() - startedAt}ms) "${truncateForLog(utterance, 20)}" → "${truncateForLog(text)}"`);
 
       stage = PIPELINE_STAGE_MAP.tts;

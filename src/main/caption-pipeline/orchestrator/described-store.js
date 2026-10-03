@@ -28,6 +28,14 @@ function createDescribedStore() {
     while (list.length > MAX_ELEMENT_PER_SLIDE) list.shift();
   }
 
+  function removeDescribed(slideLabel, elementList) {
+    const key = toMajorKey(slideLabel) || currentSlideKey;
+    const list = key ? elementListBySlideMap.get(key) : null;
+    if (!list) return;
+    const removeSet = new Set((elementList || []).map((element) => (typeof element === 'string' ? element.trim() : '')));
+    elementListBySlideMap.set(key, list.filter((element) => !removeSet.has(element)));
+  }
+
   function getDescribed(slideLabel) {
     const key = toMajorKey(slideLabel) || currentSlideKey;
     return key && elementListBySlideMap.has(key) ? [...elementListBySlideMap.get(key)] : [];
@@ -38,7 +46,7 @@ function createDescribedStore() {
     currentSlideKey = null;
   }
 
-  return { setCurrentSlide, addDescribed, getDescribed, reset };
+  return { setCurrentSlide, addDescribed, removeDescribed, getDescribed, reset };
 }
 
 module.exports = { createDescribedStore };

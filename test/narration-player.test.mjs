@@ -223,3 +223,60 @@ test('교차 모드: stop 은 줄인 회의 소리를 되돌린다', async () =>
   narrator.stop();
   assert.equal(video.volume, 1.0);
 });
+
+test('동시 모드: 한꺼번에 넣은 해설은 첫 항목부터 틀지 않고 우선순위대로 재생한다', async () => {
+  const { mixer, sourceList } = createMixer();
+  mixer.queueCaptionList([
+    makeEntry({ id: '화자', narrationClass: 'speaker_identity' }),
+    makeEntry({ id: '전환', narrationClass: 'page_transition' }),
+    makeEntry({ id: '지시' }),
+  ]);
+  await flush();
+  assert.deepEqual(startedIdList(sourceList), ['전환']);
+});
+
+test('교차 모드: 한꺼번에 넣은 해설 안에 질문 답이 있으면 재생 중인 자동 해설을 끊는다', async () => {
+  const { narrator, sourceList } = createNarrator();
+  narrator.queueCaption(makeEntry({ id: '지시' }));
+  await flush();
+  narrator.queueCaptionList([makeEntry({ id: '발화', narrationClass: 'speech_based' }), makeEntry({ id: '답', narrationClass: 'user_command' })]);
+  await flush();
+  assert.equal(sourceList[0].isStopped, true);
+  assert.deepEqual(startedIdList(sourceList), ['지시', '답']);
+});
+
+test('교차 모드: 자동 해설로 회의가 멈춘 동안은 대기 시간에 세지 않는다', async () => {
+  const clock = { nowMs: 0 };
+  const { context, sourceList } = createFakeAudioContext();
+  const video = createVideo();
+  const dropList = [];
+  const narrator = new CaptionNarrator({
+    getLiveVideo: () => video, createAudioContext: () => context, isCatchupDelegated: () => true,
+    onDrop: (drop) => dropList.push(drop), now: () => clock.nowMs,
+  });
+  narrator.start(fakeStream);
+  narrator.queueCaption({ ...makeEntry({ id: '긴 해설', durationSec: 12 }), dueAt: 0 });
+  await flush();
+  narrator.queueCaption({ ...makeEntry({ id: '같은 지점 지시' }), dueAt: 0 });
+  clock.nowMs = 12000;
+  sourceList[0].onended();
+  await flush();
+  assert.deepEqual(startedIdList(sourceList), ['긴 해설', '같은 지점 지시']);
+  assert.deepEqual(dropList, []);
+});
+
+test('동시 모드: 회의가 멈추지 않으므로 앞 해설을 기다린 시간이 8초를 넘으면 버린다', async () => {
+  const clock = { nowMs: 0 };
+  const { context, sourceList } = createFakeAudioContext();
+  const dropList = [];
+  const mixer = new NarrationMixer({ createAudioContext: () => context, onDrop: (drop) => dropList.push(drop), now: () => clock.nowMs });
+  mixer.start(fakeStream);
+  mixer.queueCaption({ ...makeEntry({ id: '긴 해설', durationSec: 12 }), dueAt: 0 });
+  await flush();
+  mixer.queueCaption({ ...makeEntry({ id: '같은 지점 지시' }), dueAt: 0 });
+  clock.nowMs = 12000;
+  sourceList[0].onended();
+  await flush();
+  assert.deepEqual(startedIdList(sourceList), ['긴 해설']);
+  assert.equal(dropList[0].reason, QUEUE_DROP_REASON_MAP.expired);
+});

@@ -71,11 +71,18 @@ export class NarrationMixer {
     return createSidePanner({ audioContext: this.audioContext, positionX });
   }
 
-  // entry: { wavArrayBuffer, narrationClass, slideLabel, text, dueAt }
+  // entry: { wavArrayBuffer, narrationClass, slideLabel, text, ts, eventTimeMs, dueAt }
   queueCaption(entry) {
-    if (!this.audioContext) return;
-    this.queue.push(entry);
-    if (shouldInterrupt({ currentEntry: this.currentEntry, incomingEntry: entry })) {
+    this.queueCaptionList([entry]);
+  }
+
+  // 여러 해설을 한꺼번에 넣은 뒤 한 번만 꺼낸다. 하나씩 넣으면 첫 항목이 순위 비교 없이 바로 재생된다.
+  queueCaptionList(entryList) {
+    if (!this.audioContext || !entryList.length) return;
+    for (const entry of entryList) this.queue.push(entry);
+    const isInterrupting = entryList.some(
+      (entry) => shouldInterrupt({ currentEntry: this.currentEntry, incomingEntry: entry }));
+    if (isInterrupting) {
       this.interruptCurrent();
       return;
     }

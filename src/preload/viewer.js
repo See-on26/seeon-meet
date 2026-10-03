@@ -85,4 +85,5 @@ contextBridge.exposeInMainWorld('seeon', {
   generateSummary() { return ipcRenderer.invoke('summary-generate'); },
   onSummaryProgress(callback) { ipcRenderer.on('summary-progress', (_e, payload) => callback(payload)); },
   appendDebugLog(entry) { ipcRenderer.send('pipeline-debug', entry); },
+  reportNarrationDropped(payload) { ipcRenderer.send('pipeline-narration-dropped', payload); },
 });

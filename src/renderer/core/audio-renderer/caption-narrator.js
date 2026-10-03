@@ -18,6 +18,7 @@ export class CaptionNarrator {
     this.onStatus = onStatus || (() => {});
     this.onDrop = onDrop || (() => {});
     this.createAudioContext = createAudioContext;
+    this.now = now;
     this.getRateRange = getRateRange
       || (() => ({ rateMin: SIC_CATCHUP_MIN_RATE, rateMax: SIC_CATCHUP_MAX_RATE }));
     this.isCatchupDelegated = isCatchupDelegated || (() => false);
@@ -30,7 +31,9 @@ export class CaptionNarrator {
     this.currentEntry = null;
     this.currentStartSec = 0;
     this.playToken = 0;
-    this.queue = new NarrationQueue({ now });
+    this.pausedTotalMs = 0;
+    this.pauseStartedAt = null;
+    this.queue = new NarrationQueue({ now, getPausedMs: () => this.readPausedMs() });
     // isInserting: 자동 해설 때문에 회의 영상을 멈춘 상태. isOverlaying: 질문 답을 회의 소리를 줄인 채 겹쳐 트는 상태.
     this.isInserting = false;
     this.isOverlaying = false;
@@ -68,6 +71,7 @@ export class CaptionNarrator {
     this.currentSource = null;
     this.currentEntry = null;
     this.queue.clear();
+    this._closePause();
     this.isInserting = false;
     this.isOverlaying = false;
     this.narratedSec = 0;
@@ -83,15 +87,28 @@ export class CaptionNarrator {
     this.onStatus('');
   }
 
-  // entry: { wavArrayBuffer, narrationClass, slideLabel, text, dueAt }
+  // entry: { wavArrayBuffer, narrationClass, slideLabel, text, ts, eventTimeMs, dueAt }
   queueCaption(entry) {
-    if (!this.audioContext) return;
-    this.queue.push(entry);
-    if (shouldInterrupt({ currentEntry: this.currentEntry, incomingEntry: entry })) {
+    this.queueCaptionList([entry]);
+  }
+
+  // 여러 해설을 한꺼번에 넣은 뒤 한 번만 꺼낸다. 하나씩 넣으면 첫 항목이 순위 비교 없이 바로 재생된다.
+  queueCaptionList(entryList) {
+    if (!this.audioContext || !entryList.length) return;
+    for (const entry of entryList) this.queue.push(entry);
+    const isInterrupting = entryList.some(
+      (entry) => shouldInterrupt({ currentEntry: this.currentEntry, incomingEntry: entry }));
+    if (isInterrupting) {
       this._interruptCurrent();
       return;
     }
     if (!this.currentEntry) this._beginNext();
+  }
+
+  // 자동 해설 때문에 회의 영상을 멈춘 누적 시간. 그동안 재생 위치가 서 있으므로 대기 줄은 기다린 시간에서 뺀다.
+  readPausedMs() {
+    const runningMs = this.pauseStartedAt === null ? 0 : this.now() - this.pauseStartedAt;
+    return this.pausedTotalMs + runningMs;
   }
 
   // 끊기거나 멈춘 재생의 비동기 디코딩·ended 가 늦게 와도 다음 재생을 건드리지 않게 재생마다 표를 나눠 준다.
@@ -153,6 +170,7 @@ export class CaptionNarrator {
     if (this.isOverlaying) this._leaveOverlay();
     if (this.isInserting) return;
     this.isInserting = true;
+    this.pauseStartedAt = this.now();
     this.narratedSec = 0;
     this._cancelCatchup();
     const video = this.getLiveVideo();
@@ -161,6 +179,7 @@ export class CaptionNarrator {
 
   _endInsertion() {
     this.isInserting = false;
+    this._closePause();
     const narratedSec = this.narratedSec;
     this.narratedSec = 0;
     this._startCatchup(narratedSec);
@@ -210,6 +229,12 @@ export class CaptionNarrator {
       this.catchupTimer = null;
       this.onStatus('');
     }, catchupMs);
+  }
+
+  _closePause() {
+    if (this.pauseStartedAt === null) return;
+    this.pausedTotalMs += this.now() - this.pauseStartedAt;
+    this.pauseStartedAt = null;
   }
 
   _cancelCatchup() {

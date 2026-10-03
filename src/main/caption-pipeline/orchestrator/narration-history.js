@@ -137,6 +137,13 @@ function createNarrationHistory({
     while (entryList.length > maxEntry) entryList.shift();
   }
 
+  // 렌더러가 재생하지 않고 버린 해설. 듣지 못한 해설이 같은 대상의 다음 해설을 중복으로 막지 않게 지운다.
+  function forget({ ts, text }) {
+    const beforeCount = entryList.length;
+    entryList = entryList.filter((entry) => !(entry.ts === ts && entry.text === text));
+    return entryList.length < beforeCount;
+  }
+
   function reset() {
     entryList = [];
   }
@@ -149,7 +156,7 @@ function createNarrationHistory({
     return entryList.slice(-limit).map((entry) => entry.text);
   }
 
-  return { findDuplicate, findRateLimited, remember, reset, getEntryList, getRecentTextList };
+  return { findDuplicate, findRateLimited, remember, forget, reset, getEntryList, getRecentTextList };
 }
 
 module.exports = {
