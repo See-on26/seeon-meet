@@ -60,3 +60,11 @@ test('어절 예산이 하한에 못 미치면 보내지 않는다', () => {
     { isReady: false, reason: SILENCE_SKIP_REASON_MAP.budget },
   );
 });
+
+test('마이크 질문·일시정지 중에는 세지 않고, 끝난 뒤 새 말소리부터 다시 센다', () => {
+  const trigger = new SilenceTrigger();
+  assert.equal(trigger.update({ nowPerf: 3000, lastHeardAt: 1000, isSuspended: true }), false);
+  assert.equal(trigger.update({ nowPerf: 9000, lastHeardAt: 1000, isSuspended: true }), false);
+  assert.equal(trigger.update({ nowPerf: 9100, lastHeardAt: 1000 }), false);
+  assert.equal(trigger.update({ nowPerf: 16000, lastHeardAt: 10000 }), true);
+});

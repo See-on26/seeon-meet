@@ -16,7 +16,7 @@ import { DelayBuffer, isCaptionDroppable, EXCESS_DROP_MS } from '../core/audio-r
 import { StreamDelaySource } from '../core/audio-renderer/stream-delay-source.js';
 import { NarrationScheduler } from '../core/audio-renderer/narration-scheduler.js';
 import { GapCandidateStore, resolveGapSearchFromMs } from '../core/audio-renderer/gap-candidate-store.js';
-import { isImmediateCaption, NarrationHoldGate } from '../core/audio-renderer/narration-entry.js';
+import { isImmediateCaption, isAnchoredCaption, NarrationHoldGate } from '../core/audio-renderer/narration-entry.js';
 import { QuestionRecorder } from '../core/command/question-recorder.js';
 import { MeetMicGuard } from '../core/command/meet-mic-guard.js';
 import { MicQuestionController, MIC_PHASE_MAP } from '../core/command/mic-question-controller.js';
@@ -1239,7 +1239,7 @@ async function emitCaption(payload, { leaderHandle = null } = {}) {
   }
   const insertVideoTimeMs = isFollower
     ? resolveFollowerInsertMs({ eventVideoTimeMs: captionCaptureMs, leader })
-    : await resolveInsertionTimeMs({ payload, captionCaptureMs });
+    : isAnchoredCaption(payload) ? captionCaptureMs : await resolveInsertionTimeMs({ payload, captionCaptureMs });
   leaderHandle?.settle({ status: LEADER_STATUS_MAP.scheduled, insertVideoTimeMs });
   if (insertVideoTimeMs === null) return;
   scheduleNarration({ wavArrayBuffer, captionCaptureMs: insertVideoTimeMs });
@@ -1332,8 +1332,7 @@ setInterval(() => {
   // 해설 재생 구간은 lastSpeechBlindAt 으로 말소리가 이어진 것으로 본다. 그래서 해설이 끝난 뒤부터 무음을 센다.
   const lastHeardAt = Math.max(lastAudioActiveAt, lastSpeechBlindAt);
   const isMicQuestionActive = Boolean(micQuestionController) && micQuestionController.phase !== MIC_PHASE_MAP.idle;
-  if (isExperimentPaused || isMicQuestionActive) return;
-  if (silenceTrigger.update({ nowPerf, lastHeardAt })) {
+  if (silenceTrigger.update({ nowPerf, lastHeardAt, isSuspended: isExperimentPaused || isMicQuestionActive })) {
     handleSilenceTrigger({ silenceMs: nowPerf - lastHeardAt }).catch((error) => {
       console.warn('[silence] 무발화 처리 오류', error);
     });
@@ -1342,6 +1341,7 @@ setInterval(() => {
 
 async function handleSilenceTrigger({ silenceMs }) {
   if (!isPipelineEnabled()) return;
+  const sessionSeq = experimentSeq;
   const slideLabel = slideRegistry.currentLabel();
   const recentTranscript = transcriptWindow.getBefore({
     nowTs: performance.now(), windowMs: SILENCE_TRANSCRIPT_WINDOW_MS,
@@ -1360,6 +1360,8 @@ async function handleSilenceTrigger({ silenceMs }) {
     return;
   }
   const buffer = await captureFrameJpeg();
+  // 캡처를 기다리는 사이 정지·재시작했으면 이전 세션의 무음이라 보내지 않는다.
+  if (!captureSource.isActive || sessionSeq !== experimentSeq || isExperimentPaused) return;
   if (!buffer) {
     markDebug({
       stage: DEBUG_STAGE_MAP.silence, verdict: DEBUG_VERDICT_MAP.skip,

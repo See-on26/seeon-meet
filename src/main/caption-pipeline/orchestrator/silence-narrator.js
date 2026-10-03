@@ -5,22 +5,38 @@ const {
 const DESCRIPTION_PREFIX = '이미지 제시';
 const DESCRIPTION_PREFIX_PATTERN = /^\s*이미지 제시\s*,?\s*/;
 const MIN_DESCRIPTION_WORD_COUNT = 3;
-// "사진들이" → "사진이": 복수 '들'을 떼야 뒤 조사까지 떼어 자료 명사 지점을 찾을 수 있다.
+// "사진들이" → "사진이": 복수 '들'을 떼야 뒤 조사까지 떼어 자료 명사 지점을 찾을 수 있다. 낱말 하나에만 쓴다.
 const PLURAL_TAIL_NOUN_PATTERN = new RegExp(
-  `(${DESCRIPTION_TAIL_NOUN_LIST.join('|')})들(?=(?:으로|이|가|을|를|은|는|과|와|의|에|도|로)?(?:\\s|$))`, 'g',
+  `(${DESCRIPTION_TAIL_NOUN_LIST.join('|')})들((?:으로|이|가|을|를|은|는|과|와|의|에|도|로)?)$`,
 );
+const TRAILING_PUNCTUATION_PATTERN = /[\s.,!?…·]+$/;
 // VLM 이 형식 예시를 흉내 내 "타임라인 제시, …"처럼 머리말을 직접 쓰는 경우.
 const SELF_PREFIX_PATTERN = /^[^,]{1,20}?\s*제시\s*,\s*/;
+
+function countWordOf(phrase) {
+  return phrase.split(/\s+/).filter(Boolean).length;
+}
+
+// 자료 명사 지점까지 자른다. 끝 판정에만 복수형을 낱말별로 정리한 사본을 쓰고,
+// 잘린 지점 앞 낱말은 원문 그대로 둔다("그래프들이 나란히 놓인 비교 화면"의 조사를 깨지 않기 위해서다).
+function cutAtMaterialNoun({ body }) {
+  if (hasCompleteTailNoun({ text: body })) return body;
+  const wordList = body.split(/\s+/).filter(Boolean);
+  const normalizedText = wordList.map((word) => word.replace(PLURAL_TAIL_NOUN_PATTERN, '$1$2')).join(' ');
+  const normalizedCut = hasCompleteTailNoun({ text: normalizedText })
+    ? normalizedText
+    : cutAtTailNoun({ text: normalizedText, maxWordCount: wordList.length, minWordCount: MIN_DESCRIPTION_WORD_COUNT });
+  if (!normalizedCut) return null;
+  const cutWordList = normalizedCut.split(' ');
+  return [...wordList.slice(0, cutWordList.length - 1), cutWordList[cutWordList.length - 1]].join(' ');
+}
 
 // 무발화 해설은 "보라고 한 자료"를 알려 주는 것이라 자료 명사(사진·그래프·표…)로 끝맺어야 한다.
 // 끝이 흐리면("검은 배경에 하얀") 자료 명사 지점까지 자르고, 그런 지점이 없으면 버린다.
 function finalizeSilenceDescription({ text }) {
-  const body = String(text || '').replace(DESCRIPTION_PREFIX_PATTERN, '').replace(PLURAL_TAIL_NOUN_PATTERN, '$1').trim();
+  const body = String(text || '').replace(DESCRIPTION_PREFIX_PATTERN, '').replace(TRAILING_PUNCTUATION_PATTERN, '').trim();
   if (!body) return null;
-  const countWordOf = (phrase) => phrase.split(/\s+/).length;
-  const cut = hasCompleteTailNoun({ text: body })
-    ? body
-    : cutAtTailNoun({ text: body, maxWordCount: countWordOf(body), minWordCount: MIN_DESCRIPTION_WORD_COUNT });
+  const cut = cutAtMaterialNoun({ body });
   if (!cut) return null;
   // 자른 뒤에도 머리말 뒤가 자료 명사로 끝나면 머리말을 뗀다. 자료 명사가 머리말 안에만 있으면("…그래프 제시,") 그대로 둔다.
   const afterSelfPrefix = cut.replace(SELF_PREFIX_PATTERN, '');

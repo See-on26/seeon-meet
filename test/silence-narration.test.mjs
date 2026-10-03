@@ -169,3 +169,22 @@ test('조사가 붙은 복수형 자료 명사도 자료 명사 지점으로 본
   assert.equal(finalizeSilenceDescription({ text: '이미지 제시, 여행과 휴양지 사진들이 나열되어 있다' }),
     '이미지 제시, 여행과 휴양지 사진');
 });
+
+test('문장 중간의 복수형 자료 명사는 건드리지 않는다', () => {
+  assert.equal(finalizeSilenceDescription({ text: '이미지 제시, 그래프들이 나란히 놓인 비교 화면' }),
+    '이미지 제시, 그래프들이 나란히 놓인 비교 화면');
+  assert.equal(finalizeSilenceDescription({ text: '이미지 제시, 표들을 비교한 매출 자료' }), '이미지 제시, 표들을 비교한 매출 자료');
+});
+
+test('끝 문장부호가 붙어도 자료 명사로 끝난 것으로 본다', () => {
+  assert.equal(finalizeSilenceDescription({ text: '이미지 제시, 귀여운 강아지 사진.' }), '이미지 제시, 귀여운 강아지 사진');
+  assert.equal(finalizeSilenceDescription({ text: '이미지 제시, 여행지 풍경 사진들,' }), '이미지 제시, 여행지 풍경 사진');
+});
+
+test('무발화 프롬프트는 사진 단독용 반응·NONE 규칙 대신 보라고 한 대상 기준을 쓴다', () => {
+  const silencePrompt = buildVisualDescriptionPrompt({ subKind: reaction, origin: NARRATION_ORIGIN_MAP.silence });
+  assert.doesNotMatch(silencePrompt, /반응을 일으킬 만한 요소가 없는 평범한 화면/);
+  assert.doesNotMatch(silencePrompt, /쓰러져있다/);
+  assert.match(silencePrompt, /보라고 한 대상을 화면에서 찾을 수 없/);
+  assert.match(buildVisualDescriptionPrompt({ subKind: reaction }), /반응을 일으킬 만한 요소가 없는 평범한 화면/);
+});

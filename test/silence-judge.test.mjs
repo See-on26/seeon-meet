@@ -65,3 +65,11 @@ test('모델 호출이 실패하면 차단한다', async () => {
   assert.equal(verdict.source, SILENCE_JUDGE_SOURCE_MAP.error);
   assert.match(verdict.reason, /500/);
 });
+
+const { SILENCE_JUDGE_SYSTEM_PROMPT, SILENCE_FEW_SHOT_LIST } = require('../src/main/caption-pipeline/prompts/silence-judge.js');
+
+test('단서는 침묵 바로 앞 마지막 문장에 있어야 한다 — 보라고 한 뒤 다른 얘기로 넘어갔으면 차단 예시가 있다', () => {
+  assert.match(SILENCE_JUDGE_SYSTEM_PROMPT, /마지막 문장/);
+  const movedOnExample = SILENCE_FEW_SHOT_LIST.find((example) => /보시죠/.test(example.input.transcript) && !example.output.cue);
+  assert.ok(movedOnExample);
+});

@@ -1,6 +1,6 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { isImmediateCaption, NarrationHoldGate } from '../src/renderer/core/audio-renderer/narration-entry.js';
+import { isImmediateCaption, isAnchoredCaption, NarrationHoldGate } from '../src/renderer/core/audio-renderer/narration-entry.js';
 
 test('사용자 명령 답만 즉시 재생한다', () => {
   assert.equal(isImmediateCaption({ narrationClass: 'user_command' }), true);
@@ -35,4 +35,10 @@ test('clear 는 모은 해설을 버리고 보류를 푼다', () => {
   gate.clear();
   assert.equal(gate.release(), 0);
   assert.deepEqual(deliveredList, []);
+});
+
+test('무발화 해설은 틈을 다시 고르지 않고 침묵 시점에 끼운다', () => {
+  assert.equal(isAnchoredCaption({ narrationClass: 'silence_based' }), true);
+  assert.equal(isAnchoredCaption({ narrationClass: 'deixis' }), false);
+  assert.equal(isAnchoredCaption(null), false);
 });

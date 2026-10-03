@@ -5,6 +5,11 @@ export function isImmediateCaption(payload) {
   return payload?.narrationClass === NARRATION_CLASS_MAP.userCommand;
 }
 
+// 무발화 해설은 그 침묵 동안 들려야 한다. 감지 시점 뒤의 틈은 발표자가 다시 말한 뒤라서 틈을 고르지 않고 감지 시점에 끼운다.
+export function isAnchoredCaption(payload) {
+  return payload?.narrationClass === NARRATION_CLASS_MAP.silenceBased;
+}
+
 // 마이크 질문을 녹음하는 동안 자동 해설이 사용자 말과 겹치지 않게 잠시 모아 둔다.
 export class NarrationHoldGate {
   constructor({ deliver }) {

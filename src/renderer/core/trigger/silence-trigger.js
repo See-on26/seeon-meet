@@ -28,7 +28,13 @@ export class SilenceTrigger {
     this.firedHeardAt = null;
   }
 
-  update({ nowPerf, lastHeardAt }) {
+  // 마이크 질문·일시정지 중(isSuspended)에는 세지 않는다. 그 사이 흐른 무음도 무음 구간으로 치지 않도록
+  // 끝난 뒤에는 새로 들린 말소리부터 다시 센다.
+  update({ nowPerf, lastHeardAt, isSuspended = false }) {
+    if (isSuspended) {
+      this.reset({ nowPerf });
+      return false;
+    }
     if (!(lastHeardAt > this.armedSince)) return false;
     if (lastHeardAt === this.firedHeardAt) return false;
     if (nowPerf - lastHeardAt < this.thresholdMs) return false;
