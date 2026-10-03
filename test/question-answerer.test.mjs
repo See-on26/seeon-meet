@@ -62,9 +62,9 @@ test('이미지 파일이 없으면 그림 정보가 없다고 답한다', async
   assert.deepEqual(result, { text: NO_IMAGE_TEXT, isGrounded: true, isImageUsed: false });
 });
 
-test('근거를 못 찾으면(NONE) 없는 내용이라고 답한다', async () => {
+test('근거를 못 찾고(NONE) 볼 이미지도 없으면 없는 내용이라고 답한다', async () => {
   const { answerer } = makeAnswerer({ textReplyList: ['NONE'] });
-  const result = await answerer.answer({ route: 'past_slide', slideMajorList: [3], questionText: '매출은?', wordBudget });
+  const result = await answerer.answer({ route: 'past_slide', slideMajorList: [4], questionText: '매출은?', wordBudget });
   assert.deepEqual(result, { text: NOT_FOUND_TEXT, isGrounded: false, isImageUsed: false });
 });
 
@@ -109,4 +109,41 @@ test('답은 어절 상한으로 자른다', async () => {
   const { answerer } = makeAnswerer({ textReplyList: ['하나 둘 셋 넷 다섯 여섯'] });
   const result = await answerer.answer({ route: 'meeting_flow', slideMajorList: [], questionText: 'q', wordBudget: { minWordCount: 1, maxWordCount: 3 } });
   assert.equal(result.text, '하나 둘 셋…');
+});
+
+test('저장 이미지가 있으면 기록에서 못 찾을 때 NONE 대신 NEED_IMAGE 를 내게 한다', async () => {
+  const { answerer, textCallList } = makeAnswerer({ textReplyList: ['답', '답'] });
+  await answerer.answer({ route: 'past_slide', slideMajorList: [3], questionText: 'A는 얼마?', wordBudget });
+  assert.match(textCallList[0].prompt, /찾을 수 없으면 정확히 "NEED_IMAGE"/);
+  assert.doesNotMatch(textCallList[0].prompt, /찾을 수 없으면 정확히 "NONE"/);
+
+  const noImageStore = makeStore();
+  const { answerer: noImageAnswerer, textCallList: noImageCallList } = makeAnswerer({ store: noImageStore, textReplyList: ['답'] });
+  noImageStore.getSlide(3).imagePath = null;
+  await noImageAnswerer.answer({ route: 'past_slide', slideMajorList: [3], questionText: 'A는 얼마?', wordBudget });
+  assert.match(noImageCallList[0].prompt, /찾을 수 없으면 정확히 "NONE"/);
+  assert.doesNotMatch(noImageCallList[0].prompt, /NEED_IMAGE/);
+});
+
+test('해설 다시는 가장 최근 해설을 표시하고, 특정 해설을 가리키지 않으면 그것을 고르게 한다', async () => {
+  const store = makeStore();
+  store.applyRecord({ kind: 'narration', ts: 3000, source: 'page-transition', text: '슬라이드 4: 복지', slideLabel: '4', isEmitted: true });
+  const { answerer, textCallList } = makeAnswerer({ store, textReplyList: ['2'] });
+  await answerer.answer({ route: 'narration_replay', slideMajorList: [], questionText: '방금 해설 다시', wordBudget });
+  const { prompt } = textCallList[0];
+  assert.match(prompt, /2\. 슬라이드 4: 복지 \(가장 최근\)/);
+  assert.match(prompt, /가장 최근 번호/);
+});
+
+test('지난 슬라이드 답이 "명시되어 있지 않다" 같은 못 찾음 설명이면 저장 이미지로 다시 묻는다', async () => {
+  const { answerer, imageCallList } = makeAnswerer({ textReplyList: ['기록에는 A의 구체적인 금액이 명시되어 있지 않습니다.'], imageReply: 'A는 1,000이에요' });
+  const result = await answerer.answer({ route: 'past_slide', slideMajorList: [3], questionText: 'A는 얼마?', wordBudget });
+  assert.deepEqual(result, { text: 'A는 1,000이에요', isGrounded: true, isImageUsed: true });
+  assert.equal(imageCallList.length, 1);
+});
+
+test('이미지가 없을 때 못 찾음 설명은 없는 내용으로 답한다', async () => {
+  const { answerer } = makeAnswerer({ textReplyList: ['기록에서 확인할 수 없습니다'] });
+  const result = await answerer.answer({ route: 'past_slide', slideMajorList: [4], questionText: 'A는 얼마?', wordBudget });
+  assert.deepEqual(result, { text: NOT_FOUND_TEXT, isGrounded: false, isImageUsed: false });
 });

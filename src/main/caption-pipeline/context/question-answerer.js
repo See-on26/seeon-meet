@@ -16,6 +16,9 @@ const NARRATION_REPLAY_LIMIT = 10;
 const FLOW_UTTERANCE_PER_SLIDE = 3;
 const FLOW_UTTERANCE_MAX_CHARS = 80;
 
+// 모델이 토큰 대신 "기록에 명시되어 있지 않습니다" 같은 설명으로 못 찾았다고 답하는 경우.
+const NOT_FOUND_PHRASE_PATTERN = /(명시되어 있지 않|나와 있지 않|알 수 없|확인할 수 없|찾을 수 없|기록에 없|기록에는 없)/;
+
 function toAnswer({ content, wordBudget }) {
   const { text, isGrounded } = parseGroundingText(
     content, computeMaxChars({ maxWordCount: wordBudget.maxWordCount }), wordBudget.maxWordCount,
@@ -47,13 +50,22 @@ function createQuestionAnswerer({ requestText, requestImage, readImage, contextS
     if (!slideList.length) return notFound();
     const evidenceText = buildSlideEvidenceText(slideList);
     const content = await requestText({
-      prompt: buildPastSlideAnswerPrompt({ questionText, evidenceText, ...wordBudget }),
+      prompt: buildPastSlideAnswerPrompt({
+        questionText, evidenceText, ...wordBudget, hasImage: Boolean(slideList[0].imagePath),
+      }),
       label: '질문 답(지난 화면)', maxTokens: ANSWER_MAX_TOKENS,
     });
-    if (!String(content ?? '').trim().startsWith(NEED_IMAGE_TOKEN)) return toAnswer({ content, wordBudget });
+    // 텍스트로 답을 못 찾았으면 저장해 둔 화면 그림에서 다시 찾는다.
+    const trimmed = String(content ?? '').trim();
+    const isImageRequested = trimmed.startsWith(NEED_IMAGE_TOKEN);
+    const isNotFound = new RegExp(`^${GROUNDING_NONE_TOKEN}\\b`, 'i').test(trimmed)
+      || NOT_FOUND_PHRASE_PATTERN.test(trimmed);
+    if (!isImageRequested && !isNotFound) return toAnswer({ content, wordBudget });
     const imagePath = slideList[0].imagePath;
     const jpegBuffer = imagePath ? await readImage(imagePath) : null;
-    if (!jpegBuffer) return { text: NO_IMAGE_TEXT, isGrounded: true, isImageUsed: false };
+    if (!jpegBuffer) {
+      return isImageRequested ? { text: NO_IMAGE_TEXT, isGrounded: true, isImageUsed: false } : notFound();
+    }
     const imageContent = await requestImage({
       jpegBuffer,
       prompt: buildImageAnswerPrompt({ questionText, evidenceText, ...wordBudget }),
