@@ -6,7 +6,8 @@ import {
 import {
   MODE_MAP, DWELL_MS, IS_DELAY_BUFFER_ENABLED,
   computeWordBudget, canSwitchMode, getModePolicy, getCatchupRateRange,
-  computeLookaheadMs, computeContextHoldMs, resolveBeforeAnchorTs, computeAnswerWordBudget,
+  computeLookaheadMs, computeSentenceWaitMs, computeContextHoldMs, resolveBeforeAnchorTs,
+  computeAnswerWordBudget,
 } from '../core/mode/mode-policy.js';
 import { CONTEXT_TOKEN_BUDGET } from '../core/mode/context-budget.js';
 
@@ -31,6 +32,7 @@ import {
 } from '../core/trigger/utterance-boundary-detector.js';
 import { TranscriptWindow } from '../core/trigger/transcript-window.js';
 import { DeixisDetector } from '../core/trigger/deixis-detector.js';
+import { resolveLastSpeechWallTs } from '../core/trigger/speech-activity.js';
 import { DeixisCandidateScheduler, CANDIDATE_SOURCE_MAP } from '../core/trigger/deixis-candidate-scheduler.js';
 import { judgeScreenDependency, SCREEN_DEPENDENCY_REASON_MAP } from '../core/trigger/screen-dependency.js';
 import { PointingLocator, describeDirection } from '../core/trigger/pointing-locator.js';
@@ -413,7 +415,11 @@ function handleClickModeButton({ mode }) {
   renderModeButtons();
 
   candidateScheduler.setLookaheadMs({ lookaheadMs: computeLookaheadMs({ mode }) });
-  asrSegmenter.setSegmentMs({ segmentMs: getModePolicy({ mode })?.asrSegmentMs });
+  candidateScheduler.setSentenceWaitMs({ sentenceWaitMs: computeSentenceWaitMs({ mode }) });
+  const modePolicy = getModePolicy({ mode });
+  asrSegmenter.setSegmentMs({
+    segmentMs: modePolicy?.asrSegmentMs, minSegmentMs: modePolicy?.asrMinSegmentMs,
+  });
   const isDelayStarted = applyDelayBufferForMode();
   applyNarrationPlayerForMode();
   console.log(`[mode] ${previousMode} → ${currentMode} (${describeModeOutput({ mode })})`);
@@ -810,16 +816,31 @@ const SPEAKER_HINT_TTL_MS = 8000;
 let lastResolvedSpeakerName = '';
 let lastResolvedSpeakerAt = 0;
 
-const candidateScheduler = new DeixisCandidateScheduler({ onDecide: runDeixisDecision });
+let lastSpeechBlindAt = 0;
+
+function getLastSpeechWallTs() {
+  return resolveLastSpeechWallTs({
+    lastActiveAt: lastAudioActiveAt, lastBlindAt: lastSpeechBlindAt,
+    nowPerf: performance.now(), nowWall: Date.now(),
+  });
+}
+
+// 지시 판정이 난 시각. 그 전 조각은 그 판정의 발화에 이미 들어갔다.
+let lastDeixisDecidedAt = -Infinity;
+
+const candidateScheduler = new DeixisCandidateScheduler({ onDecide: runDeixisDecision, getLastSpeechWallTs });
 const deixisDetector = new DeixisDetector({
-  onDeixis: ({ text, trigger, eventWallTs }) => {
+  onDeixis: ({ text, trigger, captureTs, eventWallTs }) => {
     const { region, pointingOrderHint } = getPointingSequence();
     console.log(`[deixis] 🗣 발화 지시 "${trigger}" → look-ahead 대기`);
     const nowVideoTimeMs = captureSource.videoTimeMs;
+    const nowTs = performance.now();
     candidateScheduler.submit({
       source: CANDIDATE_SOURCE_MAP.speech, utterance: text, trigger, region, pointingOrderHint,
-      captureTs: performance.now(), videoTimeMs: nowVideoTimeMs,
+      captureTs: nowTs, videoTimeMs: nowVideoTimeMs,
       eventVideoTimeMs: wallToVideoTimeMs({ wallTs: eventWallTs, nowVideoTimeMs }) ?? nowVideoTimeMs,
+      leadText: transcriptWindow.getOpenSentenceLead({ nowTs, sinceTs: lastDeixisDecidedAt }),
+      chunkEndWallTs: captureTs,
     });
   },
 });
@@ -883,9 +904,19 @@ const SCREEN_DEPENDENCY_LABEL_MAP = {
 };
 
 async function runDeixisDecision({ source, utterance, triggerList, region, pointingOrderHint,
-  captureTs, videoTimeMs, eventVideoTimeMs = null }) {
+  captureTs, videoTimeMs, eventVideoTimeMs = null,
+  triggerUtterance = utterance, leadText = '', followText = '', isSentenceWaited = false }) {
+  lastDeixisDecidedAt = performance.now();
   const label = triggerList.join(', ') || '-';
   const mode = getCurrentMode();
+  if (leadText || followText) {
+    markDebug({
+      stage: DEBUG_STAGE_MAP.asr, verdict: DEBUG_VERDICT_MAP.info,
+      reason: '조각을 문장 단위로 이어 붙임',
+      detail: `트리거 조각="${triggerUtterance}" → 문장="${utterance}"`
+        + ` (앞="${leadText || '-'}" · 뒤="${followText || '-'}" · 문장 끝 추가 대기=${isSentenceWaited ? 'Y' : 'N'})`,
+    });
+  }
   const { beforeMs, afterMs } = getModePolicy({ mode }) || {};
 
   const buffer = await captureFrameJpeg(region);
@@ -910,7 +941,7 @@ async function runDeixisDecision({ source, utterance, triggerList, region, point
       detail: `버린 발화 ${droppedCount}건 · 남은 맥락 ${tokenCount}토큰 (예산 ${CONTEXT_TOKEN_BUDGET})`,
     });
   }
-  const screenVerdict = judgeScreenDependency({ source, utterance });
+  const screenVerdict = judgeScreenDependency({ source, utterance: triggerUtterance });
   if (!screenVerdict.isScreenDependent) {
     console.log(`[deixis] 화면 의존성 없음 → 스킵 label="${label}" (${screenVerdict.reason})`);
     markDebug({
@@ -989,12 +1020,17 @@ function handleAsrTranscript({ text, ts, endTs, segmentList = [] }) {
     });
 
     transcriptWindow.push({ text: trimmed, ts: performance.now() });
-    deixisDetector.handleTranscript({
-      text: trimmed, captureTs: endTs,
-      resolveEventWallTs: ({ trigger }) => resolveSpeechEndWallTs({
-        chunkStartTs: ts, chunkEndTs: endTs, segmentList, trigger,
-      }),
-    });
+    // 대기 중인 지시 후보가 있으면 이 조각을 뒤 조각으로 먼저 붙인다. 새 후보는 그다음 탐지에서 생긴다.
+    // 이 조각으로 앞 후보의 판정이 났으면, 이미 그 문장에 쓴 조각이므로 새 후보의 트리거로 쓰지 않는다.
+    const { isDecided } = candidateScheduler.appendTranscript({ text: trimmed, endTs });
+    if (!isDecided) {
+      deixisDetector.handleTranscript({
+        text: trimmed, captureTs: endTs,
+        resolveEventWallTs: ({ trigger }) => resolveSpeechEndWallTs({
+          chunkStartTs: ts, chunkEndTs: endTs, segmentList, trigger,
+        }),
+      });
+    }
   }
 
   const candidateCount = collectGapCandidateList({
@@ -1285,7 +1321,7 @@ function isNarrationEchoWindow() {
 
 setInterval(() => {
   if (!captureSource.isActive) return;
-  if (isNarrationEchoWindow()) return;
+  if (isNarrationEchoWindow()) { lastSpeechBlindAt = performance.now(); return; }
   if (audioMeter.getLevel() > AUDIO_SPEAK_THRESHOLD) lastAudioActiveAt = performance.now();
 }, 100);
 
@@ -1344,8 +1380,11 @@ async function attemptStartExperiment() {
     const lookaheadMs = computeLookaheadMs({ mode: getCurrentMode() });
     const holdMs = computeContextHoldMs({ mode: getCurrentMode() });
     candidateScheduler.setLookaheadMs({ lookaheadMs });
+    candidateScheduler.setSentenceWaitMs({ sentenceWaitMs: computeSentenceWaitMs({ mode: getCurrentMode() }) });
 
-    asrSegmenter.setSegmentMs({ segmentMs: contextPolicy?.asrSegmentMs });
+    asrSegmenter.setSegmentMs({
+      segmentMs: contextPolicy?.asrSegmentMs, minSegmentMs: contextPolicy?.asrMinSegmentMs,
+    });
 
     lastScreenTransitionAt = performance.now();
     experimentSeq += 1;
@@ -1355,7 +1394,8 @@ async function attemptStartExperiment() {
       detail: `모드=${getCurrentMode()} · 시작 시점 = 회의 시작 시점(0초)`
         + ` · 앞 맥락 ${describeBeforeWindow({ mode: getCurrentMode(), anchorTs: lastScreenTransitionAt })}`
         + ` · 뒤 맥락 ${Math.round((contextPolicy?.afterMs ?? 0) / 1000)}초`
-        + ` (ASR 청크 ${contextPolicy?.asrSegmentMs}ms + look-ahead ${lookaheadMs}ms + 보류 ${holdMs}ms)`,
+        + ` (ASR 청크 ${contextPolicy?.asrSegmentMs}ms(무음 절단 ${contextPolicy?.asrMinSegmentMs}ms 이후)`
+        + ` + look-ahead ${lookaheadMs}ms + 보류 ${holdMs}ms)`,
     });
 
     const { audioTrack } = await captureSource.start();
