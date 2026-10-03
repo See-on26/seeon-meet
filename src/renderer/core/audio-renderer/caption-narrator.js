@@ -13,7 +13,8 @@ export function computeCatchupRate({ pausedSec, minRate, maxRate, ratePerSec }) 
 
 export class CaptionNarrator {
   constructor({ getLiveVideo, onStatus = null, onDrop = null, getRateRange = null, isCatchupDelegated = null,
-    createAudioContext = () => new AudioContext(), now = () => performance.now() }) {
+    createAudioContext = () => new AudioContext(), now = () => performance.now(),
+    isEntryEnabled = () => true }) {
     this.getLiveVideo = getLiveVideo;
     this.onStatus = onStatus || (() => {});
     this.onDrop = onDrop || (() => {});
@@ -33,7 +34,7 @@ export class CaptionNarrator {
     this.playToken = 0;
     this.pausedTotalMs = 0;
     this.pauseStartedAt = null;
-    this.queue = new NarrationQueue({ now, getPausedMs: () => this.readPausedMs() });
+    this.queue = new NarrationQueue({ now, getPausedMs: () => this.readPausedMs(), isEntryEnabled });
     // isInserting: 자동 해설 때문에 회의 영상을 멈춘 상태. isOverlaying: 질문 답을 회의 소리를 줄인 채 겹쳐 트는 상태.
     this.isInserting = false;
     this.isOverlaying = false;

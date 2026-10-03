@@ -75,6 +75,10 @@ contextBridge.exposeInMainWorld('seeon', {
   inferInsertionGap(args) { return ipcRenderer.invoke('pipeline-gap', args); },
   onUserCommand(callback) { ipcRenderer.on('user-command', (_e, payload) => callback(payload)); },
   onSummaryToggle(callback) { ipcRenderer.on('summary-toggle', () => callback()); },
+  onFeatureToggle(callback) { ipcRenderer.on('feature-toggle', (_e, payload) => callback(payload)); },
+  setFeatureToggles({ disabledClassList }) {
+    return ipcRenderer.invoke('pipeline-feature-toggles', { disabledClassList });
+  },
   reloadMeet() { return ipcRenderer.invoke('meet-reload'); },
   onMeetReloaded(callback) { ipcRenderer.on('meet-reloaded', (_e, payload) => callback(payload)); },
   onPipelineEvent(callback) { ipcRenderer.on('pipeline-event', (_e, payload) => callback(payload)); },

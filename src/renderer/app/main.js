@@ -11,6 +11,10 @@ import {
   computeAnswerWordBudget,
 } from '../core/mode/mode-policy.js';
 import { CONTEXT_TOKEN_BUDGET } from '../core/mode/context-budget.js';
+import {
+  createFeatureToggleStore, FEATURE_KEY_MAP, FEATURE_KEY_LIST, FEATURE_LABEL_MAP,
+  readFeatureKeyFromDigit, listDisabledNarrationClass,
+} from '../core/mode/feature-toggle-store.js';
 
 import { DelayBuffer, isCaptionDroppable, EXCESS_DROP_MS } from '../core/audio-renderer/delay-buffer.js';
 import { StreamDelaySource } from '../core/audio-renderer/stream-delay-source.js';
@@ -79,10 +83,14 @@ function handleNarrationStatus(text) {
   $('stDelay').textContent = text || '–';
 }
 
+const featureToggleStore = createFeatureToggleStore({ storage: window.localStorage });
+const isNarrationEntryEnabled = (entry) => featureToggleStore.isClassOn(entry.narrationClass);
+
 const narrator = new CaptionNarrator({
   getLiveVideo: getPlaybackVideo,
   onStatus: handleNarrationStatus,
   onDrop: handleNarrationDrop,
+  isEntryEnabled: isNarrationEntryEnabled,
   getRateRange: () => getCatchupRateRange({ mode: getCurrentMode() }),
   isCatchupDelegated: () => Boolean(delayBuffer),
 });
@@ -219,7 +227,9 @@ function buildWordBudgetMap() {
 function startNarrationPlayer({ stream }) {
   const policy = getModePolicy({ mode: getCurrentMode() });
   if (policy?.isMixed) {
-    narrationMixer = new NarrationMixer({ onStatus: handleNarrationStatus, onDrop: handleNarrationDrop });
+    narrationMixer = new NarrationMixer({
+      onStatus: handleNarrationStatus, onDrop: handleNarrationDrop, isEntryEnabled: isNarrationEntryEnabled,
+    });
     narrationMixer.start(stream);
 
     captureSource.detachDirectAudio();
@@ -487,7 +497,6 @@ let experimentSeq = 0;
 
 let currentSessionId = null;
 
-let isSummaryEnabled = true;
 let deixisFrameSeq = 0;
 
 const pointingLocator = new PointingLocator({ rowCount: 18, colCount: 32, cellChangeThreshold: 4 });
@@ -916,6 +925,8 @@ const SCREEN_DEPENDENCY_LABEL_MAP = {
 async function runDeixisDecision({ source, utterance, triggerList, region, pointingOrderHint,
   captureTs, videoTimeMs, eventVideoTimeMs = null,
   triggerUtterance = utterance, leadText = '', followText = '', isSentenceWaited = false }) {
+  // 지시·발화 기반을 모두 끄면 라우터가 고를 후보가 없으므로 캡처·판정을 하지 않는다.
+  if (!featureToggleStore.isOn(FEATURE_KEY_MAP.deixis) && !featureToggleStore.isOn(FEATURE_KEY_MAP.speechBased)) return;
   lastDeixisDecidedAt = performance.now();
   const label = triggerList.join(', ') || '-';
   const mode = getCurrentMode();
@@ -1087,6 +1098,10 @@ const USER_COMMAND_LABEL_MAP = {
 // 프리셋 커맨드(command)와 자유 자연어 질문(questionText)을 함께 처리한다.
 // 자유 질문이면 최근 발화(recentTranscript)를 근거로 붙인다 — 심화 질의응답 경로.
 async function askQuestion({ command = null, questionText = null, inputSource = 'typed' }) {
+  if (!featureToggleStore.isOn(FEATURE_KEY_MAP.manualQuestion)) {
+    announce(QUESTION_OFF_TEXT);
+    return;
+  }
   if (command && isDuplicateCommand({ command })) return;
   if (!captureSource.isActive) {
     announce('회의 캡처를 시작해야 질문할 수 있어요');
@@ -1123,16 +1138,71 @@ function handleUserCommand({ command }) {
 }
 window.seeon.onUserCommand(handleUserCommand);
 
-function toggleSummaryEnabled() {
-  isSummaryEnabled = !isSummaryEnabled;
-  const stateText = isSummaryEnabled ? '켜짐' : '꺼짐';
-  showNotice(`회의 요약 ${stateText}`);
-  markDebug({
-    stage: DEBUG_STAGE_MAP.session, verdict: DEBUG_VERDICT_MAP.info,
-    reason: '회의 요약 토글', detail: `회의 요약 ${stateText}`,
+// 기능별 켜기·끄기(C15). 페이지 전환·화자 안내를 꺼도 데이터는 계속 모으고 main 이 캡션만 내보내지 않는다.
+const QUESTION_OFF_TEXT = '질문 기능이 꺼져 있어요. Ctrl+Shift+6 으로 켤 수 있어요';
+
+function toggleFeature({ key }) {
+  featureToggleStore.toggle(key);
+}
+
+function syncFeatureTogglesToMain() {
+  const disabledClassList = listDisabledNarrationClass({ store: featureToggleStore });
+  window.seeon.setFeatureToggles({ disabledClassList }).catch((error) => {
+    console.warn('[toggle] main 에 기능 토글을 알리지 못함:', error.message);
   });
 }
-window.seeon.onSummaryToggle(toggleSummaryEnabled);
+
+function buildFeatureToggleList() {
+  const container = $('featureToggleList');
+  if (!container) return;
+  container.replaceChildren(...FEATURE_KEY_LIST.map((key, index) => {
+    const shortcutText = `Ctrl+Shift+${index + 1}`;
+    const row = document.createElement('div');
+    row.className = 'set-row';
+    const label = document.createElement('span');
+    label.className = 'label';
+    label.textContent = `${FEATURE_LABEL_MAP[key]} (${shortcutText})`;
+    const button = document.createElement('button');
+    button.type = 'button';
+    button.className = 'set-toggle';
+    button.dataset.feature = key;
+    button.setAttribute('role', 'switch');
+    button.setAttribute('aria-label', `${FEATURE_LABEL_MAP[key]}, 단축키 ${shortcutText}`);
+    button.addEventListener('click', () => toggleFeature({ key }));
+    row.append(label, button);
+    return row;
+  }));
+  syncFeatureToggleUi();
+}
+
+// 버튼을 다시 만들지 않고 상태만 바꾼다. 스크린리더 포커스가 누른 스위치에 남는다.
+function syncFeatureToggleUi() {
+  for (const button of document.querySelectorAll('#featureToggleList [data-feature]')) {
+    const isOn = featureToggleStore.isOn(button.dataset.feature);
+    button.classList.toggle('on', isOn);
+    button.setAttribute('aria-checked', String(isOn));
+    button.textContent = isOn ? '켜짐' : '꺼짐';
+  }
+}
+
+featureToggleStore.subscribe(({ key, isOn }) => {
+  const stateText = isOn ? '켜짐' : '꺼짐';
+  announce(`${FEATURE_LABEL_MAP[key]} ${stateText}`);
+  markDebug({
+    stage: DEBUG_STAGE_MAP.toggle, verdict: DEBUG_VERDICT_MAP.info,
+    reason: '기능 토글', detail: `${FEATURE_LABEL_MAP[key]} ${stateText}`,
+  });
+  syncFeatureTogglesToMain();
+  syncFeatureToggleUi();
+});
+
+window.seeon.onSummaryToggle(() => toggleFeature({ key: FEATURE_KEY_MAP.meetingSummary }));
+window.seeon.onFeatureToggle(({ digit }) => {
+  const key = readFeatureKeyFromDigit(digit);
+  if (key) toggleFeature({ key });
+});
+buildFeatureToggleList();
+syncFeatureTogglesToMain();
 
 // 화면 공유가 검게 보일 때 Meet 화면만 다시 불러온다. 회의 중이었다면 다시 참여해야 한다.
 $('meetReloadBtn').addEventListener('click', () => {
@@ -1149,12 +1219,24 @@ window.seeon.onMeetReloaded(({ reason }) => {
   });
 });
 
+// 실제 키 입력은 main 이 먼저 받아 막는다(before-input-event). 여기는 main 을 거치지 않은 입력용이다.
+const FEATURE_TOGGLE_CODE_PATTERN = /^Digit([1-7])$/;
+
 document.addEventListener('keydown', (event) => {
-  if (!(event.ctrlKey || event.metaKey) || event.shiftKey || event.altKey) return;
+  if (!(event.ctrlKey || event.metaKey) || event.altKey) return;
+  if (event.shiftKey) {
+    if (event.repeat) return;
+    const matched = FEATURE_TOGGLE_CODE_PATTERN.exec(event.code);
+    const key = matched ? readFeatureKeyFromDigit(matched[1]) : null;
+    if (!key) return;
+    event.preventDefault();
+    toggleFeature({ key });
+    return;
+  }
 
   if (event.key === SUMMARY_TOGGLE_KEY) {
     event.preventDefault();
-    toggleSummaryEnabled();
+    toggleFeature({ key: FEATURE_KEY_MAP.meetingSummary });
     return;
   }
   const command = USER_COMMAND_KEY_MAP[event.key];
@@ -1368,6 +1450,7 @@ setInterval(() => {
 
 async function handleSilenceTrigger({ silenceMs }) {
   if (!isPipelineEnabled()) return;
+  if (!featureToggleStore.isOn(FEATURE_KEY_MAP.silenceBased)) return;
   const sessionSeq = experimentSeq;
   const slideLabel = slideRegistry.currentLabel();
   const recentTranscript = transcriptWindow.getBefore({
@@ -1616,7 +1699,7 @@ function finalizeSession({ asrFinalFlushPromise }) {
 }
 
 async function requestMeetingSummary() {
-  if (!isSummaryEnabled) {
+  if (!featureToggleStore.isOn(FEATURE_KEY_MAP.meetingSummary)) {
     markDebug({
       stage: DEBUG_STAGE_MAP.session, verdict: DEBUG_VERDICT_MAP.skip,
       reason: '회의 요약 꺼짐', detail: '사용자가 요약 기능을 껐습니다',
@@ -1767,26 +1850,24 @@ micQuestionController = new MicQuestionController({
   onAnswerSettled: () => narrationGate.release(),
 });
 
-$('cmdMic').addEventListener('click', () => { micQuestionController.toggle(); });
-window.seeon.onMicToggle(() => { micQuestionController.toggle(); });
+// 녹음 중이면 기능을 꺼도 멈출 수는 있게 새로 시작할 때만 막는다.
+function toggleMicQuestion() {
+  if (micQuestionController.phase === MIC_PHASE_MAP.idle
+    && !featureToggleStore.isOn(FEATURE_KEY_MAP.manualQuestion)) {
+    announce(QUESTION_OFF_TEXT);
+    return;
+  }
+  micQuestionController.toggle();
+}
+$('cmdMic').addEventListener('click', toggleMicQuestion);
+window.seeon.onMicToggle(toggleMicQuestion);
 for (const chip of $('cmdChips').querySelectorAll('.chip')) {
   chip.addEventListener('click', () => handleUserCommand({ command: chip.dataset.command }));
-}
-
-function syncSettingsUi() {
-  const summary = $('setSummary');
-  summary.classList.toggle('on', isSummaryEnabled);
-  summary.textContent = isSummaryEnabled ? '켜짐' : '꺼짐';
 }
 
 $('settingsBtn').addEventListener('click', () => {
   const panel = $('settingsPanel');
   panel.hidden = !panel.hidden;
   $('settingsBtn').classList.toggle('on', !panel.hidden);
-  if (!panel.hidden) syncSettingsUi();
+  if (!panel.hidden) syncFeatureToggleUi();
 });
-$('setSummary').addEventListener('click', () => {
-  toggleSummaryEnabled();
-  syncSettingsUi();
-});
-syncSettingsUi();

@@ -23,7 +23,8 @@ export function createSidePanner({ audioContext, positionX }) {
 
 export class NarrationMixer {
   constructor({ onStatus = null, onDrop = null, duckDecibel = DEFAULT_DUCK_DB,
-    createAudioContext = () => new AudioContext(), now = () => performance.now() } = {}) {
+    createAudioContext = () => new AudioContext(), now = () => performance.now(),
+    isEntryEnabled = () => true } = {}) {
     this.onStatus = onStatus || (() => {});
     this.onDrop = onDrop || (() => {});
     this.duckDecibel = duckDecibel;
@@ -36,7 +37,7 @@ export class NarrationMixer {
     this.currentSource = null;
     this.currentEntry = null;
     this.playToken = 0;
-    this.queue = new NarrationQueue({ now });
+    this.queue = new NarrationQueue({ now, isEntryEnabled });
     this.isInserting = false;
   }
 

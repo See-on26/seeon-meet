@@ -18,12 +18,14 @@ export const QUEUE_DROP_REASON_MAP = {
   expired: 'expired',
   slideChanged: 'slide_changed',
   interrupted: 'interrupted',
+  featureOff: 'feature_off',
 };
 
 export const QUEUE_DROP_LABEL_MAP = {
   [QUEUE_DROP_REASON_MAP.expired]: `재생 대기 ${NARRATION_QUEUE_TTL_MS / 1000}초 초과 — 버림`,
   [QUEUE_DROP_REASON_MAP.slideChanged]: '다음 슬라이드 전환 고지가 앞서 — 이전 슬라이드 해설 버림',
   [QUEUE_DROP_REASON_MAP.interrupted]: '질문 답이 재생 중인 해설을 끊음',
+  [QUEUE_DROP_REASON_MAP.featureOff]: '기능 꺼짐 — 대기 중이던 해설 버림',
 };
 
 // main 은 분류가 빠진 캡션을 지시로 취급한다. 같은 순위로 맞춘다.
@@ -79,10 +81,13 @@ function pickFirst(entryList) {
 
 export class NarrationQueue {
   // getPausedMs: 해설 때문에 회의가 멈춰 있던 누적 시간. 교차 모드는 그동안 재생 위치가 서 있어 기다린 시간에 넣지 않는다.
-  constructor({ ttlMs = NARRATION_QUEUE_TTL_MS, now = () => performance.now(), getPausedMs = () => 0 } = {}) {
+  // isEntryEnabled: 사용자가 끈 분류(C15)는 생성 중에 꺼졌거나 예약돼 있던 것도 재생하지 않는다.
+  constructor({ ttlMs = NARRATION_QUEUE_TTL_MS, now = () => performance.now(), getPausedMs = () => 0,
+    isEntryEnabled = () => true } = {}) {
     this.ttlMs = ttlMs;
     this.now = now;
     this.getPausedMs = getPausedMs;
+    this.isEntryEnabled = isEntryEnabled;
     this.entryList = [];
     this.nextSeq = 0;
   }
@@ -103,7 +108,9 @@ export class NarrationQueue {
     const drop = ({ entry, reason }) => droppedList.push({ entry, reason, waitedMs: this.readWaitedMs({ entry, nowTs }) });
     let aliveList = [];
     for (const entry of this.entryList) {
-      if (isExpirable(entry) && this.readWaitedMs({ entry, nowTs }) > this.ttlMs) {
+      if (!this.isEntryEnabled(entry)) {
+        drop({ entry, reason: QUEUE_DROP_REASON_MAP.featureOff });
+      } else if (isExpirable(entry) && this.readWaitedMs({ entry, nowTs }) > this.ttlMs) {
         drop({ entry, reason: QUEUE_DROP_REASON_MAP.expired });
       } else {
         aliveList.push(entry);

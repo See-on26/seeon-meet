@@ -13,6 +13,7 @@ const { createUnifiedRouter, ROUTER_MODE_MAP } = require('./router/unified-route
 const { createDeixisJudgeClient } = require('./router/deixis-judge');
 const { createSilenceJudge } = require('./router/silence-judge');
 const { createSilenceNarrationGate, SILENCE_GATE_LABEL_MAP } = require('./orchestrator/silence-gate');
+const { createFeatureGate } = require('./orchestrator/feature-gate');
 const { createSilenceNarrator, SILENCE_RESULT_MAP } = require('./orchestrator/silence-narrator');
 const { selectGeneratableCandidate } = require('./orchestrator/candidate-selector');
 const { createDescribedStore } = require('./orchestrator/described-store');
@@ -98,6 +99,7 @@ function registerPipeline({ getViewerView }) {
   const speakerRegistry = createSpeakerRegistry();
   const narrationHistory = createNarrationHistory();
   const silenceGate = createSilenceNarrationGate();
+  const featureGate = createFeatureGate();
   const silenceNarrator = createSilenceNarrator({ gate: silenceGate, judge: createSilenceJudge({ config }) });
   console.log(`[pipeline] 발화 축 판정 경로: ${config.routerMode}`);
 
@@ -225,6 +227,19 @@ function registerPipeline({ getViewerView }) {
       });
     }
     const resolvedClass = narrationClass || NARRATION_CLASS_MAP.deixis;
+    // 사용자가 끈 분류(C15)는 맥락 저장소 기록만 남기고 TTS·재생을 하지 않는다. 재생되지 않았으므로 해설 목록에도 들어가지 않는다.
+    if (!featureGate.isEnabled(resolvedClass)) {
+      await appendRecord({
+        kind: RECORD_KIND_MAP.narration, ts, source, text, slideLabel, isEmitted: false,
+        skipReason: 'feature_off', narrationClass: resolvedClass,
+      });
+      console.log(`[pipeline]   기능 꺼짐 [${resolvedClass}] "${truncateForLog(text)}"`);
+      markDebug({
+        stage: DEBUG_STAGE_MAP.toggle, verdict: DEBUG_VERDICT_MAP.skip, narrationType: source, ts,
+        reason: '기능 꺼짐 — 캡션 내보내지 않음', detail: `분류=${resolvedClass} "${text}"`,
+      });
+      return { isEmitted: false };
+    }
     if (!isRateLimitExempt) {
       const rate = narrationHistory.findRateLimited({
         source, ts, hasPointingRegion, sourceGroupList: SPEECH_AXIS_SOURCE_LIST,
@@ -452,10 +467,14 @@ function registerPipeline({ getViewerView }) {
         });
         return { isOk: true, narration: '', isEmitted: false };
       }
+      // 고지를 끈 상태면 사용자가 듣지 못한 요소이므로 지시 해설이 "이미 설명함"으로 건너뛰지 않게 등록하지 않는다.
+      const isTransitionEnabled = featureGate.isEnabled(NARRATION_CLASS_MAP.pageTransition);
       const narration = result.screenType === 'ppt' && displayNumber
         ? `슬라이드 ${displayNumber}: ${result.narration}`
         : result.narration;
-      addCaptionDescribed({ ts, text: narration, slideLabel, elementList: result.describedElementList });
+      if (isTransitionEnabled) {
+        addCaptionDescribed({ ts, text: narration, slideLabel, elementList: result.describedElementList });
+      }
       await appendRecord({
         kind: RECORD_KIND_MAP.pageTransition, ts, slideLabel, screenType: result.screenType,
         narration, describedElementList: result.describedElementList,
@@ -487,7 +506,9 @@ function registerPipeline({ getViewerView }) {
             describedElementList: describedStore.getDescribed(slideLabel),
           });
           if (visual.isGrounded && visual.text) {
-            addCaptionDescribed({ ts, text: visual.text, slideLabel, elementList: [visual.text] });
+            if (isTransitionEnabled) {
+              addCaptionDescribed({ ts, text: visual.text, slideLabel, elementList: [visual.text] });
+            }
             await appendRecord({
               kind: RECORD_KIND_MAP.deixis, ts, utterance: '', caption: visual.text, isGrounded: true,
               slideLabel, narrationType: NARRATION_TYPE_MAP.visualDescription,
@@ -641,11 +662,25 @@ function registerPipeline({ getViewerView }) {
     });
   });
 
+  ipcMain.handle('pipeline-feature-toggles', async (_event, { disabledClassList = [] } = {}) => {
+    featureGate.setDisabledClassList(disabledClassList);
+    const appliedList = featureGate.getDisabledClassList();
+    markDebug({
+      stage: DEBUG_STAGE_MAP.toggle, verdict: DEBUG_VERDICT_MAP.info,
+      reason: '기능 토글 적용', detail: `꺼진 분류=[${appliedList.join(', ') || '없음'}]`,
+    });
+    return { isOk: true, disabledClassList: appliedList };
+  });
+
   ipcMain.handle('pipeline-silence', async (_event, {
     ts, buffer, slideLabel, recentTranscript = '', silenceMs = 0, wordBudget = null, eventVideoTimeMs = null,
   }) => {
     const startedAt = Date.now();
     const silenceSec = Math.round(silenceMs / 1000);
+    // 무발화 해설을 끄면 판정·묘사 모델을 부르지 않는다.
+    if (!featureGate.isEnabled(NARRATION_CLASS_MAP.silenceBased)) {
+      return { isOk: true, status: 'feature_off' };
+    }
     const result = await silenceNarrator.run({
       slideLabel, transcript: recentTranscript, silenceMs,
       describe: () => agentFieldMap[NARRATION_TYPE_MAP.visualDescription].generate({
@@ -792,8 +827,9 @@ function registerPipeline({ getViewerView }) {
         if (isRouterMode) {
           const routed = await routerClient.route({ utterance, before: beforeText, after: afterText });
           judgeReason = routed.blockedReason;
+          const disabledClassList = featureGate.getDisabledClassList();
           const { selected, excludedList } = selectGeneratableCandidate({
-            candidateList: routed.candidateList, isScaleEnabled: config.isScaleEnabled,
+            candidateList: routed.candidateList, isScaleEnabled: config.isScaleEnabled, disabledClassList,
           });
           selectedCandidate = selected;
           if (excludedList.length) {
@@ -812,12 +848,15 @@ function registerPipeline({ getViewerView }) {
               ? `확정 ${selectedCandidate.type}/${selectedCandidate.subKind || '-'}`
               : `후보 없음${judgeReason ? ` (${judgeReason})` : ''}`,
             detail: `발화="${utterance}" 후보=[${routed.candidateList.map((c) => `${c.type}/${c.subKind || '-'}`).join(', ') || '없음'}]`
-              + ` 경로=${routed.source}`,
+              + ` 경로=${routed.source}`
+              + (disabledClassList.length ? ` 꺼진 분류=[${disabledClassList.join(', ')}]` : ''),
           });
         } else {
           const verdict = await judgeClient.judge({ utterance, before: beforeText, after: afterText });
           judgeReason = verdict.reason;
-          if (verdict.shouldCaption) selectedCandidate = { type: NARRATION_TYPE_MAP.deixis, subKind: null };
+          if (verdict.shouldCaption && featureGate.isEnabled(NARRATION_CLASS_MAP.deixis)) {
+            selectedCandidate = { type: NARRATION_TYPE_MAP.deixis, subKind: null };
+          }
           markDebug({
             stage: DEBUG_STAGE_MAP.router, ts,
             verdict: selectedCandidate ? DEBUG_VERDICT_MAP.pass : DEBUG_VERDICT_MAP.skip,
