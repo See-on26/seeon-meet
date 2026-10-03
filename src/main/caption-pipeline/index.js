@@ -14,6 +14,7 @@ const { createDeixisJudgeClient } = require('./router/deixis-judge');
 const { createSilenceJudge } = require('./router/silence-judge');
 const { createSilenceNarrationGate, SILENCE_GATE_LABEL_MAP } = require('./orchestrator/silence-gate');
 const { createFeatureGate } = require('./orchestrator/feature-gate');
+const { createCaptionDescribedRegistry } = require('./orchestrator/caption-described-registry');
 const { createSilenceNarrator, SILENCE_RESULT_MAP } = require('./orchestrator/silence-narrator');
 const { selectGeneratableCandidate } = require('./orchestrator/candidate-selector');
 const { createDescribedStore } = require('./orchestrator/described-store');
@@ -83,17 +84,7 @@ function registerPipeline({ getViewerView }) {
   const routerClient = createUnifiedRouter({ config });
   const isRouterMode = config.routerMode === ROUTER_MODE_MAP.unified;
   const describedStore = createDescribedStore();
-  // 캡션별로 재설명 금지 목록에 넣은 요소. 렌더러가 그 캡션을 재생하지 않고 버리면 되돌린다.
-  const describedByCaptionMap = new Map();
-  const DESCRIBED_BY_CAPTION_LIMIT = 100;
-
-  function addCaptionDescribed({ ts, text, slideLabel, elementList }) {
-    describedStore.addDescribed(slideLabel, elementList);
-    describedByCaptionMap.set(`${ts}|${text}`, { slideLabel, elementList });
-    if (describedByCaptionMap.size > DESCRIBED_BY_CAPTION_LIMIT) {
-      describedByCaptionMap.delete(describedByCaptionMap.keys().next().value);
-    }
-  }
+  const captionDescribed = createCaptionDescribedRegistry({ describedStore });
   const screenRegistry = createScreenRegistry();
   const slideTopicRegistry = createSlideTopicRegistry();
   const speakerRegistry = createSpeakerRegistry();
@@ -229,6 +220,7 @@ function registerPipeline({ getViewerView }) {
     const resolvedClass = narrationClass || NARRATION_CLASS_MAP.deixis;
     // 사용자가 끈 분류(C15)는 맥락 저장소 기록만 남기고 TTS·재생을 하지 않는다. 재생되지 않았으므로 해설 목록에도 들어가지 않는다.
     if (!featureGate.isEnabled(resolvedClass)) {
+      captionDescribed.revert({ ts, text });
       await appendRecord({
         kind: RECORD_KIND_MAP.narration, ts, source, text, slideLabel, isEmitted: false,
         skipReason: 'feature_off', narrationClass: resolvedClass,
@@ -308,7 +300,7 @@ function registerPipeline({ getViewerView }) {
 
   ipcMain.handle('pipeline-session-start', async (_event, { mode = '' } = {}) => {
     describedStore.reset();
-    describedByCaptionMap.clear();
+    captionDescribed.reset();
     screenRegistry.reset();
     slideTopicRegistry.reset();
     speakerRegistry.reset();
@@ -473,7 +465,7 @@ function registerPipeline({ getViewerView }) {
         ? `슬라이드 ${displayNumber}: ${result.narration}`
         : result.narration;
       if (isTransitionEnabled) {
-        addCaptionDescribed({ ts, text: narration, slideLabel, elementList: result.describedElementList });
+        captionDescribed.add({ ts, text: narration, slideLabel, elementList: result.describedElementList });
       }
       await appendRecord({
         kind: RECORD_KIND_MAP.pageTransition, ts, slideLabel, screenType: result.screenType,
@@ -506,8 +498,9 @@ function registerPipeline({ getViewerView }) {
             describedElementList: describedStore.getDescribed(slideLabel),
           });
           if (visual.isGrounded && visual.text) {
-            if (isTransitionEnabled) {
-              addCaptionDescribed({ ts, text: visual.text, slideLabel, elementList: [visual.text] });
+            // 사진 묘사 생성 중에 고지를 껐을 수 있어 등록할 때 다시 확인한다.
+            if (featureGate.isEnabled(NARRATION_CLASS_MAP.pageTransition)) {
+              captionDescribed.add({ ts, text: visual.text, slideLabel, elementList: [visual.text] });
             }
             await appendRecord({
               kind: RECORD_KIND_MAP.deixis, ts, utterance: '', caption: visual.text, isGrounded: true,
@@ -646,14 +639,13 @@ function registerPipeline({ getViewerView }) {
 
   // 무발화(4-1): 발표자가 화면을 보라고 한 뒤 5초 이상 침묵하면 화면을 묘사한다. 애매하면 내지 않는다.
   // 렌더러 재생 대기 줄이 버리거나 질문 답이 끊은 해설. 듣지 못했으므로 중복 억제·재설명 금지 기록을 되돌린다.
-  ipcMain.on('pipeline-narration-dropped', (_event, { ts, text, slideLabel = null, reason = '' } = {}) => {
+  ipcMain.on('pipeline-narration-dropped', (_event, {
+    ts, text, slideLabel = null, narrationClass = null, reason = '',
+  } = {}) => {
     const isForgotten = narrationHistory.forget({ ts, text });
-    const key = `${ts}|${text}`;
-    const described = describedByCaptionMap.get(key);
-    if (described) {
-      describedStore.removeDescribed(described.slideLabel, described.elementList);
-      describedByCaptionMap.delete(key);
-    }
+    const described = captionDescribed.revert({ ts, text });
+    // 듣지 못한 화자 안내면 같은 화자를 다음 폴링에서 다시 안내하게 한다.
+    if (narrationClass === NARRATION_CLASS_MAP.speakerIdentity) speakerRegistry.reset();
     markDebug({
       stage: DEBUG_STAGE_MAP.queue, verdict: DEBUG_VERDICT_MAP.info, ts,
       reason: '재생 안 된 해설을 중복·재설명 기록에서 지움',
@@ -663,8 +655,10 @@ function registerPipeline({ getViewerView }) {
   });
 
   ipcMain.handle('pipeline-feature-toggles', async (_event, { disabledClassList = [] } = {}) => {
-    featureGate.setDisabledClassList(disabledClassList);
+    const { reenabledClassList } = featureGate.setDisabledClassList(disabledClassList);
     const appliedList = featureGate.getDisabledClassList();
+    // 꺼진 동안에도 현재 화자는 기록돼 있어, 다시 켜면 같은 사람이 계속 말할 때 안내가 나오지 않는다.
+    if (reenabledClassList.includes(NARRATION_CLASS_MAP.speakerIdentity)) speakerRegistry.reset();
     markDebug({
       stage: DEBUG_STAGE_MAP.toggle, verdict: DEBUG_VERDICT_MAP.info,
       reason: '기능 토글 적용', detail: `꺼진 분류=[${appliedList.join(', ') || '없음'}]`,
@@ -703,7 +697,7 @@ function registerPipeline({ getViewerView }) {
             summary: `발표자가 화면을 보라고 한 뒤 ${silenceSec}초 침묵`,
           },
         });
-        if (sent.isEmitted) addCaptionDescribed({ ts, text, slideLabel, elementList: [text] });
+        if (sent.isEmitted) captionDescribed.add({ ts, text, slideLabel, elementList: [text] });
         return sent;
       },
     });
@@ -941,7 +935,7 @@ function registerPipeline({ getViewerView }) {
         detail: `발화="${utterance}" → "${text}" (${Date.now() - startedAt}ms, 예산 ${wordBudget?.minWordCount ?? '-'}~${wordBudget?.maxWordCount ?? '-'}어절)`,
       });
 
-      addCaptionDescribed({ ts, text, slideLabel, elementList: [text] });
+      captionDescribed.add({ ts, text, slideLabel, elementList: [text] });
       console.log(`[pipeline] ${narrationType} 캡션 (${Date.now() - startedAt}ms) "${truncateForLog(utterance, 20)}" → "${truncateForLog(text)}"`);
 
       stage = PIPELINE_STAGE_MAP.tts;

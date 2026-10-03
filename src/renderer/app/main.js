@@ -13,7 +13,7 @@ import {
 import { CONTEXT_TOKEN_BUDGET } from '../core/mode/context-budget.js';
 import {
   createFeatureToggleStore, FEATURE_KEY_MAP, FEATURE_KEY_LIST, FEATURE_LABEL_MAP,
-  readFeatureKeyFromDigit, listDisabledNarrationClass,
+  readFeatureKeyFromDigit, listDisabledNarrationClass, listDisabledFeatureLabel,
 } from '../core/mode/feature-toggle-store.js';
 
 import { DelayBuffer, isCaptionDroppable, EXCESS_DROP_MS } from '../core/audio-renderer/delay-buffer.js';
@@ -83,7 +83,16 @@ function handleNarrationStatus(text) {
   $('stDelay').textContent = text || '–';
 }
 
-const featureToggleStore = createFeatureToggleStore({ storage: window.localStorage });
+// 저장소에 접근할 수 없으면 이번 실행 동안만 메모리 상태로 쓴다.
+function readLocalStorage() {
+  try {
+    return window.localStorage;
+  } catch {
+    return null;
+  }
+}
+
+const featureToggleStore = createFeatureToggleStore({ storage: readLocalStorage() });
 const isNarrationEntryEnabled = (entry) => featureToggleStore.isClassOn(entry.narrationClass);
 
 const narrator = new CaptionNarrator({
@@ -1139,10 +1148,18 @@ function handleUserCommand({ command }) {
 window.seeon.onUserCommand(handleUserCommand);
 
 // 기능별 켜기·끄기(C15). 페이지 전환·화자 안내를 꺼도 데이터는 계속 모으고 main 이 캡션만 내보내지 않는다.
-const QUESTION_OFF_TEXT = '질문 기능이 꺼져 있어요. Ctrl+Shift+6 으로 켤 수 있어요';
+const QUESTION_OFF_TEXT = '질문 기능이 꺼져 있어요. Control Shift 6 으로 켤 수 있어요';
 
-function toggleFeature({ key }) {
-  featureToggleStore.toggle(key);
+// 설정 스위치는 스크린리더가 바뀐 상태(aria-checked)를 읽으므로 화면 알림만 띄운다. 단축키는 따로 읽어 준다.
+let isSwitchToggle = false;
+
+function toggleFeature({ key, isFromSwitch = false }) {
+  isSwitchToggle = isFromSwitch;
+  try {
+    featureToggleStore.toggle(key);
+  } finally {
+    isSwitchToggle = false;
+  }
 }
 
 function syncFeatureTogglesToMain() {
@@ -1162,13 +1179,14 @@ function buildFeatureToggleList() {
     const label = document.createElement('span');
     label.className = 'label';
     label.textContent = `${FEATURE_LABEL_MAP[key]} (${shortcutText})`;
+    label.setAttribute('aria-hidden', 'true');
     const button = document.createElement('button');
     button.type = 'button';
     button.className = 'set-toggle';
     button.dataset.feature = key;
     button.setAttribute('role', 'switch');
-    button.setAttribute('aria-label', `${FEATURE_LABEL_MAP[key]}, 단축키 ${shortcutText}`);
-    button.addEventListener('click', () => toggleFeature({ key }));
+    button.setAttribute('aria-label', `${FEATURE_LABEL_MAP[key]}, 단축키 Control Shift ${index + 1}`);
+    button.addEventListener('click', () => toggleFeature({ key, isFromSwitch: true }));
     row.append(label, button);
     return row;
   }));
@@ -1187,7 +1205,8 @@ function syncFeatureToggleUi() {
 
 featureToggleStore.subscribe(({ key, isOn }) => {
   const stateText = isOn ? '켜짐' : '꺼짐';
-  announce(`${FEATURE_LABEL_MAP[key]} ${stateText}`);
+  if (isSwitchToggle) showNotice(`${FEATURE_LABEL_MAP[key]} ${stateText}`);
+  else announce(`${FEATURE_LABEL_MAP[key]} ${stateText}`);
   markDebug({
     stage: DEBUG_STAGE_MAP.toggle, verdict: DEBUG_VERDICT_MAP.info,
     reason: '기능 토글', detail: `${FEATURE_LABEL_MAP[key]} ${stateText}`,
@@ -1534,6 +1553,11 @@ async function attemptStartExperiment() {
   $('toggleBtn').disabled = true;
   try {
     showNotice('회의 캡처를 시작했습니다 — 화면 해설이 곧 표시됩니다.');
+    // 꺼 둔 기능은 다음 실행에도 남는다. 꺼진 줄 모르고 회의를 듣지 않게 시작할 때 알린다.
+    const disabledLabelList = listDisabledFeatureLabel({ store: featureToggleStore });
+    if (disabledLabelList.length) {
+      announce(`꺼져 있는 기능: ${disabledLabelList.join(', ')}. 설정이나 Control Shift 숫자로 켤 수 있어요`);
+    }
 
     const sessionResult = await window.seeon.startPipelineSession({ mode: getCurrentMode() }).catch(() => null);
     currentSessionId = sessionResult?.sessionId || null;
@@ -1700,6 +1724,7 @@ function finalizeSession({ asrFinalFlushPromise }) {
 
 async function requestMeetingSummary() {
   if (!featureToggleStore.isOn(FEATURE_KEY_MAP.meetingSummary)) {
+    announce('회의 요약이 꺼져 있어 요약을 만들지 않았어요');
     markDebug({
       stage: DEBUG_STAGE_MAP.session, verdict: DEBUG_VERDICT_MAP.skip,
       reason: '회의 요약 꺼짐', detail: '사용자가 요약 기능을 껐습니다',
@@ -1771,6 +1796,11 @@ function submitTypedQuestion() {
   const input = $('cmdInput');
   const text = input.value.trim();
   if (!text) return;
+  // 꺼져 있으면 입력한 질문을 지우지 않고 안내만 한다.
+  if (!featureToggleStore.isOn(FEATURE_KEY_MAP.manualQuestion)) {
+    announce(QUESTION_OFF_TEXT);
+    return;
+  }
   input.value = '';
   askQuestion({ questionText: text });
 }
@@ -1821,6 +1851,11 @@ function askQuestionFromAudioWithinHold(event) {
 }
 
 async function askQuestionFromAudio({ buffer, startTs }) {
+  // 녹음 중에 질문 기능을 껐으면 음성 인식을 돌리지 않는다.
+  if (!featureToggleStore.isOn(FEATURE_KEY_MAP.manualQuestion)) {
+    announce(QUESTION_OFF_TEXT);
+    return;
+  }
   announce('질문을 듣고 있어요');
   const result = await window.seeon.sendQuestionAudio({ buffer, startTs }).catch(() => null);
   if (!result?.isOk) {

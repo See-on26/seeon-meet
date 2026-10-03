@@ -280,3 +280,17 @@ test('동시 모드: 회의가 멈추지 않으므로 앞 해설을 기다린 �
   assert.deepEqual(startedIdList(sourceList), ['긴 해설']);
   assert.equal(dropList[0].reason, QUEUE_DROP_REASON_MAP.expired);
 });
+
+test('꺼진 질문 답은 재생 중인 자동 해설을 끊지 않는다', async () => {
+  const { context, sourceList } = createFakeAudioContext();
+  const mixer = new NarrationMixer({
+    createAudioContext: () => context, isEntryEnabled: (entry) => entry.narrationClass !== 'user_command',
+  });
+  mixer.start(fakeStream);
+  mixer.queueCaption(makeEntry({ id: '지시' }));
+  await flush();
+  mixer.queueCaption(makeEntry({ id: '답', narrationClass: 'user_command' }));
+  await flush();
+  assert.equal(sourceList[0].isStopped, false);
+  assert.deepEqual(startedIdList(sourceList), ['지시']);
+});

@@ -3,7 +3,7 @@ import assert from 'node:assert/strict';
 import { createRequire } from 'node:module';
 import {
   createFeatureToggleStore, FEATURE_KEY_LIST, FEATURE_KEY_MAP, FEATURE_TOGGLE_STORAGE_KEY,
-  readFeatureKeyFromDigit, listDisabledNarrationClass,
+  readFeatureKeyFromDigit, listDisabledNarrationClass, listDisabledFeatureLabel,
 } from '../src/renderer/core/mode/feature-toggle-store.js';
 import { NarrationQueue, QUEUE_DROP_REASON_MAP } from '../src/renderer/core/audio-renderer/narration-queue.js';
 
@@ -98,7 +98,8 @@ test('Ctrl/Cmd+Shift+1~7 은 기능 토글 단축키다', () => {
   const base = { type: 'keyDown', control: true, shift: true };
   assert.equal(readFeatureToggleDigit({ input: { ...base, key: '!', code: 'Digit1' } }), '1');
   assert.equal(readFeatureToggleDigit({ input: { ...base, key: '&', code: 'Digit7' } }), '7');
-  assert.equal(readFeatureToggleDigit({ input: { ...base, control: false, meta: true, key: '#', code: 'Digit3' } }), '3');
+  // 맥에서 Cmd+Shift+3/4/5 는 OS 스크린샷이 먼저 가져가므로 안내는 Control 로 한다. Cmd 도 받기는 한다.
+  assert.equal(readFeatureToggleDigit({ input: { ...base, control: false, meta: true, key: '@', code: 'Digit2' } }), '2');
   assert.equal(readFeatureToggleDigit({ input: { ...base, key: '*', code: 'Digit8' } }), null);
   assert.equal(readFeatureToggleDigit({ input: { ...base, key: ')', code: 'Digit0' } }), null);
   assert.equal(readFeatureToggleDigit({ input: { ...base, shift: false, key: '1', code: 'Digit1' } }), null);
@@ -149,4 +150,19 @@ test('재생 대기 줄은 꺼진 분류의 해설을 꺼내지 않고 기능 �
   const { entry, droppedList } = queue.takeNext();
   assert.equal(entry.text, '지시');
   assert.deepEqual(droppedList.map((drop) => [drop.entry.text, drop.reason]), [['화자', QUEUE_DROP_REASON_MAP.featureOff]]);
+});
+
+test('main 기능 게이트는 꺼졌다가 다시 켜진 분류를 알려 준다', () => {
+  const gate = createFeatureGate();
+  assert.deepEqual(gate.setDisabledClassList(['speaker_identity', 'deixis']), { reenabledClassList: [] });
+  assert.deepEqual(gate.setDisabledClassList(['deixis']), { reenabledClassList: ['speaker_identity'] });
+  assert.deepEqual(gate.setDisabledClassList([]), { reenabledClassList: ['deixis'] });
+});
+
+test('꺼진 기능 이름을 설정 순서대로 돌려준다 — 캡처 시작 때 안내용', () => {
+  const store = createFeatureToggleStore({ storage: createMemoryStorage() });
+  assert.deepEqual(listDisabledFeatureLabel({ store }), []);
+  store.set(FEATURE_KEY_MAP.meetingSummary, false);
+  store.set(FEATURE_KEY_MAP.pageTransition, false);
+  assert.deepEqual(listDisabledFeatureLabel({ store }), ['페이지 전환 해설', '회의 요약']);
 });

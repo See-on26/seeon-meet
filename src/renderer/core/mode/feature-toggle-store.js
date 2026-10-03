@@ -98,6 +98,10 @@ export function createFeatureToggleStore({ storage }) {
   };
 }
 
+export function listDisabledFeatureLabel({ store }) {
+  return FEATURE_KEY_LIST.filter((key) => !store.isOn(key)).map((key) => FEATURE_LABEL_MAP[key]);
+}
+
 export function listDisabledNarrationClass({ store }) {
   return FEATURE_KEY_LIST
     .filter((key) => NARRATION_CLASS_BY_FEATURE_MAP[key] && !store.isOn(key))

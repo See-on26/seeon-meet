@@ -7,10 +7,15 @@ const KNOWN_CLASS_LIST = Object.values(NARRATION_CLASS_MAP);
 function createFeatureGate() {
   let disabledClassList = [];
   return {
+    // 꺼졌다가 다시 켜진 분류를 돌려준다. 화자 안내처럼 꺼진 동안의 상태를 다시 맞춰야 하는 기능이 쓴다.
     setDisabledClassList(classList) {
+      const previousList = disabledClassList;
       disabledClassList = Array.isArray(classList)
         ? [...new Set(classList.filter((narrationClass) => KNOWN_CLASS_LIST.includes(narrationClass)))]
         : [];
+      return {
+        reenabledClassList: previousList.filter((narrationClass) => !disabledClassList.includes(narrationClass)),
+      };
     },
     isEnabled: (narrationClass) => !disabledClassList.includes(narrationClass),
     getDisabledClassList: () => [...disabledClassList],

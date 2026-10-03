@@ -81,8 +81,9 @@ export class NarrationMixer {
   queueCaptionList(entryList) {
     if (!this.audioContext || !entryList.length) return;
     for (const entry of entryList) this.queue.push(entry);
-    const isInterrupting = entryList.some(
-      (entry) => shouldInterrupt({ currentEntry: this.currentEntry, incomingEntry: entry }));
+    // 꺼진 분류의 질문 답은 어차피 버려지므로 재생 중인 해설을 끊지 않는다.
+    const isInterrupting = entryList.some((entry) => this.queue.isEntryEnabled(entry)
+      && shouldInterrupt({ currentEntry: this.currentEntry, incomingEntry: entry }));
     if (isInterrupting) {
       this.interruptCurrent();
       return;
