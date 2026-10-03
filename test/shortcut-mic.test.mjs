@@ -16,3 +16,7 @@ test('Ctrl/Cmd+8 은 마이크 토글이다', () => {
 test('Ctrl+8 은 프리셋 명령이 아니다', () => {
   assert.equal(readCommandFromInput({ input: { type: 'keyDown', key: '8', control: true } }), null);
 });
+
+test('키를 누르고 있을 때의 자동 반복은 토글로 보지 않는다', () => {
+  assert.equal(isMicToggleInput({ input: { type: 'keyDown', key: '8', control: true, isAutoRepeat: true } }), false);
+});

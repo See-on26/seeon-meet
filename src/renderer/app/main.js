@@ -15,8 +15,9 @@ import { StreamDelaySource } from '../core/audio-renderer/stream-delay-source.js
 import { NarrationScheduler } from '../core/audio-renderer/narration-scheduler.js';
 import { GapCandidateStore, resolveGapSearchFromMs } from '../core/audio-renderer/gap-candidate-store.js';
 import { isImmediateCaption, NarrationHoldGate } from '../core/audio-renderer/narration-entry.js';
-import { QuestionRecorder, RECORDER_STOP_REASON_MAP } from '../core/command/question-recorder.js';
+import { QuestionRecorder } from '../core/command/question-recorder.js';
 import { MeetMicGuard } from '../core/command/meet-mic-guard.js';
+import { MicQuestionController } from '../core/command/mic-question-controller.js';
 import { CaptionNarrator } from '../core/audio-renderer/caption-narrator.js';
 import { NarrationMixer } from '../core/audio-renderer/narration-mixer.js';
 import {
@@ -1036,12 +1037,15 @@ const USER_COMMAND_LABEL_MAP = {
 async function askQuestion({ command = null, questionText = null, inputSource = 'typed' }) {
   if (command && isDuplicateCommand({ command })) return;
   if (!captureSource.isActive) {
-    showNotice('회의 캡처를 시작해야 질문할 수 있습니다');
+    announce('회의 캡처를 시작해야 질문할 수 있어요');
     return;
   }
   appendAskBubble({ text: questionText || USER_COMMAND_LABEL_MAP[command] || command });
   const buffer = await captureFrameJpeg();
-  if (!buffer) return;
+  if (!buffer) {
+    announce('화면을 캡처하지 못해 질문하지 못했어요');
+    return;
+  }
   const ts = Date.now();
   const wordBudget = computeAnswerWordBudget({ mode: getCurrentMode() });
   if (!questionText) {
@@ -1056,7 +1060,7 @@ async function askQuestion({ command = null, questionText = null, inputSource = 
     currentSlideLabel: slideRegistry.currentLabel(), speakerHintNow: getSpeakerHint(),
     eventVideoTimeMs: captureSource.videoTimeMs,
   }).catch(() => null);
-  if (!result?.isOk) showNotice('질문에 답하지 못했어요');
+  if (!result?.isOk) announce('답을 만들지 못했어요');
 }
 
 function handleUserCommand({ command }) {
@@ -1418,6 +1422,7 @@ function stopExperiment() {
     ['경계 탐지기', () => boundaryDetector.reset()],
     ['지시 탐지기', () => deixisDetector.reset()],
     ['후보 스케줄러', () => candidateScheduler.reset()],
+    ['마이크 질문', () => micQuestionController.cancel()],
     ['해설 보류 게이트', () => narrationGate.clear()],
     ['인접 발화 창', () => transcriptWindow.reset()],
     ['삽입 후보 틈', () => gapCandidateStore.reset()],
@@ -1572,11 +1577,6 @@ function announce(text) {
 }
 
 // 마이크 질문(Ctrl+8): 사용자 마이크만 녹음해 별도 경로로 전사한 뒤 자유 질문과 같은 경로로 묻는다.
-const MIC_CANCEL_NOTICE_MAP = {
-  [RECORDER_STOP_REASON_MAP.noVoice]: '음성이 감지되지 않았어요',
-  permission: '마이크 권한이 필요해요',
-};
-
 function setMicUi(isRecording) {
   const mic = $('cmdMic');
   mic.classList.toggle('recording', isRecording);
@@ -1599,43 +1599,37 @@ async function endMicQuestionSession() {
   narrationGate.release();
 }
 
-const questionRecorder = new QuestionRecorder({
-  onFinish: async ({ buffer, startTs }) => {
-    setMicUi(false);
-    await endMicQuestionSession();
-    announce('질문을 듣고 있어요');
-    const result = await window.seeon.sendQuestionAudio({ buffer, startTs }).catch(() => null);
-    if (!result?.text) {
-      announce('질문을 알아듣지 못했어요');
-      return;
-    }
-    await askQuestion({ questionText: result.text, inputSource: 'mic' });
-  },
-  onCancel: async ({ reason }) => {
-    setMicUi(false);
-    await endMicQuestionSession();
-    announce(MIC_CANCEL_NOTICE_MAP[reason] || '마이크 질문을 취소했어요');
-  },
-});
-
-async function toggleMicQuestion() {
-  if (questionRecorder.isRecording) {
-    await questionRecorder.toggle();
+async function askQuestionFromAudio({ buffer, startTs }) {
+  announce('질문을 듣고 있어요');
+  const result = await window.seeon.sendQuestionAudio({ buffer, startTs }).catch(() => null);
+  if (!result?.isOk) {
+    announce('음성 인식 서버에 연결하지 못했어요');
     return;
   }
-  if (!captureSource.isActive) {
-    announce('회의 캡처를 시작해야 질문할 수 있어요');
+  if (!result.text) {
+    announce('질문을 알아듣지 못했어요');
     return;
   }
-  await beginMicQuestionSession();
-  const isStarted = await questionRecorder.start();
-  if (!isStarted) return;
-  setMicUi(true);
-  announce('질문을 말씀하세요');
+  await askQuestion({ questionText: result.text, inputSource: 'mic' });
 }
 
-$('cmdMic').addEventListener('click', () => { toggleMicQuestion(); });
-window.seeon.onMicToggle(() => { toggleMicQuestion(); });
+let micQuestionController = null;
+const questionRecorder = new QuestionRecorder({
+  onFinish: (event) => micQuestionController.handleFinish(event),
+  onCancel: (event) => micQuestionController.handleCancel(event),
+});
+micQuestionController = new MicQuestionController({
+  recorder: questionRecorder,
+  canStart: () => captureSource.isActive,
+  beginSession: beginMicQuestionSession,
+  endSession: endMicQuestionSession,
+  announce,
+  setUi: setMicUi,
+  onQuestionAudio: askQuestionFromAudio,
+});
+
+$('cmdMic').addEventListener('click', () => { micQuestionController.toggle(); });
+window.seeon.onMicToggle(() => { micQuestionController.toggle(); });
 for (const chip of $('cmdChips').querySelectorAll('.chip')) {
   chip.addEventListener('click', () => handleUserCommand({ command: chip.dataset.command }));
 }

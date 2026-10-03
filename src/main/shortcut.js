@@ -24,8 +24,9 @@ function isSummaryToggleInput({ input }) {
 
 const MIC_TOGGLE_KEY = '8';
 
+// 키를 누르고 있으면 keyDown 이 반복된다. 반복분까지 토글로 보면 녹음이 켜졌다 꺼졌다 한다.
 function isMicToggleInput({ input }) {
-  if (!input || input.type !== 'keyDown') return false;
+  if (!input || input.type !== 'keyDown' || input.isAutoRepeat) return false;
   if (!(input.control || input.meta)) return false;
   if (input.shift || input.alt) return false;
   return input.key === MIC_TOGGLE_KEY;

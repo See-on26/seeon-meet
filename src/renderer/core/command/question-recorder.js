@@ -3,6 +3,7 @@ export const RECORDER_STOP_REASON_MAP = {
   silence: 'silence',
   maxLength: 'max_length',
   noVoice: 'no_voice',
+  cancelled: 'cancelled',
 };
 
 const MIN_VOICED_MS = 200;
@@ -29,7 +30,7 @@ function computeRms(analyser, sampleBuffer) {
   return Math.sqrt(sum / sampleBuffer.length);
 }
 
-// 사용자 마이크만 녹음한다(Meet 회의 소리와 별개). 끝나면 webm 버퍼를 넘기고, 말이 없었으면 취소한다.
+// 사용자 마이크만 녹음한다(Meet 회의 소리와 별개). 끝나면 webm 버퍼를 넘기고, 말이 없었거나 취소되면 취소를 알린다.
 export class QuestionRecorder {
   constructor({ onFinish, onCancel, getUserMedia = (constraints) => navigator.mediaDevices.getUserMedia(constraints),
     now = () => performance.now() }) {
@@ -39,6 +40,7 @@ export class QuestionRecorder {
     this.now = now;
     this.isRecording = false;
     this.isToggled = false;
+    this.stopReason = null;
   }
 
   async start() {
@@ -50,8 +52,19 @@ export class QuestionRecorder {
       this.onCancel?.({ reason: 'permission', message: error.message });
       return false;
     }
+    // 준비 중 하나라도 실패하면 마이크를 닫고 취소를 알린다. 열린 채 남으면 보류 게이트와 Meet 마이크가 풀리지 않는다.
+    try {
+      this.setUp(stream);
+    } catch (error) {
+      this.tearDown();
+      this.onCancel?.({ reason: 'error', message: error.message });
+      return false;
+    }
+    return true;
+  }
+
+  setUp(stream) {
     this.stream = stream;
-    this.isRecording = true;
     this.isToggled = false;
     this.stopReason = null;
     this.startTs = Date.now();
@@ -66,8 +79,9 @@ export class QuestionRecorder {
     const sampleBuffer = new Float32Array(analyser.fftSize);
     this.recorder = new MediaRecorder(stream, { mimeType: AUDIO_MIME_TYPE });
     this.recorder.ondataavailable = (event) => { if (event.data.size) this.chunkList.push(event.data); };
-    this.recorder.onstop = () => this.finish();
+    this.recorder.onstop = () => { this.finish(); };
     this.recorder.start();
+    this.isRecording = true;
     this.sampleTimer = setInterval(() => {
       if (computeRms(analyser, sampleBuffer) >= VOICE_LEVEL_THRESHOLD) {
         this.voicedMs += SAMPLE_MS;
@@ -77,7 +91,15 @@ export class QuestionRecorder {
       }
       this.checkStop();
     }, SAMPLE_MS);
-    return true;
+  }
+
+  tearDown() {
+    clearInterval(this.sampleTimer);
+    this.sampleTimer = null;
+    this.isRecording = false;
+    for (const track of this.stream?.getTracks?.() || []) track.stop();
+    this.audioContext?.close().catch(() => {});
+    this.audioContext = null;
   }
 
   toggle() {
@@ -87,28 +109,41 @@ export class QuestionRecorder {
     return Promise.resolve(false);
   }
 
+  cancel() {
+    if (!this.isRecording) return;
+    this.requestStop(RECORDER_STOP_REASON_MAP.cancelled);
+  }
+
   checkStop() {
     const reason = resolveRecorderStop({
       elapsedMs: this.now() - this.startedAt, voicedMs: this.voicedMs,
       silenceMs: this.silenceMs, isToggled: this.isToggled,
     });
-    if (!reason || this.stopReason) return;
+    if (reason) this.requestStop(reason);
+  }
+
+  requestStop(reason) {
+    if (this.stopReason) return;
     this.stopReason = reason;
     clearInterval(this.sampleTimer);
     if (this.recorder.state !== 'inactive') this.recorder.stop();
+    else this.finish();
   }
 
   async finish() {
-    const reason = this.stopReason;
+    const reason = this.stopReason || RECORDER_STOP_REASON_MAP.cancelled;
     this.stopReason = null;
-    this.isRecording = false;
-    for (const track of this.stream.getTracks()) track.stop();
-    this.audioContext.close().catch(() => {});
-    if (reason === RECORDER_STOP_REASON_MAP.noVoice) {
+    const chunkList = this.chunkList;
+    this.tearDown();
+    if (reason === RECORDER_STOP_REASON_MAP.noVoice || reason === RECORDER_STOP_REASON_MAP.cancelled) {
       this.onCancel?.({ reason });
       return;
     }
-    const blob = new Blob(this.chunkList, { type: AUDIO_MIME_TYPE });
-    this.onFinish?.({ buffer: await blob.arrayBuffer(), startTs: this.startTs, reason });
+    try {
+      const blob = new Blob(chunkList, { type: AUDIO_MIME_TYPE });
+      this.onFinish?.({ buffer: await blob.arrayBuffer(), startTs: this.startTs, reason });
+    } catch (error) {
+      this.onCancel?.({ reason: 'error', message: error.message });
+    }
   }
 }
