@@ -1,3 +1,4 @@
+const fs = require('fs');
 const { ipcMain } = require('electron');
 const { readPipelineConfig } = require('./config');
 const {
@@ -29,6 +30,10 @@ const { verifyValuePresence, VALUE_PRESENCE_VERDICT_MAP } = require('./orchestra
 const { createContextStore, toSlideMajor, LABEL_STATUS_MAP } = require('./context/context-store');
 const { createSlideLabeler } = require('./context/slide-labeler');
 const { createContextFileWriter } = require('./context/context-file');
+const { classifyQuestion, QUESTION_ROUTE_MAP } = require('./context/question-classifier');
+const { createQuestionRouter, selectFollowUpQa } = require('./context/question-router');
+const { createQuestionAnswerer, NOT_FOUND_TEXT } = require('./context/question-answerer');
+const { buildSlideEvidence } = require('./prompts/question-answer');
 const { OUT_DIR, CONTEXT_DIR } = require('../paths');
 
 const ASR_DRAIN_TIMEOUT_MS = 8000;
@@ -91,6 +96,23 @@ function registerPipeline({ getViewerView }) {
     config, prompt, label, maxTokens, temperature: 0,
   });
   const slideLabeler = createSlideLabeler({ requestText });
+  const questionRouter = createQuestionRouter({ requestText });
+  const questionAnswerer = createQuestionAnswerer({
+    contextStore,
+    requestText,
+    requestImage: ({ jpegBuffer, prompt, label, maxTokens }) => requestVlmContent({
+      config, jpegBuffer, prompt, label, maxTokens,
+    }),
+    readImage: (filePath) => fs.promises.readFile(filePath).catch(() => null),
+  });
+
+  function buildCurrentSlideContextText(major) {
+    const slide = major === null ? null : contextStore.getSlide(major);
+    if (!slide) return '';
+    return buildSlideEvidence({
+      slide, utteranceList: [], narrationList: [], startedAt: contextStore.getSessionInfo().startedAt,
+    });
+  }
 
   function appendRecord(record) {
     try {
@@ -839,6 +861,70 @@ function registerPipeline({ getViewerView }) {
       console.error(`[pipeline] ✖ 커맨드 실패 ts=${ts}: ${error.message}`);
       await appendErrorRecordSafely({
         appendRecord, record: { kind: RECORD_KIND_MAP.error, ts, stage, message: error.message },
+      });
+      return { isOk: false, message: error.message };
+    }
+  });
+
+  ipcMain.handle('pipeline-question', async (_event, { ts, buffer, questionText, recentTranscript = '',
+    wordBudget, currentSlideLabel = null, speakerHintNow = null, inputSource = 'typed',
+    eventVideoTimeMs = null }) => {
+    const startedAt = Date.now();
+    const currentSlideMajor = toSlideMajor(currentSlideLabel) ?? contextStore.getCurrentSlideMajor();
+    const followUpQa = selectFollowUpQa({ lastQa: contextStore.getLastQa(), now: Date.now() });
+    try {
+      const ruled = classifyQuestion(questionText);
+      const knownMajorSet = new Set(contextStore.buildIndex().map((entry) => entry.major));
+      const isRuledUsable = ruled && (ruled.route !== QUESTION_ROUTE_MAP.pastSlide
+        || ruled.slideMajorList.every((major) => knownMajorSet.has(major)));
+      const routed = isRuledUsable
+        ? { ...ruled, source: 'rule', reason: '' }
+        : await questionRouter.route({
+          questionText, currentSlideMajor, index: contextStore.buildIndex(), followUpQa,
+          startedAt: contextStore.getSessionInfo().startedAt,
+        });
+      markDebug({
+        stage: DEBUG_STAGE_MAP.question, verdict: DEBUG_VERDICT_MAP.info, ts,
+        narrationType: NARRATION_TYPE_MAP.userCommand,
+        reason: `질문 갈래 ${routed.route} (${routed.source})`,
+        detail: `"${questionText}" 입력=${inputSource} 대상=[${routed.slideMajorList.join(', ')}]`
+          + `${followUpQa ? ` 직전질문="${followUpQa.question}"` : ''}${routed.reason ? ` · ${routed.reason}` : ''}`,
+      });
+
+      const result = routed.route === QUESTION_ROUTE_MAP.currentScreen
+        ? await agentFieldMap[NARRATION_TYPE_MAP.userCommand].generate({
+          jpegBuffer: Buffer.from(buffer), questionText, recentTranscript,
+          contextText: buildCurrentSlideContextText(currentSlideMajor),
+          minWordCount: wordBudget?.minWordCount, maxWordCount: wordBudget?.maxWordCount,
+        })
+        : await questionAnswerer.answer({
+          route: routed.route, slideMajorList: routed.slideMajorList, questionText, wordBudget, speakerHintNow,
+        });
+      const text = result.isGrounded && result.text ? result.text : NOT_FOUND_TEXT;
+      contextStore.addQa({
+        ts, question: questionText, answer: text, route: routed.route,
+        slideMajorList: routed.slideMajorList, isFollowUp: Boolean(followUpQa),
+      });
+      await appendRecord({
+        kind: RECORD_KIND_MAP.deixis, ts, utterance: questionText, caption: text,
+        isGrounded: Boolean(result.isGrounded), narrationType: NARRATION_TYPE_MAP.userCommand,
+        subKind: `question:${routed.route}`,
+      });
+      console.log(`[pipeline] 질문 답 (${Date.now() - startedAt}ms) [${routed.route}] "${truncateForLog(questionText)}" → "${truncateForLog(text)}"`);
+      await sendCaption({
+        ts, text, source: NARRATION_TYPE_MAP.userCommand, isDedupeExempt: true,
+        narrationClass: NARRATION_CLASS_MAP.userCommand, eventVideoTimeMs,
+        rationale: { subKind: `question:${routed.route}`, summary: '사용자가 직접 물은 질문' },
+      });
+      return { isOk: true, isGrounded: Boolean(result.isGrounded), route: routed.route };
+    } catch (error) {
+      console.error(`[pipeline] ✖ 질문 처리 실패 ts=${ts}: ${error.message}`);
+      markDebug({
+        stage: DEBUG_STAGE_MAP.question, verdict: DEBUG_VERDICT_MAP.fail, ts,
+        narrationType: NARRATION_TYPE_MAP.userCommand, reason: '질문 처리 실패', detail: error.message,
+      });
+      await appendErrorRecordSafely({
+        appendRecord, record: { kind: RECORD_KIND_MAP.error, ts, stage: 'question', message: error.message },
       });
       return { isOk: false, message: error.message };
     }

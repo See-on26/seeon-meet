@@ -46,7 +46,7 @@ function buildCommandPrompt({ command,
 // PDF 3.1.2⑧의 "심화 질의응답 에이전트" 경로. 전용 생성기를 새로 만들지 않고 이 프롬프트를 쓴다.
 function buildFreeQuestionPrompt({ questionText,
   minWordCount = DEFAULT_COMMAND_MIN_WORD_COUNT,
-  maxWordCount = DEFAULT_COMMAND_MAX_WORD_COUNT, maxChars = null, recentTranscript = '' }) {
+  maxWordCount = DEFAULT_COMMAND_MAX_WORD_COUNT, maxChars = null, recentTranscript = '', contextText = '' }) {
   const effectiveMaxChars = Number.isFinite(maxChars) ? maxChars : computeMaxChars({ maxWordCount });
   return [
     '이 이미지는 회의에서 공유 중인 화면이다.',
@@ -54,6 +54,7 @@ function buildFreeQuestionPrompt({ questionText,
     '',
     `질문: "${questionText}"`,
     recentTranscript ? `참고로 최근 발화 맥락은 다음과 같다: ${recentTranscript}` : '',
+    contextText ? `참고로 이 화면에 대해 저장해 둔 기록: ${contextText}` : '',
     '',
     '규칙:',
     '(1) 화면에 실제로 보이는 것에 근거해 답한다. 지어내지 않는다.',

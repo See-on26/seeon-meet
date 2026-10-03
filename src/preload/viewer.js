@@ -58,6 +58,10 @@ contextBridge.exposeInMainWorld('seeon', {
     return ipcRenderer.invoke('pipeline-command',
       { ts, buffer: new Uint8Array(buffer), command, questionText, recentTranscript, wordBudget, eventVideoTimeMs });
   },
+  sendPipelineQuestion({ ts, buffer, questionText, recentTranscript = '', wordBudget = null, currentSlideLabel = null, speakerHintNow = null, inputSource = 'typed', eventVideoTimeMs = null }) {
+    return ipcRenderer.invoke('pipeline-question',
+      { ts, buffer: new Uint8Array(buffer), questionText, recentTranscript, wordBudget, currentSlideLabel, speakerHintNow, inputSource, eventVideoTimeMs });
+  },
   inferInsertionGap(args) { return ipcRenderer.invoke('pipeline-gap', args); },
   onUserCommand(callback) { ipcRenderer.on('user-command', (_e, payload) => callback(payload)); },
   onSummaryToggle(callback) { ipcRenderer.on('summary-toggle', () => callback()); },

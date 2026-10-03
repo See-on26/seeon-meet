@@ -67,6 +67,25 @@ export const MODE_POLICY_MAP = {
   },
 };
 
+const ANSWER_MIN_WORD_COUNT = 3;
+const ANSWER_DEFAULT_MAX_WORD_COUNT = 12;
+
+// 사용자가 직접 물은 질문의 답 길이 상한. 교차 모드일수록 회의를 오래 멈출 수 있어 길게 답한다.
+export const ANSWER_MAX_WORD_MAP = {
+  [MODE_MAP.listening]: 25,
+  [MODE_MAP.delayed]: 15,
+  [MODE_MAP.realtimeSic]: 12,
+  [MODE_MAP.realtimeMix]: 12,
+};
+
+export function computeAnswerWordBudget({ mode }) {
+  return {
+    minWordCount: ANSWER_MIN_WORD_COUNT,
+    maxWordCount: ANSWER_MAX_WORD_MAP[mode] ?? ANSWER_DEFAULT_MAX_WORD_COUNT,
+    isDroppable: false,
+  };
+}
+
 export const NARRATION_WORD_RANGE_MAP = {
   [NARRATION_TYPE_MAP.pageTransition]: {
     [PAGE_TRANSITION_KIND_MAP.slide]: { minWordCount: 6, maxWordCount: 9 },

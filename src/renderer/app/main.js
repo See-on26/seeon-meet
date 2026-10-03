@@ -6,7 +6,7 @@ import {
 import {
   MODE_MAP, DWELL_MS, IS_DELAY_BUFFER_ENABLED,
   computeWordBudget, canSwitchMode, getModePolicy, getCatchupRateRange,
-  computeLookaheadMs, computeContextHoldMs, resolveBeforeAnchorTs,
+  computeLookaheadMs, computeContextHoldMs, resolveBeforeAnchorTs, computeAnswerWordBudget,
 } from '../core/mode/mode-policy.js';
 import { CONTEXT_TOKEN_BUDGET } from '../core/mode/context-budget.js';
 
@@ -1029,7 +1029,7 @@ const USER_COMMAND_LABEL_MAP = {
 
 // 프리셋 커맨드(command)와 자유 자연어 질문(questionText)을 함께 처리한다.
 // 자유 질문이면 최근 발화(recentTranscript)를 근거로 붙인다 — 심화 질의응답 경로.
-async function askQuestion({ command = null, questionText = null }) {
+async function askQuestion({ command = null, questionText = null, inputSource = 'typed' }) {
   if (command && isDuplicateCommand({ command })) return;
   if (!captureSource.isActive) {
     showNotice('회의 캡처를 시작해야 질문할 수 있습니다');
@@ -1039,17 +1039,20 @@ async function askQuestion({ command = null, questionText = null }) {
   const buffer = await captureFrameJpeg();
   if (!buffer) return;
   const ts = Date.now();
-  const wordBudget = buildWordBudget({ narrationType: NARRATION_TYPE_MAP.userCommand });
-  const recentTranscript = questionText
-    ? transcriptWindow.getBefore({ nowTs: performance.now(), windowMs: 60000 })
-    : '';
-  const result = await window.seeon.sendPipelineCommand({
-    ts, buffer, command, questionText, recentTranscript, wordBudget,
+  const wordBudget = computeAnswerWordBudget({ mode: getCurrentMode() });
+  if (!questionText) {
+    await window.seeon.sendPipelineCommand({
+      ts, buffer, command, wordBudget, eventVideoTimeMs: captureSource.videoTimeMs,
+    }).catch(() => null);
+    return;
+  }
+  const result = await window.seeon.sendPipelineQuestion({
+    ts, buffer, questionText, wordBudget, inputSource,
+    recentTranscript: transcriptWindow.getBefore({ nowTs: performance.now(), windowMs: 60000 }),
+    currentSlideLabel: slideRegistry.currentLabel(), speakerHintNow: getSpeakerHint(),
     eventVideoTimeMs: captureSource.videoTimeMs,
   }).catch(() => null);
-  if (!result?.isGrounded && questionText) {
-    showNotice('화면에서 답을 찾지 못했어요');
-  }
+  if (!result?.isOk) showNotice('질문에 답하지 못했어요');
 }
 
 function handleUserCommand({ command }) {
