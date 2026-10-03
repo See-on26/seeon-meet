@@ -40,6 +40,11 @@ contextBridge.exposeInMainWorld('seeon', {
       speakerName, position, participantId, wordBudget, eventVideoTimeMs,
     });
   },
+  sendPipelineSilence({ ts, buffer, slideLabel, recentTranscript, silenceMs, wordBudget, eventVideoTimeMs = null }) {
+    return ipcRenderer.invoke('pipeline-silence', {
+      ts, buffer: new Uint8Array(buffer), slideLabel, recentTranscript, silenceMs, wordBudget, eventVideoTimeMs,
+    });
+  },
   embedFrame({ buffer }) {
     return ipcRenderer.invoke('embed-frame', { buffer: new Uint8Array(buffer) });
   },

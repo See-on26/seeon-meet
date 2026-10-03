@@ -112,6 +112,7 @@ export const DEBUG_STAGE_MAP = {
   vlmFallback: 'vlm_fallback',
   context: 'context',
   question: 'question',
+  silence: 'silence',
 };
 
 export const DEBUG_VERDICT_MAP = { pass: 'pass', skip: 'skip', fail: 'fail', info: 'info' };

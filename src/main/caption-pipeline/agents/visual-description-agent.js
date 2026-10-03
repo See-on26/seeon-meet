@@ -14,7 +14,7 @@ const VISUAL_DESCRIPTION_TEMPERATURE = 0.3;
 function createVisualDescriptionAgent({ config }) {
   async function generate({ jpegBuffer, subKind = VISUAL_DESCRIPTION_KIND_MAP.reaction,
     utterance = '', recentTranscript = '', minWordCount, maxWordCount,
-    describedElementList = [], mergedAnchorList = [] }) {
+    describedElementList = [], mergedAnchorList = [], origin = null }) {
     const defaultRange = DEFAULT_VISUAL_WORD_RANGE_MAP[subKind]
       || DEFAULT_VISUAL_WORD_RANGE_MAP[VISUAL_DESCRIPTION_KIND_MAP.reaction];
     const effectiveMaxWordCount = Number.isFinite(maxWordCount) ? maxWordCount : defaultRange.maxWordCount;
@@ -23,7 +23,7 @@ function createVisualDescriptionAgent({ config }) {
       config, jpegBuffer, label: AGENT_LABEL, temperature: VISUAL_DESCRIPTION_TEMPERATURE,
       prompt: buildVisualDescriptionPrompt({
         subKind, utterance, recentTranscript, minWordCount, maxWordCount,
-        maxChars: effectiveMaxChars, describedElementList, mergedAnchorList,
+        maxChars: effectiveMaxChars, describedElementList, mergedAnchorList, origin,
       }),
     });
     return parseSlotCaption({

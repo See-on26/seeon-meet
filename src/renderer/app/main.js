@@ -2,6 +2,7 @@ import {
   CROP_JPEG_QUALITY, NARRATION_TYPE_MAP, NARRATION_CLASS_MAP,
   PAGE_TRANSITION_KIND_MAP, USER_COMMAND_KEY_MAP, USER_COMMAND_MAP, SUMMARY_TOGGLE_KEY,
   MEET_MEETING_URL_PATTERN, SPEAKER_SOURCE_MAP, DEBUG_STAGE_MAP, DEBUG_VERDICT_MAP,
+  VISUAL_DESCRIPTION_KIND_MAP,
 } from '../core/constants.js';
 import {
   MODE_MAP, DWELL_MS, IS_DELAY_BUFFER_ENABLED,
@@ -18,7 +19,7 @@ import { GapCandidateStore, resolveGapSearchFromMs } from '../core/audio-rendere
 import { isImmediateCaption, NarrationHoldGate } from '../core/audio-renderer/narration-entry.js';
 import { QuestionRecorder } from '../core/command/question-recorder.js';
 import { MeetMicGuard } from '../core/command/meet-mic-guard.js';
-import { MicQuestionController } from '../core/command/mic-question-controller.js';
+import { MicQuestionController, MIC_PHASE_MAP } from '../core/command/mic-question-controller.js';
 import { CaptionNarrator } from '../core/audio-renderer/caption-narrator.js';
 import { NarrationMixer } from '../core/audio-renderer/narration-mixer.js';
 import {
@@ -33,6 +34,9 @@ import {
 import { TranscriptWindow } from '../core/trigger/transcript-window.js';
 import { DeixisDetector } from '../core/trigger/deixis-detector.js';
 import { resolveLastSpeechWallTs } from '../core/trigger/speech-activity.js';
+import {
+  SilenceTrigger, evaluateSilencePrecondition, SILENCE_TRANSCRIPT_WINDOW_MS, SILENCE_SKIP_LABEL_MAP,
+} from '../core/trigger/silence-trigger.js';
 import { DeixisCandidateScheduler, CANDIDATE_SOURCE_MAP } from '../core/trigger/deixis-candidate-scheduler.js';
 import { judgeScreenDependency, SCREEN_DEPENDENCY_REASON_MAP } from '../core/trigger/screen-dependency.js';
 import { PointingLocator, describeDirection } from '../core/trigger/pointing-locator.js';
@@ -817,6 +821,7 @@ let lastResolvedSpeakerName = '';
 let lastResolvedSpeakerAt = 0;
 
 let lastSpeechBlindAt = 0;
+const silenceTrigger = new SilenceTrigger();
 
 function getLastSpeechWallTs() {
   return resolveLastSpeechWallTs({
@@ -1322,8 +1327,52 @@ function isNarrationEchoWindow() {
 setInterval(() => {
   if (!captureSource.isActive) return;
   if (isNarrationEchoWindow()) { lastSpeechBlindAt = performance.now(); return; }
-  if (audioMeter.getLevel() > AUDIO_SPEAK_THRESHOLD) lastAudioActiveAt = performance.now();
+  const nowPerf = performance.now();
+  if (audioMeter.getLevel() > AUDIO_SPEAK_THRESHOLD) lastAudioActiveAt = nowPerf;
+  // 해설 재생 구간은 lastSpeechBlindAt 으로 말소리가 이어진 것으로 본다. 그래서 해설이 끝난 뒤부터 무음을 센다.
+  const lastHeardAt = Math.max(lastAudioActiveAt, lastSpeechBlindAt);
+  const isMicQuestionActive = Boolean(micQuestionController) && micQuestionController.phase !== MIC_PHASE_MAP.idle;
+  if (isExperimentPaused || isMicQuestionActive) return;
+  if (silenceTrigger.update({ nowPerf, lastHeardAt })) {
+    handleSilenceTrigger({ silenceMs: nowPerf - lastHeardAt }).catch((error) => {
+      console.warn('[silence] 무발화 처리 오류', error);
+    });
+  }
 }, 100);
+
+async function handleSilenceTrigger({ silenceMs }) {
+  if (!isPipelineEnabled()) return;
+  const slideLabel = slideRegistry.currentLabel();
+  const recentTranscript = transcriptWindow.getBefore({
+    nowTs: performance.now(), windowMs: SILENCE_TRANSCRIPT_WINDOW_MS,
+  });
+  const wordBudget = buildWordBudget({
+    narrationType: NARRATION_TYPE_MAP.visualDescription, subKind: VISUAL_DESCRIPTION_KIND_MAP.reaction,
+  });
+  const precondition = evaluateSilencePrecondition({ slideLabel, recentTranscript, wordBudget });
+  const silenceLog = `무음 ${Math.round(silenceMs / 1000)}초 · 슬라이드=${slideLabel || '-'} · 모드=${getCurrentMode()}`;
+  if (!precondition.isReady) {
+    markDebug({
+      stage: DEBUG_STAGE_MAP.silence, verdict: DEBUG_VERDICT_MAP.skip,
+      narrationType: NARRATION_TYPE_MAP.visualDescription,
+      reason: SILENCE_SKIP_LABEL_MAP[precondition.reason], detail: silenceLog,
+    });
+    return;
+  }
+  const buffer = await captureFrameJpeg();
+  if (!buffer) {
+    markDebug({
+      stage: DEBUG_STAGE_MAP.silence, verdict: DEBUG_VERDICT_MAP.skip,
+      narrationType: NARRATION_TYPE_MAP.visualDescription,
+      reason: SILENCE_SKIP_LABEL_MAP.no_screen, detail: `${silenceLog} · 화면 캡처 실패`,
+    });
+    return;
+  }
+  await window.seeon.sendPipelineSilence({
+    ts: Date.now(), buffer, slideLabel, recentTranscript, silenceMs, wordBudget,
+    eventVideoTimeMs: captureSource.videoTimeMs,
+  });
+}
 
 function setToggleUi(isRunning) {
   $('toggleBtn').textContent = isRunning ? '회의 캡처 정지' : '회의 캡처 시작';
@@ -1357,6 +1406,7 @@ function resumeExperiment() {
   startNarrationPlayer({ stream });
   delayBuffer?.release();
   pointingLocator.reset();
+  silenceTrigger.reset({ nowPerf: performance.now() });
 
   lastPointingMotionAt = -Infinity;
   pointingSampleTimer = setInterval(samplePointingFrame, POINTING_SAMPLE_MS);
@@ -1409,6 +1459,7 @@ async function attemptStartExperiment() {
     audioMeter.start(stream);
     startNarrationPlayer({ stream });
     boundaryDetector.reset();
+    silenceTrigger.reset({ nowPerf: performance.now() });
     deixisDetector.reset();
     candidateScheduler.reset();
     pointingLocator.reset();

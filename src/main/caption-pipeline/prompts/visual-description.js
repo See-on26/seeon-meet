@@ -1,4 +1,5 @@
 const { NARRATION_TYPE_MAP, VISUAL_DESCRIPTION_KIND_MAP } = require('../contracts/narration-types');
+const { NARRATION_ORIGIN_MAP } = require('../contracts/narration-class');
 const {
   GROUNDING_NONE_TOKEN, computeMaxChars, buildSlotOutputInstruction,
 } = require('../agents/shared/caption-parser');
@@ -10,7 +11,7 @@ const DEFAULT_VISUAL_WORD_RANGE_MAP = {
 
 function buildVisualDescriptionPrompt({ subKind = VISUAL_DESCRIPTION_KIND_MAP.reaction,
   utterance = '', recentTranscript = '', minWordCount, maxWordCount, maxChars = null,
-  describedElementList = [], mergedAnchorList = [] }) {
+  describedElementList = [], mergedAnchorList = [], origin = null }) {
   const defaultRange = DEFAULT_VISUAL_WORD_RANGE_MAP[subKind]
     || DEFAULT_VISUAL_WORD_RANGE_MAP[VISUAL_DESCRIPTION_KIND_MAP.reaction];
   const effectiveMinWordCount = Number.isFinite(minWordCount) ? minWordCount : defaultRange.minWordCount;
@@ -52,10 +53,24 @@ function buildVisualDescriptionPrompt({ subKind = VISUAL_DESCRIPTION_KIND_MAP.re
     ].filter(Boolean).join('\n');
   }
 
+  // 무발화는 사진 전환이 아니라 "화면을 보라"고 한 뒤의 침묵이다. 상황 설명만 바꾸고 출력 형식은 같다.
+  const situationLineList = origin === NARRATION_ORIGIN_MAP.silence
+    ? [
+      '이 이미지는 회의에서 공유 중인 화면이다.',
+      '발표자가 화면을 보라고 한 뒤 말없이 기다리고 있다. 청중은 지금 이 화면을 보며 반응하고 있다.',
+      recentTranscript ? `발표자의 침묵 직전 발화: ${recentTranscript}` : '',
+      '발표자가 보라고 한 대상(사진·영상·그래프·표 등)이 무엇이고 무엇을 보여 주는지 묘사하라.',
+      '화면의 제목·본문 문장을 그대로 옮기지 않는다. 글만 있는 화면이면 NONE 이다.',
+      '묘사는 "…사진", "…그래프", "…표"처럼 자료 종류로 끝맺는다.',
+    ]
+    : [
+      '이 이미지는 회의에서 방금 단독으로 제시된 사진이다.',
+      '발표자는 이 사진의 의미를 말로 설명하지 않았다. 사진 자체로 웃음·감탄·충격 같은 반응을 노린 것이다.',
+      recentTranscript ? `참고로 최근 발화 맥락은 다음과 같다: ${recentTranscript}` : '',
+    ];
+
   return [
-    '이 이미지는 회의에서 방금 단독으로 제시된 사진이다.',
-    '발표자는 이 사진의 의미를 말로 설명하지 않았다. 사진 자체로 웃음·감탄·충격 같은 반응을 노린 것이다.',
-    recentTranscript ? `참고로 최근 발화 맥락은 다음과 같다: ${recentTranscript}` : '',
+    ...situationLineList,
     '',
     '청자는 화면을 볼 수 없어 다른 사람들과 같이 반응할 수 없다.',
     '**반응을 일으키는 요소를 포함해서** 이 사진을 묘사하라.',

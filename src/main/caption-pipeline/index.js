@@ -5,12 +5,15 @@ const {
   NARRATION_TYPE_MAP, VISUAL_DESCRIPTION_KIND_MAP, SPEAKER_SOURCE_MAP, NARRATION_CLASS_MAP,
   INTERPRETATION_KIND_MAP,
 } = require('./contracts/narration-types');
-const { toNarrationClass } = require('./contracts/narration-class');
+const { toNarrationClass, NARRATION_ORIGIN_MAP } = require('./contracts/narration-class');
 const { buildSpeakerIdentityFromDom } = require('./agents/speaker-identity-agent');
 const { DEBUG_STAGE_MAP, DEBUG_VERDICT_MAP } = require('./contracts/debug-events');
 const { createAgentFieldMap } = require('./agents');
 const { createUnifiedRouter, ROUTER_MODE_MAP } = require('./router/unified-router');
 const { createDeixisJudgeClient } = require('./router/deixis-judge');
+const { createSilenceJudge } = require('./router/silence-judge');
+const { createSilenceNarrationGate, SILENCE_GATE_LABEL_MAP } = require('./orchestrator/silence-gate');
+const { createSilenceNarrator, SILENCE_RESULT_MAP } = require('./orchestrator/silence-narrator');
 const { selectGeneratableCandidate } = require('./orchestrator/candidate-selector');
 const { createDescribedStore } = require('./orchestrator/described-store');
 const { createScreenRegistry } = require('./orchestrator/screen-registry');
@@ -83,6 +86,8 @@ function registerPipeline({ getViewerView }) {
   const slideTopicRegistry = createSlideTopicRegistry();
   const speakerRegistry = createSpeakerRegistry();
   const narrationHistory = createNarrationHistory();
+  const silenceGate = createSilenceNarrationGate();
+  const silenceNarrator = createSilenceNarrator({ gate: silenceGate, judge: createSilenceJudge({ config }) });
   console.log(`[pipeline] 발화 축 판정 경로: ${config.routerMode}`);
 
   const contextFile = createContextFileWriter({ outDir: CONTEXT_DIR });
@@ -281,6 +286,7 @@ function registerPipeline({ getViewerView }) {
     slideTopicRegistry.reset();
     speakerRegistry.reset();
     narrationHistory.reset();
+    silenceGate.reset();
     slideTextStore.reset();
     const { sessionId } = sessionStore.startSession({ mode });
     contextGeneration += 1;
@@ -604,6 +610,67 @@ function registerPipeline({ getViewerView }) {
       });
       return { isOk: false, message: error.message };
     }
+  });
+
+  // 무발화(4-1): 발표자가 화면을 보라고 한 뒤 5초 이상 침묵하면 화면을 묘사한다. 애매하면 내지 않는다.
+  ipcMain.handle('pipeline-silence', async (_event, {
+    ts, buffer, slideLabel, recentTranscript = '', silenceMs = 0, wordBudget = null, eventVideoTimeMs = null,
+  }) => {
+    const startedAt = Date.now();
+    const silenceSec = Math.round(silenceMs / 1000);
+    const result = await silenceNarrator.run({
+      slideLabel, transcript: recentTranscript, silenceMs,
+      describe: () => agentFieldMap[NARRATION_TYPE_MAP.visualDescription].generate({
+        jpegBuffer: Buffer.from(buffer), subKind: VISUAL_DESCRIPTION_KIND_MAP.reaction,
+        origin: NARRATION_ORIGIN_MAP.silence, recentTranscript,
+        minWordCount: wordBudget?.minWordCount, maxWordCount: wordBudget?.maxWordCount,
+        describedElementList: describedStore.getDescribed(slideLabel),
+      }),
+      emit: async ({ text }) => {
+        await appendRecord({
+          kind: RECORD_KIND_MAP.deixis, ts, utterance: recentTranscript, caption: text, isGrounded: true,
+          slideLabel, narrationType: NARRATION_TYPE_MAP.visualDescription,
+          subKind: VISUAL_DESCRIPTION_KIND_MAP.reaction, origin: NARRATION_ORIGIN_MAP.silence,
+        });
+        const sent = await sendCaption({
+          ts, text, source: NARRATION_TYPE_MAP.visualDescription, slideLabel,
+          narrationClass: NARRATION_CLASS_MAP.silenceBased, eventVideoTimeMs,
+          rationale: {
+            subKind: VISUAL_DESCRIPTION_KIND_MAP.reaction,
+            summary: `발표자가 화면을 보라고 한 뒤 ${silenceSec}초 침묵`,
+          },
+        });
+        if (sent.isEmitted) describedStore.addDescribed(slideLabel, [text]);
+        return sent;
+      },
+    });
+    const elapsedMs = Date.now() - startedAt;
+    const transcriptLog = `직전 발화="${truncateForLog(recentTranscript, 80)}" 무음=${silenceSec}초 슬라이드=${slideLabel}`;
+    const debugByStatusMap = {
+      [SILENCE_RESULT_MAP.gated]: {
+        verdict: DEBUG_VERDICT_MAP.skip, reason: SILENCE_GATE_LABEL_MAP[result.reason] || result.reason,
+      },
+      [SILENCE_RESULT_MAP.blocked]: {
+        verdict: DEBUG_VERDICT_MAP.skip, reason: `화면 제시 단서 없음 → 차단 (${result.reason || result.source})`,
+      },
+      [SILENCE_RESULT_MAP.none]: {
+        verdict: DEBUG_VERDICT_MAP.skip,
+        reason: result.rawText ? `끝이 흐린 묘사 폐기 ("${result.rawText}")` : '묘사할 것 없음 (NONE)',
+      },
+      [SILENCE_RESULT_MAP.dropped]: { verdict: DEBUG_VERDICT_MAP.skip, reason: '내보내기 억제 (중복·간격)' },
+      [SILENCE_RESULT_MAP.emitted]: { verdict: DEBUG_VERDICT_MAP.pass, reason: '무발화 해설 생성' },
+      [SILENCE_RESULT_MAP.failed]: { verdict: DEBUG_VERDICT_MAP.fail, reason: `무발화 처리 실패: ${result.reason}` },
+    };
+    const debug = debugByStatusMap[result.status];
+    markDebug({
+      stage: DEBUG_STAGE_MAP.silence, verdict: debug.verdict, ts,
+      narrationType: NARRATION_TYPE_MAP.visualDescription, reason: debug.reason,
+      detail: `${result.text ? `"${result.text}" · ` : ''}${transcriptLog} (${elapsedMs}ms)`,
+    });
+    if (result.status === SILENCE_RESULT_MAP.emitted) {
+      console.log(`[pipeline] 무발화 해설 (${elapsedMs}ms) "${truncateForLog(result.text)}"`);
+    }
+    return { isOk: result.status !== SILENCE_RESULT_MAP.failed, status: result.status };
   });
 
   ipcMain.handle('pipeline-audio', async (_event, { startTs, endTs, buffer, speakerHint }) => {
