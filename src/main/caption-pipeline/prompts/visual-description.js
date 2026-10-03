@@ -1,4 +1,5 @@
 const { NARRATION_TYPE_MAP, VISUAL_DESCRIPTION_KIND_MAP } = require('../contracts/narration-types');
+const { NARRATION_ORIGIN_MAP } = require('../contracts/narration-class');
 const {
   GROUNDING_NONE_TOKEN, computeMaxChars, buildSlotOutputInstruction,
 } = require('../agents/shared/caption-parser');
@@ -10,7 +11,7 @@ const DEFAULT_VISUAL_WORD_RANGE_MAP = {
 
 function buildVisualDescriptionPrompt({ subKind = VISUAL_DESCRIPTION_KIND_MAP.reaction,
   utterance = '', recentTranscript = '', minWordCount, maxWordCount, maxChars = null,
-  describedElementList = [], mergedAnchorList = [] }) {
+  describedElementList = [], mergedAnchorList = [], origin = null }) {
   const defaultRange = DEFAULT_VISUAL_WORD_RANGE_MAP[subKind]
     || DEFAULT_VISUAL_WORD_RANGE_MAP[VISUAL_DESCRIPTION_KIND_MAP.reaction];
   const effectiveMinWordCount = Number.isFinite(minWordCount) ? minWordCount : defaultRange.minWordCount;
@@ -49,6 +50,27 @@ function buildVisualDescriptionPrompt({ subKind = VISUAL_DESCRIPTION_KIND_MAP.re
       ...commonTailList,
       '· 화면에 실제로 보이는 것만 쓴다. 크기를 지어내지 않는다.',
       `· **비교 대상을 찾을 수 없으면 "${GROUNDING_NONE_TOKEN}"만 출력한다.** 배수를 모르면 scale을 빈 문자열로 둔다.`,
+    ].filter(Boolean).join('\n');
+  }
+
+  // 무발화는 사진 전환이 아니라 "화면을 보라"고 한 뒤의 침묵이다. 보라고 한 대상을 자료 종류로 끝맺어 묘사한다.
+  if (origin === NARRATION_ORIGIN_MAP.silence) {
+    return [
+      '이 이미지는 회의에서 공유 중인 화면이다.',
+      '발표자가 화면을 보라고 한 뒤 말없이 기다리고 있다. 청중은 지금 이 화면을 보고 있다.',
+      recentTranscript ? `발표자의 침묵 직전 발화: ${recentTranscript}` : '',
+      '',
+      '청자는 화면을 볼 수 없어 발표자가 보여 주는 것을 함께 볼 수 없다.',
+      '발표자가 보라고 한 대상(사진·영상·그래프·표 등)이 무엇이고 무엇을 보여 주는지 묘사하라.',
+      '  예) "이 사진 한번 보시죠" + 침묵 → "이미지 제시, 뼈가 앙상하게 야윈 어린아이 사진"',
+      '  예) "이 그래프 잠깐 보시죠" + 침묵 → "이미지 제시, 3년간 두 배로 늘어난 매출 막대그래프"',
+      '',
+      '형식(참고): "이미지 제시" + (묘사).',
+      ...commonTailList,
+      '· 화면에 실제로 있는 것만 쓴다. **없는 사물이나 수치를 지어내지 않는다.**',
+      '· 화면의 제목·본문 문장을 그대로 옮기지 않는다.',
+      '· 묘사는 "…사진", "…그래프", "…표"처럼 자료 종류로 끝맺는다.',
+      `· 보라고 한 대상을 화면에서 찾을 수 없거나 글만 있는 화면이면 "${GROUNDING_NONE_TOKEN}"만 출력한다.`,
     ].filter(Boolean).join('\n');
   }
 
