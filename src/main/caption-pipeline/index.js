@@ -315,9 +315,9 @@ function registerPipeline({ getViewerView }) {
     };
   });
 
-  ipcMain.on('pipeline-slide-mark', (_event, { ts, slideLabel, frameKind, filePath }) => {
+  ipcMain.on('pipeline-slide-mark', (_event, { ts, slideLabel, frameKind, filePath, transitionTs = null }) => {
     appendRecord({
-      kind: RECORD_KIND_MAP.slideMark, ts, slideLabel, frameKind, filePath,
+      kind: RECORD_KIND_MAP.slideMark, ts, slideLabel, frameKind, filePath, transitionTs,
     }).catch(() => {});
   });
 
@@ -397,7 +397,7 @@ function registerPipeline({ getViewerView }) {
         const revisitNarration = `이전 슬라이드 ${displayNumber}: ${result.pageTopic || result.narration}`;
         await appendRecord({
           kind: RECORD_KIND_MAP.pageTransition, ts, slideLabel, screenType: result.screenType,
-          narration: revisitNarration, isRevisit: true,
+          narration: revisitNarration, isRevisit: true, displayNumber,
         });
         console.log(`[pipeline]   복귀 축약 고지 (${Date.now() - startedAt}ms) "${truncateForLog(revisitNarration)}"`);
         const revisitSent = await sendCaption({
@@ -416,6 +416,7 @@ function registerPipeline({ getViewerView }) {
           narration: '', skipReason: 'incomplete_description',
           rejectedDescription: result.rejectedDescription,
           rejectedRawDescription: result.rejectedRawDescription,
+          displayNumber, pageNumber: result.pageNumber, pageTopic: result.pageTopic,
         });
         console.log(`[pipeline]   묘사 미완결 드롭 [${result.screenType}] 절삭후="${result.rejectedDescription}" 원문="${result.rejectedRawDescription}"`);
         markDebug({
@@ -435,6 +436,7 @@ function registerPipeline({ getViewerView }) {
         kind: RECORD_KIND_MAP.pageTransition, ts, slideLabel, screenType: result.screenType,
         narration, describedElementList: result.describedElementList,
         pageNumber: result.pageNumber, pageTopic: result.pageTopic, description: result.description,
+        displayNumber,
       });
       console.log(`[pipeline]   전환 내레이션 (${Date.now() - startedAt}ms) [${result.screenType}] "${truncateForLog(narration)}"`);
       markDebug({
@@ -879,11 +881,11 @@ function registerPipeline({ getViewerView }) {
     const followUpQa = selectFollowUpQa({ lastQa: contextStore.getLastQa(), now: Date.now() });
     try {
       const ruled = classifyQuestion(questionText);
-      const knownMajorSet = new Set(contextStore.buildIndex().map((entry) => entry.major));
-      const isRuledUsable = ruled && (ruled.route !== QUESTION_ROUTE_MAP.pastSlide
-        || ruled.slideMajorList.every((major) => knownMajorSet.has(major)));
+      const ruledMajor = ruled?.route === QUESTION_ROUTE_MAP.pastSlide
+        ? contextStore.resolveSlideNumber(ruled.spokenNumber) : null;
+      const isRuledUsable = ruled && (ruled.route !== QUESTION_ROUTE_MAP.pastSlide || ruledMajor !== null);
       const routed = isRuledUsable
-        ? { ...ruled, source: 'rule', reason: '' }
+        ? { route: ruled.route, slideMajorList: ruledMajor === null ? [] : [ruledMajor], source: 'rule', reason: '' }
         : await questionRouter.route({
           questionText, currentSlideMajor, index: contextStore.buildIndex(), followUpQa,
           startedAt: contextStore.getSessionInfo().startedAt,
@@ -906,9 +908,10 @@ function registerPipeline({ getViewerView }) {
           route: routed.route, slideMajorList: routed.slideMajorList, questionText, wordBudget, speakerHintNow,
         });
       const text = result.isGrounded && result.text ? result.text : NOT_FOUND_TEXT;
+      // 직전 Q&A 를 실제로 라우터에 넣었을 때만 되묻기로 친다. 규칙으로 처리한 질문은 다음 되묻기를 막지 않는다.
       contextStore.addQa({
         ts, question: questionText, answer: text, route: routed.route,
-        slideMajorList: routed.slideMajorList, isFollowUp: Boolean(followUpQa),
+        slideMajorList: routed.slideMajorList, isFollowUp: Boolean(followUpQa) && routed.source !== 'rule',
       });
       await appendRecord({
         kind: RECORD_KIND_MAP.deixis, ts, utterance: questionText, caption: text,

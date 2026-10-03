@@ -9,9 +9,9 @@ const {
 } = require('../src/main/caption-pipeline/context/question-router.js');
 
 const index = [
-  { major: 1, title: '회사 소개', keywordList: ['미션'], summary: '', firstSeenTs: 1000, isCurrent: false },
-  { major: 3, title: '반기 연봉 조정', keywordList: ['연봉', '+500'], summary: '', firstSeenTs: 151000, isCurrent: false },
-  { major: 5, title: '복지', keywordList: [], summary: '', firstSeenTs: 400000, isCurrent: true },
+  { major: 1, displayNumber: null, title: '회사 소개', keywordList: ['미션'], summary: '', firstSeenTs: 1000, isCurrent: false },
+  { major: 3, displayNumber: 171, title: '반기 연봉 조정', keywordList: ['연봉', '+500'], summary: '', firstSeenTs: 151000, isCurrent: false },
+  { major: 5, displayNumber: null, title: '복지', keywordList: [], summary: '', firstSeenTs: 400000, isCurrent: true },
 ];
 
 test('경과 시각은 mm:ss, 1시간을 넘으면 h:mm:ss, 모르면 --:--', () => {
@@ -34,9 +34,10 @@ test('라우터 프롬프트는 색인·현재 슬라이드·직전 Q&A·질문�
     questionText: '거기서 두 번째는?', currentSlideMajor: 5, index, startedAt: 1000,
     followUpQa: { question: '연봉 슬라이드 뭐였어?', answer: '반기 조정', slideMajorList: [3] },
   });
-  assert.match(prompt, /현재 슬라이드: 5/);
-  assert.match(prompt, /3 \| 반기 연봉 조정 \| 연봉, \+500 \| 02:30/);
-  assert.match(prompt, /5 \| 복지 \| - \| 06:39 \| 현재/);
+  assert.match(prompt, /현재 슬라이드 id: 5/);
+  assert.match(prompt, /3 \| 슬라이드 171 \| 반기 연봉 조정 \| 연봉, \+500 \| 02:30/);
+  assert.match(prompt, /5 \| 슬라이드 5 \| 복지 \| - \| 06:39 \| 현재/);
+  assert.match(prompt, /slideMajorList 에는 근거가 될 슬라이드의 id/);
   assert.match(prompt, /대상 슬라이드: 3/);
   assert.match(prompt, /질문: 거기서 두 번째는\?/);
   assert.doesNotMatch(buildRouterPrompt({ questionText: 'q', currentSlideMajor: null, index: [], startedAt: 0, followUpQa: null }), /직전 질문/);

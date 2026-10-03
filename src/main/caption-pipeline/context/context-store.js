@@ -25,6 +25,7 @@ function createSlideEntry(major) {
     imagePath: null,
     hasTransition: false,
     hasLeft: false,
+    displayNumber: null,
     pageNumber: null,
     pageTopic: '',
     description: '',
@@ -83,18 +84,20 @@ function createContextStore({ onChange = () => {} } = {}) {
     return foundMajor;
   }
 
-  function applySlideMark({ ts, slideLabel, frameKind, filePath }) {
+  // 교차 모드는 체류(3초) 확정 뒤에 마크를 남기므로, 실제 전환 시각(transitionTs)이 있으면 그 시각으로 방문을 연다.
+  function applySlideMark({ ts, transitionTs, slideLabel, frameKind, filePath }) {
     const major = toSlideMajor(slideLabel);
     if (major === null) return false;
     const slide = ensureSlide(major);
     if (frameKind !== SLIDE_FRAME_KIND_BASE) return true;
     if (!slide.imagePath && filePath) slide.imagePath = filePath;
     if (currentMajor === major) return true;
+    const visitTs = Number.isFinite(transitionTs) ? transitionTs : ts;
     const previous = currentMajor === null ? null : slideMap.get(currentMajor);
     const openVisit = previous?.visitList[previous.visitList.length - 1];
-    if (openVisit && openVisit.endTs === null) openVisit.endTs = ts;
+    if (openVisit && openVisit.endTs === null) openVisit.endTs = visitTs;
     if (previous) previous.hasLeft = true;
-    slide.visitList.push({ startTs: ts, endTs: null });
+    slide.visitList.push({ startTs: visitTs, endTs: null });
     currentMajor = major;
     return true;
   }
@@ -104,6 +107,8 @@ function createContextStore({ onChange = () => {} } = {}) {
     if (major === null) return false;
     const slide = ensureSlide(major);
     slide.hasTransition = true;
+    // 사용자는 전환 고지에서 "슬라이드 N"의 N(표시 번호)을 듣는다. 질문 속 번호는 이 번호다.
+    if (Number.isFinite(record.displayNumber) && record.displayNumber > 0) slide.displayNumber = record.displayNumber;
     if (Number.isFinite(record.pageNumber)) slide.pageNumber = record.pageNumber;
     if (typeof record.pageTopic === 'string' && record.pageTopic.trim()) slide.pageTopic = record.pageTopic.trim();
     if (typeof record.description === 'string' && record.description.trim()) {
@@ -228,9 +233,19 @@ function createContextStore({ onChange = () => {} } = {}) {
     return narrationList.slice(-limit);
   }
 
+  // 질문 속 "N번 슬라이드"를 저장소 번호로 바꾼다. 들은 번호 > 화면 쪽번호 > 내부 번호 순이다.
+  function resolveSlideNumber(spokenNumber) {
+    const slideList = [...slideMap.values()];
+    const found = slideList.find((slide) => slide.displayNumber === spokenNumber)
+      || slideList.find((slide) => slide.pageNumber === spokenNumber)
+      || slideMap.get(spokenNumber);
+    return found ? found.major : null;
+  }
+
   function buildIndex() {
     return getSlideList().map((slide) => ({
       major: slide.major,
+      displayNumber: slide.displayNumber,
       title: slide.label?.title || slide.pageTopic || '',
       keywordList: slide.label?.keywordList ? [...slide.label.keywordList] : [],
       summary: slide.label?.summary || slide.description || '',
@@ -273,7 +288,7 @@ function createContextStore({ onChange = () => {} } = {}) {
     applyRecord, applySlideText, listReadyForLabelMajors, markLabelRequested, setLabel, addQa,
     getSlide, getSlideList, getCurrentSlideMajor: () => currentMajor,
     getUtteranceList, getNarrationList, getLastQa: () => qaList[qaList.length - 1] || null,
-    buildIndex, snapshot,
+    buildIndex, resolveSlideNumber, snapshot,
   };
 }
 

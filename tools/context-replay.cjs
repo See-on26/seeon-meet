@@ -66,7 +66,10 @@ const requestText = ({ prompt, label, maxTokens }) => requestVlmContent({ config
   for (const questionText of questionList) {
     const startedAt = Date.now();
     const followUpQa = selectFollowUpQa({ lastQa: store.getLastQa(), now: store.getLastQa()?.ts ?? 0 });
-    const routed = classifyQuestion(questionText) || await router.route({
+    const ruled = classifyQuestion(questionText);
+    const ruledMajor = ruled?.route === 'past_slide' ? store.resolveSlideNumber(ruled.spokenNumber) : null;
+    const isRuledUsable = ruled && (ruled.route !== 'past_slide' || ruledMajor !== null);
+    const routed = isRuledUsable ? { route: ruled.route, slideMajorList: ruledMajor === null ? [] : [ruledMajor] } : await router.route({
       questionText, currentSlideMajor: store.getCurrentSlideMajor(), index: store.buildIndex(), followUpQa,
       startedAt: store.getSessionInfo().startedAt,
     });

@@ -10,11 +10,11 @@ test('슬라이드 번호 표현은 지난 슬라이드로 바로 간다', () =>
     const result = classifyQuestion(text);
     assert.equal(result?.route, QUESTION_ROUTE_MAP.pastSlide, text);
   }
-  assert.deepEqual(classifyQuestion('페이지 12').slideMajorList, [12]);
+  assert.equal(classifyQuestion('페이지 12').spokenNumber, 12);
 });
 
 test('지금 누가 말하는지는 화자 레지스트리로 바로 간다', () => {
-  assert.deepEqual(classifyQuestion('지금 누가 말해?'), { route: QUESTION_ROUTE_MAP.speakerNow, slideMajorList: [] });
+  assert.deepEqual(classifyQuestion('지금 누가 말해?'), { route: QUESTION_ROUTE_MAP.speakerNow, spokenNumber: null });
   assert.equal(classifyQuestion('현재 말하는 사람이 누구야')?.route, QUESTION_ROUTE_MAP.speakerNow);
 });
 

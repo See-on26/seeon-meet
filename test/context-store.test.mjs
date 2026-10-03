@@ -120,8 +120,8 @@ test('라벨을 붙이면 색인이 라벨을 쓰고, 없으면 주제·묘사�
   store.applyRecord(baseMark({ ts: 100, slideLabel: '2' }));
   store.setLabel({ major: 2, status: LABEL_STATUS_MAP.ready, label: { title: '임금', keywordList: ['기본급'], summary: '임금 체계' } });
   assert.deepEqual(store.buildIndex(), [
-    { major: 1, title: '회사 소개', keywordList: [], summary: '미션 문구', firstSeenTs: 0, isCurrent: false },
-    { major: 2, title: '임금', keywordList: ['기본급'], summary: '임금 체계', firstSeenTs: 100, isCurrent: true },
+    { major: 1, displayNumber: null, title: '회사 소개', keywordList: [], summary: '미션 문구', firstSeenTs: 0, isCurrent: false },
+    { major: 2, displayNumber: null, title: '임금', keywordList: ['기본급'], summary: '임금 체계', firstSeenTs: 100, isCurrent: true },
   ]);
 });
 
@@ -153,4 +153,28 @@ test('start 는 이전 세션 데이터를 비우고 스냅샷에 세션 정보�
   assert.equal(snapshot.startedAt, 500);
   assert.deepEqual(snapshot.slideList, []);
   assert.deepEqual(JSON.parse(JSON.stringify(snapshot)), snapshot);
+});
+
+test('사용자가 들은 슬라이드 번호(표시 번호)를 저장하고, 말한 번호를 표시 번호 > 쪽번호 > 내부 번호 순으로 찾는다', () => {
+  const store = createContextStore();
+  store.applyRecord({ kind: 'page_transition', ts: 0, slideLabel: '1', displayNumber: 185, pageNumber: 185, pageTopic: 'a' });
+  store.applyRecord({ kind: 'page_transition', ts: 0, slideLabel: '2', displayNumber: 2, pageNumber: null, pageTopic: 'b' });
+  store.applyRecord({ kind: 'page_transition', ts: 0, slideLabel: '3', pageNumber: 171, pageTopic: 'c' });
+  assert.equal(store.getSlide(1).displayNumber, 185);
+  assert.equal(store.resolveSlideNumber(185), 1);
+  assert.equal(store.resolveSlideNumber(2), 2);
+  assert.equal(store.resolveSlideNumber(171), 3);
+  assert.equal(store.resolveSlideNumber(3), 3);
+  assert.equal(store.resolveSlideNumber(99), null);
+  assert.equal(store.buildIndex().find((entry) => entry.major === 1).displayNumber, 185);
+});
+
+test('슬라이드 마크에 실제 전환 시각이 있으면 그 시각으로 방문을 연다', () => {
+  const store = createContextStore();
+  store.applyRecord({ kind: 'slide_mark', ts: 1000, slideLabel: '1', frameKind: 'base', filePath: '/tmp/1.jpg' });
+  store.applyRecord({ kind: 'slide_mark', ts: 9000, transitionTs: 6000, slideLabel: '2', frameKind: 'base', filePath: '/tmp/2.jpg' });
+  store.applyRecord({ kind: 'asr', ts: 7000, text: '다음은 복지입니다', segmentList: [{ startSec: 0, endSec: 1, text: '다음은 복지입니다' }] });
+  assert.deepEqual(store.getSlide(1).visitList, [{ startTs: 1000, endTs: 6000 }]);
+  assert.deepEqual(store.getSlide(2).visitList, [{ startTs: 6000, endTs: null }]);
+  assert.equal(store.getUtteranceList()[0].slideMajor, 2);
 });

@@ -482,6 +482,7 @@ const histogramGate = new SlideHistogramGate({});
 const slideRegistry = new SlideEmbeddingRegistry({});
 // 슬라이드 전환을 확정한 영상 시각. 체류 판정 후 생성하는 모드에서도 원 사건 시각을 잃지 않게 보관한다.
 const slideEventVideoTimeMap = new Map();
+const slideTransitionWallTsMap = new Map();
 const transitionOrderGate = new TransitionOrderGate();
 
 const slideDwellGate = new SlideDwellGate({
@@ -652,6 +653,7 @@ async function confirmSlideCandidate({ isFirst, imageData }) {
 
   lastScreenTransitionAt = performance.now();
   slideEventVideoTimeMap.set(decision.label, captureSource.videoTimeMs);
+  slideTransitionWallTsMap.set(decision.label, Date.now());
   console.log(`[slide] ${isRevisit ? '재방문' : (isFirst ? '첫' : '새')} 슬라이드 ${decision.label} (거리=${distance} src=${source}) → 체류 ${DWELL_MS}ms 판정`);
   markDebug({
     stage: DEBUG_STAGE_MAP.slide, verdict: DEBUG_VERDICT_MAP.info,
@@ -673,7 +675,10 @@ async function requestPageTransitionNarration(decision) {
     ? `이전 슬라이드 ${decision.label}로 복귀 — 고지 생성 중…`
     : `슬라이드 ${decision.label} 전환 — 화면 고지 생성 중…`);
 
-  saveSlideFrameWithMark({ slideLabel: decision.label, frameKind: 'base', buffer }).catch(() => {});
+  saveSlideFrameWithMark({
+    slideLabel: decision.label, frameKind: 'base', buffer,
+    transitionTs: slideTransitionWallTsMap.get(decision.label) ?? null,
+  }).catch(() => {});
 
   const wordBudget = buildWordBudget({
     narrationType: NARRATION_TYPE_MAP.pageTransition, subKind: PAGE_TRANSITION_KIND_MAP.slide,
@@ -834,13 +839,14 @@ function attachPointingMotion() {
     + ` → ${isAttached ? '대기 중인 발화 후보에 영역 첨부' : '대기 후보 없음 (포인터는 트리거가 아니다)'}`);
 }
 
-async function saveSlideFrameWithMark({ slideLabel, frameKind, buffer }) {
+// transitionTs 는 슬라이드가 실제로 바뀐 시각이다. 교차 모드는 체류 확정 뒤에 저장하므로 ts 보다 이르다.
+async function saveSlideFrameWithMark({ slideLabel, frameKind, buffer, transitionTs = null }) {
   const ts = Date.now();
   const filePath = await window.seeon
     .saveSlideFrame({ slideLabel, kind: frameKind, buffer, sessionId: currentSessionId })
     .catch(() => null);
   if (!filePath) return;
-  window.seeon.markSlideFrame({ ts, slideLabel, frameKind, filePath });
+  window.seeon.markSlideFrame({ ts, slideLabel, frameKind, filePath, transitionTs });
 }
 
 const ANNOTATION_SNAPSHOT_MIN_INTERVAL_MS = 2000;
@@ -1371,6 +1377,7 @@ async function attemptStartExperiment() {
     histogramGate.reset();
     slideRegistry.reset();
     slideEventVideoTimeMap.clear();
+    slideTransitionWallTsMap.clear();
     transitionOrderGate.reset();
     slideDwellGate.reset();
     isConfirmingSlide = false;
@@ -1435,7 +1442,7 @@ function stopExperiment() {
     ['포인팅 로컬라이저', () => pointingLocator.reset()],
     ['슬라이드 히스토그램 게이트', () => histogramGate.reset()],
     ['슬라이드 레지스트리', () => {
-      slideRegistry.reset(); slideEventVideoTimeMap.clear(); transitionOrderGate.reset();
+      slideRegistry.reset(); slideEventVideoTimeMap.clear(); slideTransitionWallTsMap.clear(); transitionOrderGate.reset();
     }],
     ['전환 체류 게이트', () => slideDwellGate.reset()],
     ['ROI 스토어', () => roiStore.reset()],

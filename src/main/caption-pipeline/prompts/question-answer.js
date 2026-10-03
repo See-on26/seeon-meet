@@ -20,7 +20,7 @@ function buildAnswerRuleList({ minWordCount, maxWordCount, notFoundToken = 'NONE
 
 function buildSlideEvidence({ slide, utteranceList, narrationList, startedAt }) {
   return [
-    `[슬라이드 ${slide.major}] ${slide.label?.title || slide.pageTopic || ''}`.trim(),
+    `[슬라이드 ${slide.displayNumber ?? slide.major}] ${slide.label?.title || slide.pageTopic || ''}`.trim(),
     slide.pageTopic ? `화면 주제: ${slide.pageTopic}` : '',
     slide.description ? `화면 묘사: ${slide.description}` : '',
     slide.slideText ? `화면 글자: ${slide.slideText.slice(0, SLIDE_TEXT_EVIDENCE_LIMIT)}` : '',

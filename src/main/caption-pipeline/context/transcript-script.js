@@ -15,8 +15,9 @@ function buildTranscriptScript({ snapshot }) {
   let lastSlideMajor = null;
   for (const utterance of utteranceList) {
     if (utterance.slideMajor !== null && utterance.slideMajor !== lastSlideMajor) {
-      const title = resolveSlideTitle(slideByMajorMap.get(utterance.slideMajor));
-      lineList.push(`── 슬라이드 ${utterance.slideMajor}${title ? `: ${title}` : ''} ──`);
+      const slide = slideByMajorMap.get(utterance.slideMajor);
+      const title = resolveSlideTitle(slide);
+      lineList.push(`── 슬라이드 ${slide?.displayNumber ?? utterance.slideMajor}${title ? `: ${title}` : ''} ──`);
       lastSlideMajor = utterance.slideMajor;
     }
     const speaker = utterance.speakerHint ? `${utterance.speakerHint}: ` : '';
