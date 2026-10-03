@@ -54,10 +54,11 @@ function readSpokeAgoMs(roi) {
 
 export const SELF_MIC_STATE_MAP = { on: 'on', muted: 'muted', unknown: 'unknown' };
 
+// roi-scanner 는 음소거를 micMuted 로 보낸다. 값을 모르면 마이크를 건드리지 않도록 unknown 으로 둔다.
 export function resolveSelfMicState(roiList) {
   const self = Array.isArray(roiList) ? roiList.find((roi) => roi?.isSelf) : null;
-  if (!self) return SELF_MIC_STATE_MAP.unknown;
-  return self.isMuted ? SELF_MIC_STATE_MAP.muted : SELF_MIC_STATE_MAP.on;
+  if (!self || typeof self.micMuted !== 'boolean') return SELF_MIC_STATE_MAP.unknown;
+  return self.micMuted ? SELF_MIC_STATE_MAP.muted : SELF_MIC_STATE_MAP.on;
 }
 
 export class RoiStore {
