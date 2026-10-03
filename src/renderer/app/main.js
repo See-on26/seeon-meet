@@ -17,6 +17,7 @@ import { StreamDelaySource } from '../core/audio-renderer/stream-delay-source.js
 import { NarrationScheduler } from '../core/audio-renderer/narration-scheduler.js';
 import { GapCandidateStore, resolveGapSearchFromMs } from '../core/audio-renderer/gap-candidate-store.js';
 import { isImmediateCaption, isAnchoredCaption, NarrationHoldGate } from '../core/audio-renderer/narration-entry.js';
+import { QUEUE_DROP_LABEL_MAP } from '../core/audio-renderer/narration-queue.js';
 import { QuestionRecorder } from '../core/command/question-recorder.js';
 import { MeetMicGuard } from '../core/command/meet-mic-guard.js';
 import { MicQuestionController, MIC_PHASE_MAP } from '../core/command/mic-question-controller.js';
@@ -81,6 +82,7 @@ function handleNarrationStatus(text) {
 const narrator = new CaptionNarrator({
   getLiveVideo: getPlaybackVideo,
   onStatus: handleNarrationStatus,
+  onDrop: handleNarrationDrop,
   getRateRange: () => getCatchupRateRange({ mode: getCurrentMode() }),
   isCatchupDelegated: () => Boolean(delayBuffer),
 });
@@ -88,7 +90,7 @@ const narrator = new CaptionNarrator({
 let narrationMixer = null;
 
 const getNarrationPlayer = () => narrationMixer || narrator;
-const narrationGate = new NarrationHoldGate({ deliver: (wav) => getNarrationPlayer()?.queueCaption(wav) });
+const narrationGate = new NarrationHoldGate({ deliver: (entry) => getNarrationPlayer()?.queueCaption(entry) });
 const audioMeter = new AudioMeter();
 
 function markDebug({ stage, verdict, reason, detail = '', narrationType = null }) {
@@ -214,7 +216,7 @@ function buildWordBudgetMap() {
 function startNarrationPlayer({ stream }) {
   const policy = getModePolicy({ mode: getCurrentMode() });
   if (policy?.isMixed) {
-    narrationMixer = new NarrationMixer({ onStatus: handleNarrationStatus });
+    narrationMixer = new NarrationMixer({ onStatus: handleNarrationStatus, onDrop: handleNarrationDrop });
     narrationMixer.start(stream);
 
     captureSource.detachDirectAudio();
@@ -272,9 +274,9 @@ function startDelayBufferIfNeeded({ fromTimeMs = null } = {}) {
 
   narrationScheduler = new NarrationScheduler({
     getPlaybackTimeMs: () => (delayBuffer ? delayBuffer.getDelayedTimeMs() : Infinity),
-    onDue: ({ wavArrayBuffer, captionCaptureMs }) => {
+    onDue: ({ entry, captionCaptureMs }) => {
       console.log(`[delay] 삽입 시점 도달 (영상 ${Math.round(captionCaptureMs)}ms 지점)`);
-      narrationGate.submit(wavArrayBuffer);
+      narrationGate.submit({ ...entry, dueAt: performance.now() });
     },
   });
   narrationScheduler.start();
@@ -1230,11 +1232,15 @@ async function emitCaption(payload, { leaderHandle = null } = {}) {
     leaderHandle?.settle({ status: LEADER_STATUS_MAP.unscheduled });
     return;
   }
-  const wavArrayBuffer = payload.wavData.buffer.slice(
-    payload.wavData.byteOffset, payload.wavData.byteOffset + payload.wavData.byteLength);
+  const entry = {
+    wavArrayBuffer: payload.wavData.buffer.slice(
+      payload.wavData.byteOffset, payload.wavData.byteOffset + payload.wavData.byteLength),
+    narrationClass: payload.narrationClass, slideLabel: payload.slideLabel ?? null,
+    source: payload.source, text: payload.text,
+  };
   if (isImmediateCaption(payload)) {
     leaderHandle?.settle({ status: LEADER_STATUS_MAP.unscheduled });
-    getNarrationPlayer()?.queueCaption(wavArrayBuffer);
+    getNarrationPlayer()?.queueCaption({ ...entry, dueAt: performance.now() });
     return;
   }
   const insertVideoTimeMs = isFollower
@@ -1242,7 +1248,7 @@ async function emitCaption(payload, { leaderHandle = null } = {}) {
     : isAnchoredCaption(payload) ? captionCaptureMs : await resolveInsertionTimeMs({ payload, captionCaptureMs });
   leaderHandle?.settle({ status: LEADER_STATUS_MAP.scheduled, insertVideoTimeMs });
   if (insertVideoTimeMs === null) return;
-  scheduleNarration({ wavArrayBuffer, captionCaptureMs: insertVideoTimeMs });
+  scheduleNarration({ entry, captionCaptureMs: insertVideoTimeMs });
 }
 
 function emitCaptionSafely(payload, { leaderHandle = null } = {}) {
@@ -1290,7 +1296,7 @@ window.seeon.onSummaryProgress(({ message }) => {
   });
 });
 
-function scheduleNarration({ wavArrayBuffer, captionCaptureMs }) {
+function scheduleNarration({ entry, captionCaptureMs }) {
   if (delayBuffer) {
     const excessMs = delayBuffer.getExcessMs();
     if (isCaptionDroppable({ excessMs, dropThresholdMs: EXCESS_DROP_MS })) {
@@ -1305,14 +1311,28 @@ function scheduleNarration({ wavArrayBuffer, captionCaptureMs }) {
     }
   }
   if (!narrationScheduler || !Number.isFinite(captionCaptureMs)) {
-    narrationGate.submit(wavArrayBuffer);
+    narrationGate.submit({ ...entry, dueAt: performance.now() });
     return;
   }
   const waitMs = Math.max(0, captionCaptureMs - delayBuffer.getDelayedTimeMs());
   if (waitMs > 0) {
     console.log(`[delay] 캡션 삽입 대기 ~${Math.round(waitMs)}ms (영상 ${Math.round(captionCaptureMs)}ms 지점)`);
   }
-  narrationScheduler.schedule({ wavArrayBuffer, captionCaptureMs });
+  narrationScheduler.schedule({ entry, captionCaptureMs });
+}
+
+// 재생 대기 줄에서 버려지거나 질문 답에 끊긴 해설. main 기록에는 재생된 해설로 남아 있다.
+function handleNarrationDrop({ entry, reason, waitedMs = null }) {
+  const label = QUEUE_DROP_LABEL_MAP[reason] || reason;
+  const waitedText = Number.isFinite(waitedMs) ? ` · 대기 ${(waitedMs / 1000).toFixed(1)}초` : '';
+  console.log(`[queue] ${label} [${entry.narrationClass}] "${entry.text}"${waitedText}`);
+  markDebug({
+    stage: DEBUG_STAGE_MAP.queue, verdict: DEBUG_VERDICT_MAP.skip,
+    narrationType: entry.source || null,
+    reason: label,
+    detail: `"${entry.text}" · 분류=${entry.narrationClass}`
+      + `${entry.slideLabel !== null ? ` · 슬라이드 ${entry.slideLabel}` : ''}${waitedText}`,
+  });
 }
 
 function isNarrationEchoWindow() {

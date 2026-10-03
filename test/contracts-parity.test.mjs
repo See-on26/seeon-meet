@@ -39,3 +39,7 @@ test('컨텍스트·질문 디버그 단계가 있다', () => {
 test('무발화 디버그 단계가 있다', () => {
   assert.equal(mainDebugEvents.DEBUG_STAGE_MAP.silence, 'silence');
 });
+
+test('재생 대기 줄 디버그 단계가 있다', () => {
+  assert.equal(mainDebugEvents.DEBUG_STAGE_MAP.queue, 'queue');
+});
