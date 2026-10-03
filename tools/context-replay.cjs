@@ -29,10 +29,18 @@ const requestText = ({ prompt, label, maxTokens }) => requestVlmContent({ config
     .map((line) => JSON.parse(line)).filter((record) => record.sessionId === sessionId);
   const store = createContextStore();
   store.start({ sessionId, startedAt: Math.min(...recordList.map((record) => record.ts)) });
-  // 예전 기록의 전환 고지 성공 기록에는 묘사 칸이 없어, 고지 문장을 묘사로 쓴다.
+  // 예전 기록의 전환 고지 성공 기록에는 묘사·표시 번호 칸이 없어, 고지 문장("슬라이드 N: 묘사")에서 채운다.
   for (const record of recordList) {
     const isOldTransition = record.kind === 'page_transition' && !record.description && record.narration;
-    store.applyRecord(isOldTransition ? { ...record, description: record.narration } : record);
+    if (!isOldTransition) {
+      store.applyRecord(record);
+      continue;
+    }
+    const spokenNumber = Number(record.narration.match(/슬라이드 (\d+):/)?.[1]);
+    store.applyRecord({
+      ...record, description: record.narration,
+      displayNumber: Number.isFinite(record.displayNumber) ? record.displayNumber : (spokenNumber || null),
+    });
   }
   // 슬라이드 글자 전사는 기록에 남지 않으므로 저장된 슬라이드 이미지로 다시 받는다.
   const slideTextAgent = createSlideTextAgent({ config });
