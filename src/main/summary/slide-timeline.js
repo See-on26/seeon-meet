@@ -39,7 +39,7 @@ function flattenAsrSegmentList({ asrEntryList }) {
     const segmentList = Array.isArray(entry.segmentList) ? entry.segmentList : [];
     if (!segmentList.length) {
       const text = String(entry.text ?? '').trim();
-      if (text) flatList.push({ ts: entry.ts, midTs: entry.ts, text });
+      if (text) flatList.push({ ts: entry.ts, midTs: entry.ts, text, speakerHint: entry.speakerHint || null });
       continue;
     }
     for (const segment of segmentList) {
@@ -47,7 +47,7 @@ function flattenAsrSegmentList({ asrEntryList }) {
       if (!text) continue;
       const startTs = entry.ts + Number(segment.startSec ?? 0) * 1000;
       const endTs = entry.ts + Number(segment.endSec ?? segment.startSec ?? 0) * 1000;
-      flatList.push({ ts: startTs, midTs: (startTs + endTs) / 2, text });
+      flatList.push({ ts: startTs, midTs: (startTs + endTs) / 2, text, speakerHint: entry.speakerHint || null });
     }
   }
   return flatList.sort((left, right) => left.ts - right.ts);
@@ -69,7 +69,9 @@ function assignAsrToSlideList({ asrEntryList, slideIntervalList }) {
     for (let index = flatIntervalList.length - 1; index >= 0; index -= 1) {
       const interval = flatIntervalList[index];
       if (segment.midTs >= interval.startTs && segment.midTs < interval.endTs) {
-        utteranceListByMajorMap.get(interval.major).push({ ts: segment.ts, text: segment.text });
+        utteranceListByMajorMap.get(interval.major).push({
+          ts: segment.ts, text: segment.text, speakerHint: segment.speakerHint,
+        });
         break;
       }
     }
