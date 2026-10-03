@@ -19,7 +19,10 @@ function buildSlideBlock({ slideSection }) {
   const utteranceList = slideSection.utteranceList || [];
   if (utteranceList.length) {
     lineList.push('이 화면을 띄워 놓고 오간 말:');
-    for (const utterance of utteranceList) lineList.push(`  ${utterance.text}`);
+    // 화자 이름은 회의 화면의 '말하는 중' 표시로 붙인 것이다. 있는 발화만 "이름: 발화"로 적는다.
+    for (const utterance of utteranceList) {
+      lineList.push(utterance.speakerHint ? `  ${utterance.speakerHint}: ${utterance.text}` : `  ${utterance.text}`);
+    }
   } else {
     lineList.push('이 화면을 띄워 놓고 오간 말 없음');
   }
