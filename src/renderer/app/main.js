@@ -1562,8 +1562,13 @@ $('cmdInput').addEventListener('keydown', (event) => {
 });
 $('cmdSend').addEventListener('click', submitTypedQuestion);
 
+// 화면 안내와 함께 스크린리더로도 읽는다. 같은 문구를 연달아 알릴 때도 읽히도록 비웠다가 넣는다.
 function announce(text) {
   showNotice(text);
+  const region = $('srAnnounce');
+  if (!region) return;
+  region.textContent = '';
+  requestAnimationFrame(() => { region.textContent = text; });
 }
 
 // 마이크 질문(Ctrl+8): 사용자 마이크만 녹음해 별도 경로로 전사한 뒤 자유 질문과 같은 경로로 묻는다.

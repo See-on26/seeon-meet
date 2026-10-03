@@ -175,6 +175,7 @@
     dialog#permModal .btns { display: flex; gap: 8px; justify-content: flex-end; flex-wrap: wrap; }
     dialog#permModal button { padding: 7px 14px; border-radius: 9px; background: var(--primary); color: #fff; border: 1px solid var(--primary); }
     dialog#permModal button.secondary { background: var(--canvas); color: var(--ink); border-color: var(--hairline-strong); }
+    .sr-only { position: absolute; width: 1px; height: 1px; overflow: hidden; clip: rect(0 0 0 0); white-space: nowrap; }
   </style>
 </head>
 <body>
@@ -221,6 +222,7 @@
       </button>
     </header>
 
+    <div id="srAnnounce" class="sr-only" aria-live="polite" aria-atomic="true"></div>
     <div class="stream" id="logStream">
       <div class="stream-empty" id="streamEmpty">
         왼쪽 Meet 창에서 회의에 참여한 뒤 <b>회의 캡처 시작</b>을 누르세요.<br />
@@ -237,7 +239,7 @@
       <div class="input-row">
         <div class="field">
           <input type="text" id="cmdInput" placeholder='화면에 대해 무엇이든 물어보세요' />
-          <button class="mic" id="cmdMic" title="음성 질문" aria-label="음성 질문">
+          <button class="mic" id="cmdMic" title="음성 질문 (Ctrl+8)" aria-label="음성 질문" aria-pressed="false">
             <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><rect x="9" y="2" width="6" height="12" rx="3"/><path d="M5 10a7 7 0 0 0 14 0M12 17v4"/></svg>
           </button>
         </div>
