@@ -12,6 +12,8 @@ const SLIDES_DIR = path.join(OUT_DIR, 'slides');
 
 const SUMMARIES_DIR = path.join(OUT_DIR, 'summaries');
 
+const CONTEXT_DIR = path.join(OUT_DIR, 'context');
+
 function resolveSlideDir({ sessionId, major }) {
   const slideDirName = `slide-${major}`;
   return sessionId
@@ -22,5 +24,5 @@ function resolveSlideDir({ sessionId, major }) {
 module.exports = {
   OUT_DIR, FRAMES_DIR, ROI_LOG,
   DEIXIS_FRAMES_DIR, DEIXIS_NARRATED_DIR, DEIXIS_SKIPPED_DIR,
-  SLIDES_DIR, SUMMARIES_DIR, resolveSlideDir,
+  SLIDES_DIR, SUMMARIES_DIR, resolveSlideDir, CONTEXT_DIR,
 };

@@ -30,3 +30,8 @@ test('값 검사·VLM 폴백 디버그 단계가 있다', () => {
   assert.equal(mainDebugEvents.DEBUG_STAGE_MAP.valueCheck, 'value_check');
   assert.equal(mainDebugEvents.DEBUG_STAGE_MAP.vlmFallback, 'vlm_fallback');
 });
+
+test('컨텍스트·질문 디버그 단계가 있다', () => {
+  assert.equal(mainDebugEvents.DEBUG_STAGE_MAP.context, 'context');
+  assert.equal(mainDebugEvents.DEBUG_STAGE_MAP.question, 'question');
+});

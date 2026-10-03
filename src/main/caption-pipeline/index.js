@@ -22,11 +22,14 @@ const { createTtsClient } = require('./output/tts-client');
 const { createGapInferenceAgent } = require('./output/gap-inference-agent');
 const { createRecordStore, RECORD_KIND_MAP } = require('./instrumentation/record-store');
 const { createSessionStore } = require('./instrumentation/session-store');
-const { setVlmFallbackListener } = require('./agents/shared/vlm-gateway');
+const { requestVlmContent, setVlmFallbackListener } = require('./agents/shared/vlm-gateway');
 const { createSlideTextAgent } = require('./agents/slide-text-agent');
 const { createSlideTextStore } = require('./orchestrator/slide-text-store');
 const { verifyValuePresence, VALUE_PRESENCE_VERDICT_MAP } = require('./orchestrator/value-presence');
-const { OUT_DIR } = require('../paths');
+const { createContextStore, toSlideMajor, LABEL_STATUS_MAP } = require('./context/context-store');
+const { createSlideLabeler } = require('./context/slide-labeler');
+const { createContextFileWriter } = require('./context/context-file');
+const { OUT_DIR, CONTEXT_DIR } = require('../paths');
 
 const ASR_DRAIN_TIMEOUT_MS = 8000;
 const ASR_DRAIN_POLL_MS = 100;
@@ -76,8 +79,48 @@ function registerPipeline({ getViewerView }) {
   const narrationHistory = createNarrationHistory();
   console.log(`[pipeline] 발화 축 판정 경로: ${config.routerMode}`);
 
+  const contextFile = createContextFileWriter({ outDir: CONTEXT_DIR });
+  const contextStore = createContextStore({
+    onChange: () => contextFile.schedule({
+      sessionId: contextStore.getSessionInfo().sessionId, getSnapshot: contextStore.snapshot,
+    }),
+  });
+  let lastContextSnapshot = null;
+  // 라벨링·질문 라우팅은 이미지 없이 GPU VLM 을 부르고, GPU 가 실패하면 Haiku 로 폴백한다.
+  const requestText = ({ prompt, label, maxTokens }) => requestVlmContent({
+    config, prompt, label, maxTokens, temperature: 0,
+  });
+  const slideLabeler = createSlideLabeler({ requestText });
+
   function appendRecord(record) {
+    try {
+      if (contextStore.applyRecord(record)) labelReadySlides();
+    } catch (error) {
+      console.warn(`[context] 기록 반영 실패(무시) kind=${record?.kind}: ${error.message}`);
+    }
     return recordStore.append(sessionStore.addRecord({ record }));
+  }
+
+  function labelReadySlides() {
+    for (const major of contextStore.listReadyForLabelMajors()) {
+      contextStore.markLabelRequested(major);
+      const slide = contextStore.getSlide(major);
+      const startedAt = Date.now();
+      slideLabeler.label({ slide }).then((label) => {
+        contextStore.setLabel({ major, label, status: LABEL_STATUS_MAP.ready });
+        markDebug({
+          stage: DEBUG_STAGE_MAP.context, verdict: DEBUG_VERDICT_MAP.info,
+          reason: `슬라이드 ${major} 라벨`,
+          detail: `"${label.title}" [${label.keywordList.join(', ')}] (${Date.now() - startedAt}ms)`,
+        });
+      }).catch((error) => {
+        contextStore.setLabel({ major, label: null, status: LABEL_STATUS_MAP.failed });
+        markDebug({
+          stage: DEBUG_STAGE_MAP.context, verdict: DEBUG_VERDICT_MAP.fail,
+          reason: `슬라이드 ${major} 라벨 실패 — 주제·묘사로 색인`, detail: error.message,
+        });
+      });
+    }
   }
 
   async function drainPendingAsr() {
@@ -121,6 +164,10 @@ function registerPipeline({ getViewerView }) {
         reason: `슬라이드 텍스트 전사 ${status}`,
         detail: `슬라이드=${slideLabel} 글자수=${textLength}${errorMessage ? ` · ${errorMessage}` : ''}`,
       });
+      contextStore.applySlideText({
+        slideLabel, status, text: slideTextStore.get(slideLabel).text,
+      });
+      labelReadySlides();
     },
   });
 
@@ -189,7 +236,7 @@ function registerPipeline({ getViewerView }) {
     }
     await appendRecord({
       kind: RECORD_KIND_MAP.narration, ts, source, text, slideLabel, isEmitted: true,
-      hasAudio: Boolean(wavData),
+      hasAudio: Boolean(wavData), narrationClass: resolvedClass,
     });
     getViewerView()?.webContents.send('pipeline-event', {
       type: 'caption', ts, text, source, slideLabel, wavData, rationale,
@@ -207,6 +254,7 @@ function registerPipeline({ getViewerView }) {
     narrationHistory.reset();
     slideTextStore.reset();
     const { sessionId } = sessionStore.startSession({ mode });
+    contextStore.start({ sessionId, startedAt: Date.now() });
     console.log(`[pipeline] ■ 캡처 세션 시작 (모드=${mode}, ${sessionId}) — 중복 이력·화면 레지스트리 초기화`);
     markDebug({
       stage: DEBUG_STAGE_MAP.session, verdict: DEBUG_VERDICT_MAP.info,
@@ -228,6 +276,9 @@ function registerPipeline({ getViewerView }) {
     });
 
     lastSession = sessionStore.endSession({ endedAt: Date.now() });
+    lastContextSnapshot = contextStore.snapshot();
+    const contextFilePath = await contextFile.flush();
+    console.log(`[context] 컨텍스트 저장 ${contextFilePath || '(실패)'} — 슬라이드 ${lastContextSnapshot.slideList.length}장 · 발화 ${lastContextSnapshot.utteranceList.length}건`);
     console.log(`[pipeline] ■ 캡처 세션 종료 (${sessionId}) — 발화 ${lastSession.asrEntryList.length}건 · 슬라이드 마크 ${lastSession.slideMarkList.length}건`);
     return {
       isOk: true,
@@ -356,6 +407,7 @@ function registerPipeline({ getViewerView }) {
       await appendRecord({
         kind: RECORD_KIND_MAP.pageTransition, ts, slideLabel, screenType: result.screenType,
         narration, describedElementList: result.describedElementList,
+        pageNumber: result.pageNumber, pageTopic: result.pageTopic, description: result.description,
       });
       console.log(`[pipeline]   전환 내레이션 (${Date.now() - startedAt}ms) [${result.screenType}] "${truncateForLog(narration)}"`);
       markDebug({
@@ -841,6 +893,11 @@ function registerPipeline({ getViewerView }) {
       const session = lastSession;
       lastSession = null;
       return session;
+    },
+    consumeLastContext() {
+      const snapshot = lastContextSnapshot;
+      lastContextSnapshot = null;
+      return snapshot;
     },
   };
 }

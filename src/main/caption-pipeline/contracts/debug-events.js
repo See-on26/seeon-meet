@@ -13,6 +13,8 @@ const DEBUG_STAGE_MAP = {
   asr: 'asr',
   valueCheck: 'value_check',
   vlmFallback: 'vlm_fallback',
+  context: 'context',
+  question: 'question',
 };
 
 const DEBUG_VERDICT_MAP = { pass: 'pass', skip: 'skip', fail: 'fail', info: 'info' };
