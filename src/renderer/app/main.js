@@ -14,6 +14,7 @@ import { DelayBuffer, isCaptionDroppable, EXCESS_DROP_MS } from '../core/audio-r
 import { StreamDelaySource } from '../core/audio-renderer/stream-delay-source.js';
 import { NarrationScheduler } from '../core/audio-renderer/narration-scheduler.js';
 import { GapCandidateStore, resolveGapSearchFromMs } from '../core/audio-renderer/gap-candidate-store.js';
+import { isImmediateCaption, NarrationHoldGate } from '../core/audio-renderer/narration-entry.js';
 import { CaptionNarrator } from '../core/audio-renderer/caption-narrator.js';
 import { NarrationMixer } from '../core/audio-renderer/narration-mixer.js';
 import {
@@ -78,6 +79,7 @@ const narrator = new CaptionNarrator({
 let narrationMixer = null;
 
 const getNarrationPlayer = () => narrationMixer || narrator;
+const narrationGate = new NarrationHoldGate({ deliver: (wav) => getNarrationPlayer()?.queueCaption(wav) });
 const audioMeter = new AudioMeter();
 
 function markDebug({ stage, verdict, reason, detail = '', narrationType = null }) {
@@ -263,7 +265,7 @@ function startDelayBufferIfNeeded({ fromTimeMs = null } = {}) {
     getPlaybackTimeMs: () => (delayBuffer ? delayBuffer.getDelayedTimeMs() : Infinity),
     onDue: ({ wavArrayBuffer, captionCaptureMs }) => {
       console.log(`[delay] 삽입 시점 도달 (영상 ${Math.round(captionCaptureMs)}ms 지점)`);
-      getNarrationPlayer().queueCaption(wavArrayBuffer);
+      narrationGate.submit(wavArrayBuffer);
     },
   });
   narrationScheduler.start();
@@ -1174,6 +1176,11 @@ async function emitCaption(payload, { leaderHandle = null } = {}) {
   }
   const wavArrayBuffer = payload.wavData.buffer.slice(
     payload.wavData.byteOffset, payload.wavData.byteOffset + payload.wavData.byteLength);
+  if (isImmediateCaption(payload)) {
+    leaderHandle?.settle({ status: LEADER_STATUS_MAP.unscheduled });
+    getNarrationPlayer()?.queueCaption(wavArrayBuffer);
+    return;
+  }
   const insertVideoTimeMs = isFollower
     ? resolveFollowerInsertMs({ eventVideoTimeMs: captionCaptureMs, leader })
     : await resolveInsertionTimeMs({ payload, captionCaptureMs });
@@ -1242,7 +1249,7 @@ function scheduleNarration({ wavArrayBuffer, captionCaptureMs }) {
     }
   }
   if (!narrationScheduler || !Number.isFinite(captionCaptureMs)) {
-    getNarrationPlayer().queueCaption(wavArrayBuffer);
+    narrationGate.submit(wavArrayBuffer);
     return;
   }
   const waitMs = Math.max(0, captionCaptureMs - delayBuffer.getDelayedTimeMs());
@@ -1409,6 +1416,7 @@ function stopExperiment() {
     ['경계 탐지기', () => boundaryDetector.reset()],
     ['지시 탐지기', () => deixisDetector.reset()],
     ['후보 스케줄러', () => candidateScheduler.reset()],
+    ['해설 보류 게이트', () => narrationGate.clear()],
     ['인접 발화 창', () => transcriptWindow.reset()],
     ['삽입 후보 틈', () => gapCandidateStore.reset()],
     ['프레임 샘플러', () => {
