@@ -11,9 +11,10 @@ function registerSummary({ getViewerView, pipelineHandle }) {
 
   ipcMain.handle('summary-generate', async () => {
     const session = pipelineHandle.consumeLastSession();
+    const contextSnapshot = pipelineHandle.consumeLastContext();
     if (!session) return { isOk: false, message: '요약할 세션이 없습니다' };
     try {
-      const result = await generator.generate({ session });
+      const result = await generator.generate({ session, contextSnapshot });
 
       return {
         isOk: true,

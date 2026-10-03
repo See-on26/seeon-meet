@@ -30,6 +30,7 @@ const { verifyValuePresence, VALUE_PRESENCE_VERDICT_MAP } = require('./orchestra
 const { createContextStore, toSlideMajor, LABEL_STATUS_MAP } = require('./context/context-store');
 const { createSlideLabeler } = require('./context/slide-labeler');
 const { createContextFileWriter } = require('./context/context-file');
+const { buildTranscriptScript, buildScriptFileName } = require('./context/transcript-script');
 const { classifyQuestion, QUESTION_ROUTE_MAP } = require('./context/question-classifier');
 const { createQuestionRouter, selectFollowUpQa } = require('./context/question-router');
 const { createQuestionAnswerer, NOT_FOUND_TEXT } = require('./context/question-answerer');
@@ -301,6 +302,10 @@ function registerPipeline({ getViewerView }) {
     lastContextSnapshot = contextStore.snapshot();
     const contextFilePath = await contextFile.flush();
     console.log(`[context] 컨텍스트 저장 ${contextFilePath || '(실패)'} — 슬라이드 ${lastContextSnapshot.slideList.length}장 · 발화 ${lastContextSnapshot.utteranceList.length}건`);
+    const scriptFilePath = await contextFile.writeText({
+      fileName: buildScriptFileName({ sessionId }), text: buildTranscriptScript({ snapshot: lastContextSnapshot }),
+    });
+    console.log(`[context] 대화 스크립트 ${scriptFilePath || '(실패)'}`);
     console.log(`[pipeline] ■ 캡처 세션 종료 (${sessionId}) — 발화 ${lastSession.asrEntryList.length}건 · 슬라이드 마크 ${lastSession.slideMarkList.length}건`);
     return {
       isOk: true,

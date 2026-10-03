@@ -7,6 +7,8 @@ const { createTtsClient } = require('../caption-pipeline/output/tts-client');
 const { buildSlideIntervalList, assignAsrToSlideList } = require('./slide-timeline');
 const { resolveSlideAssetList } = require('./slide-asset-resolver');
 const { buildSummaryDocument, findMarkupViolationList, buildSummaryFileName } = require('./summary-document');
+const { needsRecaption, buildSlideSectionListFromContext } = require('./context-slide-section');
+const { buildTranscriptScript } = require('../caption-pipeline/context/transcript-script');
 
 const RECAPTION_CONCURRENCY = 3;
 
@@ -77,31 +79,41 @@ function createSummaryGenerator({ config, summariesDir, onProgress = null }) {
     }));
   }
 
-  async function generate({ session }) {
+  async function generate({ session, contextSnapshot = null }) {
     const assetList = resolveSlideAssetList({ slideMarkList: session.slideMarkList });
     reportProgress({
       stage: SUMMARY_STAGE_MAP.collect,
       message: `요약 재료 수집 — 슬라이드 ${assetList.length}장 · 발화 ${session.asrEntryList.length}건`,
     });
 
+    // 회의 중 모아 둔 글자·묘사가 있는 슬라이드는 VLM 재캡션을 건너뛴다.
+    const slideByMajorMap = new Map((contextSnapshot?.slideList || []).map((slide) => [String(slide.major), slide]));
+    const recaptionTargetList = contextSnapshot
+      ? assetList.filter((asset) => needsRecaption({ slide: slideByMajorMap.get(String(asset.major)), asset }))
+      : assetList;
     let doneCount = 0;
     const recaptionList = await mapWithConcurrencyLimit({
-      itemList: assetList,
+      itemList: recaptionTargetList,
       limit: RECAPTION_CONCURRENCY,
       run: async ({ item }) => {
         const recaption = await recaptionSlide({ asset: item });
         doneCount += 1;
         reportProgress({
           stage: SUMMARY_STAGE_MAP.recaption,
-          message: `슬라이드 화면 설명 ${doneCount}/${assetList.length}`,
-          doneCount, totalCount: assetList.length,
+          message: `슬라이드 화면 설명 ${doneCount}/${recaptionTargetList.length}`,
+          doneCount, totalCount: recaptionTargetList.length,
         });
         return recaption;
       },
     });
 
     reportProgress({ stage: SUMMARY_STAGE_MAP.summarize, message: '회의 요약 생성 중' });
-    const slideSectionList = buildSlideSectionList({ session, assetList, recaptionList });
+    const slideSectionList = contextSnapshot
+      ? buildSlideSectionListFromContext({
+        snapshot: contextSnapshot, assetList,
+        recaptionByMajorMap: new Map(recaptionTargetList.map((asset, index) => [String(asset.major), recaptionList[index]])),
+      })
+      : buildSlideSectionList({ session, assetList, recaptionList });
     const { text: draftText, isTruncated: draftTruncated } = await summaryAgent.summarize({ slideSectionList });
 
     reportProgress({ stage: SUMMARY_STAGE_MAP.rewrite, message: '요약본 듣는 글로 재구성 중' });
@@ -131,6 +143,10 @@ function createSummaryGenerator({ config, summariesDir, onProgress = null }) {
       summariesDir, buildSummaryFileName({ sessionId: session.sessionId, extension: 'txt' }),
     );
     fs.writeFileSync(textFilePath, documentText, 'utf8');
+    if (contextSnapshot) {
+      const scriptFilePath = textFilePath.replace(/\.txt$/, '-script.txt');
+      fs.writeFileSync(scriptFilePath, buildTranscriptScript({ snapshot: contextSnapshot }), 'utf8');
+    }
 
     const audioFilePath = await synthesizeSummaryAudio({
       sessionId: session.sessionId, documentText,
