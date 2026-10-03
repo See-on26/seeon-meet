@@ -22,8 +22,25 @@ function isSummaryToggleInput({ input }) {
   return input.key === SUMMARY_TOGGLE_KEY;
 }
 
+const MIC_TOGGLE_KEY = '8';
+
+function isMicToggleInput({ input }) {
+  if (!input || input.type !== 'keyDown') return false;
+  if (!(input.control || input.meta)) return false;
+  if (input.shift || input.alt) return false;
+  return input.key === MIC_TOGGLE_KEY;
+}
+
 function attachShortcutListener({ webContents, getViewerView }) {
   webContents.on('before-input-event', (event, input) => {
+    if (isMicToggleInput({ input })) {
+      event.preventDefault();
+      const viewerView = getViewerView();
+      if (!viewerView || viewerView.webContents.isDestroyed()) return;
+      console.log('[shortcut] 마이크 질문 토글');
+      viewerView.webContents.send('mic-toggle');
+      return;
+    }
     const isToggle = isSummaryToggleInput({ input });
     const command = isToggle ? null : readCommandFromInput({ input });
     if (!isToggle && !command) return;
@@ -47,10 +64,10 @@ function registerCommandShortcut({ getViewerView, getMeetView = () => null }) {
   attachShortcutListener({ webContents: viewerView.webContents, getViewerView });
   const meetView = getMeetView();
   if (meetView) attachShortcutListener({ webContents: meetView.webContents, getViewerView });
-  console.log(`[shortcut] 커맨드 단축키 등록 (${meetView ? '뷰어+Meet' : '뷰어'}) — Ctrl+${Object.keys(USER_COMMAND_KEY_MAP).join('/')} · 회의 요약 토글 Ctrl+${SUMMARY_TOGGLE_KEY}`);
+  console.log(`[shortcut] 커맨드 단축키 등록 (${meetView ? '뷰어+Meet' : '뷰어'}) — Ctrl+${Object.keys(USER_COMMAND_KEY_MAP).join('/')} · 회의 요약 토글 Ctrl+${SUMMARY_TOGGLE_KEY} · 마이크 질문 Ctrl+${MIC_TOGGLE_KEY}`);
 }
 
 module.exports = {
-  registerCommandShortcut, readCommandFromInput, isSummaryToggleInput,
-  USER_COMMAND_KEY_MAP, SUMMARY_TOGGLE_KEY,
+  registerCommandShortcut, readCommandFromInput, isSummaryToggleInput, isMicToggleInput,
+  USER_COMMAND_KEY_MAP, SUMMARY_TOGGLE_KEY, MIC_TOGGLE_KEY,
 };

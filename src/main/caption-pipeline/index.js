@@ -935,6 +935,26 @@ function registerPipeline({ getViewerView }) {
     }
   });
 
+  // 질문 음성은 pipeline-audio 를 쓰지 않는다. 그 경로는 asr 기록을 남겨 회의 전사·지시 탐지·저장소에 섞인다.
+  ipcMain.handle('pipeline-question-audio', async (_event, { buffer, startTs }) => {
+    try {
+      const result = await asrClient.transcribeSegment({ webmBuffer: Buffer.from(buffer), startTs });
+      const text = (result.text || '').trim();
+      markDebug({
+        stage: DEBUG_STAGE_MAP.question, verdict: text ? DEBUG_VERDICT_MAP.info : DEBUG_VERDICT_MAP.skip,
+        reason: text ? '마이크 질문 전사' : '마이크 질문 전사 비어 있음',
+        detail: text ? `"${text}"` : (result.hallucinationText ? `환각 문구 폐기 "${result.hallucinationText}"` : ''),
+      });
+      return { isOk: true, text };
+    } catch (error) {
+      markDebug({
+        stage: DEBUG_STAGE_MAP.question, verdict: DEBUG_VERDICT_MAP.fail,
+        reason: '마이크 질문 전사 실패', detail: error.message,
+      });
+      return { isOk: false, text: '', message: error.message };
+    }
+  });
+
   ipcMain.handle('pipeline-gap', async (_event, { mode, ts, narrationText, narrationType, subKind,
     rationale, screenSummary, beforeTranscript, gapList }) => {
     const startedAt = Date.now();
