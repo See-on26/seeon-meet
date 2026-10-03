@@ -13,7 +13,11 @@ const SLIDE_NUMBER_PATTERN_LIST = [
   /(?:슬라이드|페이지)\s*(\d+)/,
 ];
 
-const SPEAKER_NOW_PATTERN = /(?:지금|현재)[^?？]*?(?:누가|누구)/;
+// "지금 화면에 누구 사진이야?"처럼 사람을 묻지만 말하는 사람을 묻지 않는 질문은 거른다.
+const SPEAKER_NOW_PATTERN_LIST = [
+  /(?:지금|현재)[^?？]*?(?:누가|누구)[^?？]*?(?:말|발표|얘기|이야기)/,
+  /(?:지금|현재)[^?？]*?(?:말하는|발표하는|얘기하는|이야기하는)[^?？]*?(?:누구|사람)/,
+];
 
 // 규칙으로 확실히 가를 수 있는 질문만 고른다. 나머지(null)는 LLM 라우터가 색인을 보고 정한다.
 // spokenNumber 는 사용자가 말한 번호 그대로다. 저장소 번호로 바꾸는 것은 저장소(resolveSlideNumber)가 한다.
@@ -24,7 +28,9 @@ function classifyQuestion(text) {
     const match = trimmed.match(pattern);
     if (match) return { route: QUESTION_ROUTE_MAP.pastSlide, spokenNumber: Number(match[1]) };
   }
-  if (SPEAKER_NOW_PATTERN.test(trimmed)) return { route: QUESTION_ROUTE_MAP.speakerNow, spokenNumber: null };
+  if (SPEAKER_NOW_PATTERN_LIST.some((pattern) => pattern.test(trimmed))) {
+    return { route: QUESTION_ROUTE_MAP.speakerNow, spokenNumber: null };
+  }
   return null;
 }
 

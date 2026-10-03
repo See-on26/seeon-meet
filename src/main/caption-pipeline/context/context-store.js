@@ -155,6 +155,7 @@ function createContextStore({ onChange = () => {} } = {}) {
       narrationClass: record.narrationClass || null,
       text: record.text.trim(),
       slideMajor: labelMajor ?? findSlideMajorAt(record.ts),
+      eventVideoTimeMs: Number.isFinite(record.eventVideoTimeMs) ? record.eventVideoTimeMs : null,
     });
     return true;
   }

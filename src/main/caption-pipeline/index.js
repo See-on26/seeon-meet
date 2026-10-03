@@ -92,6 +92,8 @@ function registerPipeline({ getViewerView }) {
     }),
   });
   let lastContextSnapshot = null;
+  // 라벨 요청이 정지·재시작 뒤에 도착하면 새 세션의 같은 번호 슬라이드에 붙는다. 세대가 바뀌었으면 버린다.
+  let contextGeneration = 0;
   // 라벨링·질문 라우팅은 이미지 없이 GPU VLM 을 부르고, GPU 가 실패하면 Haiku 로 폴백한다.
   const requestText = ({ prompt, label, maxTokens }) => requestVlmContent({
     config, prompt, label, maxTokens, temperature: 0,
@@ -129,7 +131,9 @@ function registerPipeline({ getViewerView }) {
       contextStore.markLabelRequested(major);
       const slide = contextStore.getSlide(major);
       const startedAt = Date.now();
+      const generation = contextGeneration;
       slideLabeler.label({ slide }).then((label) => {
+        if (generation !== contextGeneration) return;
         contextStore.setLabel({ major, label, status: LABEL_STATUS_MAP.ready });
         markDebug({
           stage: DEBUG_STAGE_MAP.context, verdict: DEBUG_VERDICT_MAP.info,
@@ -137,6 +141,7 @@ function registerPipeline({ getViewerView }) {
           detail: `"${label.title}" [${label.keywordList.join(', ')}] (${Date.now() - startedAt}ms)`,
         });
       }).catch((error) => {
+        if (generation !== contextGeneration) return;
         contextStore.setLabel({ major, label: null, status: LABEL_STATUS_MAP.failed });
         markDebug({
           stage: DEBUG_STAGE_MAP.context, verdict: DEBUG_VERDICT_MAP.fail,
@@ -260,6 +265,7 @@ function registerPipeline({ getViewerView }) {
     await appendRecord({
       kind: RECORD_KIND_MAP.narration, ts, source, text, slideLabel, isEmitted: true,
       hasAudio: Boolean(wavData), narrationClass: resolvedClass,
+      eventVideoTimeMs: Number.isFinite(eventVideoTimeMs) ? eventVideoTimeMs : null,
     });
     getViewerView()?.webContents.send('pipeline-event', {
       type: 'caption', ts, text, source, slideLabel, wavData, rationale,
@@ -277,6 +283,7 @@ function registerPipeline({ getViewerView }) {
     narrationHistory.reset();
     slideTextStore.reset();
     const { sessionId } = sessionStore.startSession({ mode });
+    contextGeneration += 1;
     contextStore.start({ sessionId, startedAt: Date.now() });
     console.log(`[pipeline] ■ 캡처 세션 시작 (모드=${mode}, ${sessionId}) — 중복 이력·화면 레지스트리 초기화`);
     markDebug({
@@ -875,7 +882,7 @@ function registerPipeline({ getViewerView }) {
 
   ipcMain.handle('pipeline-question', async (_event, { ts, buffer, questionText, recentTranscript = '',
     wordBudget, currentSlideLabel = null, speakerHintNow = null, inputSource = 'typed',
-    eventVideoTimeMs = null }) => {
+    eventVideoTimeMs = null, heardWallTs = null, heardVideoTimeMs = null }) => {
     const startedAt = Date.now();
     const currentSlideMajor = toSlideMajor(currentSlideLabel) ?? contextStore.getCurrentSlideMajor();
     const followUpQa = selectFollowUpQa({ lastQa: contextStore.getLastQa(), now: Date.now() });
@@ -906,6 +913,7 @@ function registerPipeline({ getViewerView }) {
         })
         : await questionAnswerer.answer({
           route: routed.route, slideMajorList: routed.slideMajorList, questionText, wordBudget, speakerHintNow,
+          heardWallTs, heardVideoTimeMs,
         });
       const text = result.isGrounded && result.text ? result.text : NOT_FOUND_TEXT;
       // 직전 Q&A 를 실제로 라우터에 넣었을 때만 되묻기로 친다. 규칙으로 처리한 질문은 다음 되묻기를 막지 않는다.

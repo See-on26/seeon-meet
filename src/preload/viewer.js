@@ -58,9 +58,9 @@ contextBridge.exposeInMainWorld('seeon', {
     return ipcRenderer.invoke('pipeline-command',
       { ts, buffer: new Uint8Array(buffer), command, questionText, recentTranscript, wordBudget, eventVideoTimeMs });
   },
-  sendPipelineQuestion({ ts, buffer, questionText, recentTranscript = '', wordBudget = null, currentSlideLabel = null, speakerHintNow = null, inputSource = 'typed', eventVideoTimeMs = null }) {
+  sendPipelineQuestion({ ts, buffer, questionText, recentTranscript = '', wordBudget = null, currentSlideLabel = null, speakerHintNow = null, inputSource = 'typed', eventVideoTimeMs = null, heardWallTs = null, heardVideoTimeMs = null }) {
     return ipcRenderer.invoke('pipeline-question',
-      { ts, buffer: new Uint8Array(buffer), questionText, recentTranscript, wordBudget, currentSlideLabel, speakerHintNow, inputSource, eventVideoTimeMs });
+      { ts, buffer: new Uint8Array(buffer), questionText, recentTranscript, wordBudget, currentSlideLabel, speakerHintNow, inputSource, eventVideoTimeMs, heardWallTs, heardVideoTimeMs });
   },
   sendQuestionAudio({ buffer, startTs }) {
     return ipcRenderer.invoke('pipeline-question-audio', { buffer: new Uint8Array(buffer), startTs });

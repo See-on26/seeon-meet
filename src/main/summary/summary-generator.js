@@ -143,9 +143,14 @@ function createSummaryGenerator({ config, summariesDir, onProgress = null }) {
       summariesDir, buildSummaryFileName({ sessionId: session.sessionId, extension: 'txt' }),
     );
     fs.writeFileSync(textFilePath, documentText, 'utf8');
+    // 스크립트는 부가 출력이라, 쓰기에 실패해도 요약 문서·음성 생성은 계속한다.
     if (contextSnapshot) {
       const scriptFilePath = textFilePath.replace(/\.txt$/, '-script.txt');
-      fs.writeFileSync(scriptFilePath, buildTranscriptScript({ snapshot: contextSnapshot }), 'utf8');
+      try {
+        fs.writeFileSync(scriptFilePath, buildTranscriptScript({ snapshot: contextSnapshot }), 'utf8');
+      } catch (error) {
+        console.warn(`[summary] 대화 스크립트 쓰기 실패(무시) ${scriptFilePath}: ${error.message}`);
+      }
     }
 
     const audioFilePath = await synthesizeSummaryAudio({

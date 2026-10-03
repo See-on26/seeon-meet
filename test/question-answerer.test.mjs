@@ -147,3 +147,43 @@ test('이미지가 없을 때 못 찾음 설명은 없는 내용으로 답한다
   const result = await answerer.answer({ route: 'past_slide', slideMajorList: [4], questionText: 'A는 얼마?', wordBudget });
   assert.deepEqual(result, { text: NOT_FOUND_TEXT, isGrounded: false, isImageUsed: false });
 });
+
+test('교차 모드: 해설 다시는 사용자가 아직 듣지 못한 해설을 고르지 않는다', async () => {
+  const store = makeStore();
+  store.applyRecord({ kind: 'narration', ts: 3000, source: 'deixis', text: '들은 해설', slideLabel: '3', isEmitted: true, eventVideoTimeMs: 5000 });
+  store.applyRecord({ kind: 'narration', ts: 3100, source: 'deixis', text: '아직 안 들린 해설', slideLabel: '3', isEmitted: true, eventVideoTimeMs: 50000 });
+  const { answerer, textCallList } = makeAnswerer({ store, textReplyList: ['2'] });
+  await answerer.answer({ route: 'narration_replay', slideMajorList: [], questionText: '방금 해설 다시', wordBudget, heardVideoTimeMs: 10000 });
+  assert.match(textCallList[0].prompt, /들은 해설 \(가장 최근\)/);
+  assert.doesNotMatch(textCallList[0].prompt, /아직 안 들린 해설/);
+});
+
+test('교차 모드: 화자 질문은 사용자가 들은 시점까지의 발화만 근거로 쓴다', async () => {
+  const { answerer, textCallList } = makeAnswerer({ textReplyList: ['답'], now: () => 700_000 });
+  await answerer.answer({ route: 'speaker', slideMajorList: [], questionText: '방금 누가 뭐라고 했어?', wordBudget, heardWallTs: 100_000 });
+  assert.match(textCallList[0].prompt, /500만원이 추가됩니다/);
+  assert.doesNotMatch(textCallList[0].prompt, /복지 얘기/);
+});
+
+test('교차 모드: 지금 화자는 사용자가 듣는 시점 근처 발화의 화자로 답한다', async () => {
+  const { answerer } = makeAnswerer({ now: () => 62_000 });
+  const lagged = await answerer.answer({ route: 'speaker_now', slideMajorList: [], questionText: 'q', wordBudget, speakerHintNow: '이수민', heardWallTs: 3_000 });
+  assert.equal(lagged.text, '김지오님이 말하고 있어요');
+  const live = await answerer.answer({ route: 'speaker_now', slideMajorList: [], questionText: 'q', wordBudget, speakerHintNow: '이수민', heardWallTs: 61_500 });
+  assert.equal(live.text, '이수민님이 말하고 있어요');
+});
+
+test('따옴표·백틱이 붙은 NEED_IMAGE 도 이미지 요청으로 본다', async () => {
+  const { answerer, imageCallList } = makeAnswerer({ textReplyList: ['"NEED_IMAGE"'], imageReply: '빨간 선' });
+  const result = await answerer.answer({ route: 'past_slide', slideMajorList: [3], questionText: '색?', wordBudget });
+  assert.equal(result.isImageUsed, true);
+  assert.equal(imageCallList.length, 1);
+});
+
+test('숫자가 든 답은 "알 수 없지만" 같은 말이 있어도 버리지 않는다', async () => {
+  const { answerer, imageCallList } = makeAnswerer({ textReplyList: ['정확한 날짜는 알 수 없지만 500만원이 추가됐어요'] });
+  const result = await answerer.answer({ route: 'past_slide', slideMajorList: [3], questionText: '얼마?', wordBudget: { minWordCount: 3, maxWordCount: 20 } });
+  assert.equal(result.isImageUsed, false);
+  assert.equal(imageCallList.length, 0);
+  assert.match(result.text, /500만원/);
+});

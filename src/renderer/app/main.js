@@ -1060,8 +1060,11 @@ async function askQuestion({ command = null, questionText = null, inputSource = 
     }).catch(() => null);
     return;
   }
+  // 교차 모드는 회의를 늦게 듣는다. "방금·지금"을 사용자가 듣고 있는 위치 기준으로 답하도록 그 위치를 넘긴다.
+  const heardVideoTimeMs = delayBuffer ? delayBuffer.getDelayedTimeMs() : captureSource.videoTimeMs;
+  const heardWallTs = Date.now() - Math.max(0, captureSource.videoTimeMs - heardVideoTimeMs);
   const result = await window.seeon.sendPipelineQuestion({
-    ts, buffer, questionText, wordBudget, inputSource,
+    ts, buffer, questionText, wordBudget, inputSource, heardWallTs, heardVideoTimeMs,
     recentTranscript: transcriptWindow.getBefore({ nowTs: performance.now(), windowMs: 60000 }),
     currentSlideLabel: slideRegistry.currentLabel(), speakerHintNow: getSpeakerHint(),
     eventVideoTimeMs: captureSource.videoTimeMs,

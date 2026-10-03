@@ -24,3 +24,8 @@ test('그 밖의 질문은 라우터로 넘긴다', () => {
   assert.equal(classifyQuestion('2023년 매출이 얼마야?'), null);
   assert.equal(classifyQuestion(''), null);
 });
+
+test('"지금 화면에 누구 사진이야?"는 지금 화자 질문이 아니다', () => {
+  assert.equal(classifyQuestion('지금 화면에 누구 사진이야?'), null);
+  assert.equal(classifyQuestion('지금 발표하는 사람 누구야?')?.route, QUESTION_ROUTE_MAP.speakerNow);
+});

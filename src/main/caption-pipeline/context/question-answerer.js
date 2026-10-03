@@ -17,7 +17,13 @@ const FLOW_UTTERANCE_PER_SLIDE = 3;
 const FLOW_UTTERANCE_MAX_CHARS = 80;
 
 // 모델이 토큰 대신 "기록에 명시되어 있지 않습니다" 같은 설명으로 못 찾았다고 답하는 경우.
+// 숫자가 든 답("날짜는 알 수 없지만 500만원…")은 답이 있는 것으로 본다.
 const NOT_FOUND_PHRASE_PATTERN = /(명시되어 있지 않|나와 있지 않|알 수 없|확인할 수 없|찾을 수 없|기록에 없|기록에는 없)/;
+const TOKEN_WRAPPER_PATTERN = /^[\s"'`*「『“]+/;
+
+// 교차 모드는 사용자가 회의를 늦게 듣는다. 이만큼 늦으면 '지금 화자'를 실시간 화면이 아니라 들은 시점 발화로 정한다.
+const HEARD_LAG_THRESHOLD_MS = 2000;
+const HEARD_SPEAKER_WINDOW_MS = 8000;
 
 function toAnswer({ content, wordBudget }) {
   const { text, isGrounded } = parseGroundingText(
@@ -56,10 +62,10 @@ function createQuestionAnswerer({ requestText, requestImage, readImage, contextS
       label: '질문 답(지난 화면)', maxTokens: ANSWER_MAX_TOKENS,
     });
     // 텍스트로 답을 못 찾았으면 저장해 둔 화면 그림에서 다시 찾는다.
-    const trimmed = String(content ?? '').trim();
+    const trimmed = String(content ?? '').trim().replace(TOKEN_WRAPPER_PATTERN, '');
     const isImageRequested = trimmed.startsWith(NEED_IMAGE_TOKEN);
     const isNotFound = new RegExp(`^${GROUNDING_NONE_TOKEN}\\b`, 'i').test(trimmed)
-      || NOT_FOUND_PHRASE_PATTERN.test(trimmed);
+      || (NOT_FOUND_PHRASE_PATTERN.test(trimmed) && !/\d/.test(trimmed));
     if (!isImageRequested && !isNotFound) return toAnswer({ content, wordBudget });
     const imagePath = slideList[0].imagePath;
     const jpegBuffer = imagePath ? await readImage(imagePath) : null;
@@ -74,10 +80,11 @@ function createQuestionAnswerer({ requestText, requestImage, readImage, contextS
     return { ...toAnswer({ content: imageContent, wordBudget }), isImageUsed: true };
   }
 
-  async function answerSpeaker({ slideMajorList, questionText, wordBudget }) {
+  async function answerSpeaker({ slideMajorList, questionText, wordBudget, heardWallTs }) {
+    const toTs = heardWallTs ?? Infinity;
     const utteranceList = slideMajorList.length
-      ? slideMajorList.flatMap((slideMajor) => contextStore.getUtteranceList({ slideMajor }))
-      : contextStore.getUtteranceList({ fromTs: now() - SPEAKER_WINDOW_MS });
+      ? slideMajorList.flatMap((slideMajor) => contextStore.getUtteranceList({ slideMajor, toTs }))
+      : contextStore.getUtteranceList({ fromTs: (heardWallTs ?? now()) - SPEAKER_WINDOW_MS, toTs });
     const utteranceText = utteranceList.slice(-SPEAKER_UTTERANCE_LIMIT)
       .map((utterance) => formatUtteranceLine({ utterance, startedAt: getStartedAt() }))
       .join('\n');
@@ -88,8 +95,12 @@ function createQuestionAnswerer({ requestText, requestImage, readImage, contextS
     return toAnswer({ content, wordBudget });
   }
 
-  async function answerNarrationReplay({ questionText }) {
-    const narrationList = contextStore.getNarrationList({ limit: NARRATION_REPLAY_LIMIT });
+  // 교차 모드에서 아직 재생되지 않은 해설(원 사건 시각이 들은 위치보다 뒤)은 "방금 해설"이 아니다.
+  async function answerNarrationReplay({ questionText, heardVideoTimeMs }) {
+    const narrationList = contextStore.getNarrationList({ limit: Infinity })
+      .filter((narration) => !Number.isFinite(heardVideoTimeMs) || narration.eventVideoTimeMs === null
+        || narration.eventVideoTimeMs <= heardVideoTimeMs)
+      .slice(-NARRATION_REPLAY_LIMIT);
     if (!narrationList.length) return notFound();
     const content = String(await requestText({
       prompt: buildNarrationReplayPrompt({ questionText, narrationList }),
@@ -118,16 +129,29 @@ function createQuestionAnswerer({ requestText, requestImage, readImage, contextS
     return toAnswer({ content, wordBudget });
   }
 
-  async function answer({ route, slideMajorList = [], questionText, wordBudget, speakerHintNow = null }) {
+  function resolveSpeakerNow({ speakerHintNow, heardWallTs }) {
+    if (!Number.isFinite(heardWallTs) || now() - heardWallTs <= HEARD_LAG_THRESHOLD_MS) return speakerHintNow;
+    const heardList = contextStore.getUtteranceList({
+      fromTs: heardWallTs - HEARD_SPEAKER_WINDOW_MS, toTs: heardWallTs,
+    }).filter((utterance) => utterance.speakerHint);
+    return heardList.length ? heardList[heardList.length - 1].speakerHint : null;
+  }
+
+  // heardWallTs·heardVideoTimeMs 는 사용자가 지금 듣고 있는 위치다(교차 모드는 실시간보다 늦다).
+  async function answer({ route, slideMajorList = [], questionText, wordBudget, speakerHintNow = null,
+    heardWallTs = null, heardVideoTimeMs = null }) {
     if (route === QUESTION_ROUTE_MAP.speakerNow) {
+      const speaker = resolveSpeakerNow({ speakerHintNow, heardWallTs });
       return {
-        text: speakerHintNow ? `${speakerHintNow}님이 말하고 있어요` : SPEAKER_UNKNOWN_TEXT,
+        text: speaker ? `${speaker}님이 말하고 있어요` : SPEAKER_UNKNOWN_TEXT,
         isGrounded: true, isImageUsed: false,
       };
     }
     if (route === QUESTION_ROUTE_MAP.pastSlide) return answerPastSlide({ slideMajorList, questionText, wordBudget });
-    if (route === QUESTION_ROUTE_MAP.speaker) return answerSpeaker({ slideMajorList, questionText, wordBudget });
-    if (route === QUESTION_ROUTE_MAP.narrationReplay) return answerNarrationReplay({ questionText });
+    if (route === QUESTION_ROUTE_MAP.speaker) {
+      return answerSpeaker({ slideMajorList, questionText, wordBudget, heardWallTs });
+    }
+    if (route === QUESTION_ROUTE_MAP.narrationReplay) return answerNarrationReplay({ questionText, heardVideoTimeMs });
     if (route === QUESTION_ROUTE_MAP.meetingFlow) return answerMeetingFlow({ questionText, wordBudget });
     return notFound();
   }
