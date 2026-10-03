@@ -1009,13 +1009,16 @@ function handleAsrTranscript({ text, ts, endTs, segmentList = [] }) {
 
     transcriptWindow.push({ text: trimmed, ts: performance.now() });
     // 대기 중인 지시 후보가 있으면 이 조각을 뒤 조각으로 먼저 붙인다. 새 후보는 그다음 탐지에서 생긴다.
-    candidateScheduler.appendTranscript({ text: trimmed });
-    deixisDetector.handleTranscript({
-      text: trimmed, captureTs: endTs,
-      resolveEventWallTs: ({ trigger }) => resolveSpeechEndWallTs({
-        chunkStartTs: ts, chunkEndTs: endTs, segmentList, trigger,
-      }),
-    });
+    // 이 조각으로 앞 후보의 판정이 났으면, 이미 그 문장에 쓴 조각이므로 새 후보의 트리거로 쓰지 않는다.
+    const { isDecided } = candidateScheduler.appendTranscript({ text: trimmed, endTs });
+    if (!isDecided) {
+      deixisDetector.handleTranscript({
+        text: trimmed, captureTs: endTs,
+        resolveEventWallTs: ({ trigger }) => resolveSpeechEndWallTs({
+          chunkStartTs: ts, chunkEndTs: endTs, segmentList, trigger,
+        }),
+      });
+    }
   }
 
   const candidateCount = collectGapCandidateList({

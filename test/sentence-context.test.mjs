@@ -27,7 +27,7 @@ function submitSpeech(scheduler, { utterance, trigger = utterance, leadText = ''
 
 test('대기 후보가 없으면 전사 조각을 붙이지 않는다', () => {
   const { scheduler, timerList, decisionList } = makeScheduler();
-  assert.equal(scheduler.appendTranscript({ text: '500만원이 추가된 것을' }), false);
+  assert.equal(scheduler.appendTranscript({ text: '500만원이 추가된 것을' }).isAppended, false);
   assert.equal(timerList.length, 0);
   assert.equal(decisionList.length, 0);
 });
@@ -41,7 +41,7 @@ test('문장이 안 끝났으면 추가로 기다렸다가 앞 조각 + 트리�
   assert.equal(decisionList.length, 0);
   assert.equal(timerList[1].ms, SENTENCE_WAIT_MS);
 
-  assert.equal(scheduler.appendTranscript({ text: '500만원이 추가된 것을 보실 수가' }), true);
+  assert.equal(scheduler.appendTranscript({ text: '500만원이 추가된 것을 보실 수가' }).isAppended, true);
   assert.equal(decisionList.length, 0);
 
   timerList[1].fn();
@@ -138,7 +138,7 @@ test('추가 대기 중 reset 하면 타이머를 풀고 판정하지 않는다'
   timerList[0].fn();
   scheduler.reset();
   assert.equal(timerList[1].isCleared, true);
-  assert.equal(scheduler.appendTranscript({ text: '봐 주세요' }), false);
+  assert.equal(scheduler.appendTranscript({ text: '봐 주세요' }).isAppended, false);
   assert.equal(decisionList.length, 0);
 });
 
@@ -146,7 +146,7 @@ test('판정이 끝난 뒤 들어온 조각은 붙이지 않는다', () => {
   const { scheduler, timerList } = makeScheduler({ sentenceWaitMs: 0 });
   submitSpeech(scheduler, { utterance: '여기' });
   timerList[0].fn();
-  assert.equal(scheduler.appendTranscript({ text: '다음 조각' }), false);
+  assert.equal(scheduler.appendTranscript({ text: '다음 조각' }).isAppended, false);
 });
 
 test('대기 중 들어온 지시 조각은 트리거 목록에만 더하고 발화는 뒤 조각으로 한 번만 붙는다', () => {
@@ -177,4 +177,28 @@ test('문장 끝 추가 대기는 동시·성능 모드만 1.5초, 균형·품�
   assert.equal(computeSentenceWaitMs({ mode: MODE_MAP.delayed }), 0);
   assert.equal(computeSentenceWaitMs({ mode: MODE_MAP.listening }), 0);
   assert.equal(computeSentenceWaitMs({ mode: 'unknown' }), 0);
+});
+
+test('트리거 조각보다 먼저 녹음된(응답 순서가 뒤바뀐) 전사는 뒤 조각으로 붙이지 않는다', () => {
+  const { scheduler, timerList, decisionList } = makeScheduler({ sentenceWaitMs: 0 });
+  submitSpeech(scheduler, { utterance: '5배', chunkEndWallTs: 1000 });
+  assert.deepEqual(scheduler.appendTranscript({ text: '늦게 도착한 앞 조각', endTs: 900 }), { isAppended: false, isDecided: false });
+  assert.deepEqual(scheduler.appendTranscript({ text: '500만원이 추가된', endTs: 1500 }), { isAppended: true, isDecided: false });
+  timerList[0].fn();
+  assert.equal(decisionList[0].followText, '500만원이 추가된');
+});
+
+test('뒤 조각으로 판정이 나면 isDecided 를 알려 그 조각으로 새 후보를 만들지 않게 한다', () => {
+  const { scheduler, timerList, decisionList } = makeScheduler();
+  submitSpeech(scheduler, { utterance: '이 부분을 보시면' });
+  timerList[0].fn();
+  assert.deepEqual(scheduler.appendTranscript({ text: '여기가 핵심입니다' }), { isAppended: true, isDecided: true });
+  assert.equal(decisionList.length, 1);
+});
+
+test('대기 중인 후보가 없을 때 판정 함수가 불려도 오류 없이 넘어간다', () => {
+  const { scheduler, decisionList } = makeScheduler();
+  assert.doesNotThrow(() => scheduler.fire());
+  assert.doesNotThrow(() => scheduler.handleLookaheadEnd());
+  assert.equal(decisionList.length, 0);
 });

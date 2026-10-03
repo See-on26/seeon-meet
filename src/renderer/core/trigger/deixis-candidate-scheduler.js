@@ -55,15 +55,22 @@ export class DeixisCandidateScheduler {
 
   // 대기 중에 들어온 전사 조각은 지시어가 없어도 뒤 조각으로 붙인다.
   // 문장 끝을 기다리는 중이면 문장 끝 조각이 오는 즉시 판정한다.
-  appendTranscript({ text }) {
+  // ASR 응답은 순서가 뒤바뀌어 올 수 있다. 트리거 조각보다 먼저 녹음된 조각(endTs ≤ chunkEndWallTs)은 뒤 조각이 아니다.
+  // isDecided 는 이 조각으로 판정이 났다는 뜻이다. 호출부는 같은 조각으로 새 후보를 만들지 않는다.
+  appendTranscript({ text, endTs = null }) {
     const trimmed = String(text || '').trim();
-    if (!this.pending || !trimmed) return false;
+    if (!this.pending || !trimmed) return { isAppended: false, isDecided: false };
+    const { chunkEndWallTs } = this.pending;
+    if (Number.isFinite(endTs) && Number.isFinite(chunkEndWallTs) && endTs <= chunkEndWallTs) {
+      return { isAppended: false, isDecided: false };
+    }
     this.pending.followList.push(trimmed);
     if (this.pending.isSentenceWaited && isSentenceComplete(trimmed)) {
       this.clearTimer(this.timerHandle);
       this.fire();
+      return { isAppended: true, isDecided: true };
     }
-    return true;
+    return { isAppended: true, isDecided: false };
   }
 
   // 트리거 조각이 끝난 뒤 말소리가 한 번도 없었으면 아직 전사 중인 뒤 조각도 없다.
@@ -77,6 +84,7 @@ export class DeixisCandidateScheduler {
   }
 
   handleLookaheadEnd() {
+    if (!this.pending) return;
     const { followList, utterance } = this.pending;
     const lastText = followList.length ? followList[followList.length - 1] : utterance;
     if (this.sentenceWaitMs <= 0 || isSentenceComplete(lastText) || !this.isSpeechContinued()) {
@@ -102,6 +110,7 @@ export class DeixisCandidateScheduler {
   }
 
   fire() {
+    if (!this.pending) return;
     const { followList, leadText, utterance, ...rest } = this.pending;
     const followText = followList.join(' ');
     const decision = {
