@@ -72,7 +72,32 @@ const DESCRIPTION_TAIL_NOUN_LIST = [
   '역할', '구성',
   '자료', '데이터', '모음', '묶음', '장', '건', '점', '컷', '양식', '서식', '보고서', '기록',
   '수치', '값', '통계', '지표', '비율', '분포', '추이', '변화', '실적', '성과',
+  '박스', '상자', '카드', '배너', '도형', '버튼', '메뉴', '창', '탭', '타임라인', '로드맵', '일정',
+  '조직도', '목차', '표지', '평가', '제도', '정책',
 ];
+
+// 묘사 끝 낱말에서 떼어 볼 조사. 긴 것부터 맞춰야 '으로'를 '로'로 잘못 떼지 않는다.
+const TAIL_PARTICLE_LIST = [
+  '으로', '에서', '에게', '이랑', '과', '와', '을', '를', '이', '가', '은', '는', '의', '에', '도', '로', '랑',
+];
+
+function stripTailParticle(word) {
+  const particle = TAIL_PARTICLE_LIST.find((candidate) => word.length > candidate.length && word.endsWith(candidate));
+  return particle ? word.slice(0, -particle.length) : word;
+}
+
+// VLM 이 상한을 넘겨 쓰거나 자료 명사로 맺지 못한 묘사를, 상한 안에서 자료 명사로 끝나는 가장 긴 지점까지 자른다.
+// 그 지점의 조사는 뗀다("…설명한 본문과" → "…설명한 본문"). 하한보다 짧아지면 null 이다.
+function cutAtTailNoun({ text, maxWordCount, minWordCount, tailNounList = DESCRIPTION_TAIL_NOUN_LIST }) {
+  const wordList = String(text || '').trim().split(/\s+/).filter(Boolean).slice(0, maxWordCount);
+  const endsWithTailNoun = (word) => tailNounList.some((noun) => word.endsWith(noun));
+  for (let lastIndex = wordList.length - 1; lastIndex >= minWordCount - 1; lastIndex -= 1) {
+    const word = wordList[lastIndex].replace(TRAILING_MARK_PATTERN, '');
+    const candidate = endsWithTailNoun(word) ? word : stripTailParticle(word);
+    if (endsWithTailNoun(candidate)) return [...wordList.slice(0, lastIndex), candidate].join(' ');
+  }
+  return null;
+}
 
 const INCOMPLETE_WORD_SET = new Set([
   '한', '두', '세', '네', '다섯', '여섯', '일곱', '여덟', '아홉', '열',
@@ -192,6 +217,13 @@ function normalizeSlotMap({ slotList, rawSlotMap }) {
       slotMap[slot.key] = String(text).trim().replace(TRAILING_PUNCTUATION_PATTERN, '');
       continue;
     }
+    const nounCut = slot.tailNounList ? cutAtTailNoun({
+      text, maxWordCount: slot.maxWordCount, minWordCount: slot.minWordCount, tailNounList: slot.tailNounList,
+    }) : null;
+    if (nounCut) {
+      slotMap[slot.key] = nounCut;
+      continue;
+    }
     const truncated = truncateSlot({ text, maxWordCount: slot.maxWordCount });
     const isTruncated = countWord({ text }) > slot.maxWordCount;
     if (isTruncated) slotMap[slot.key] = trimToCompletePhrase({ text: truncated });
@@ -301,6 +333,7 @@ function assembleNarration({ narrationType, subKind, rawSlotMap, index = '' }) {
 
 module.exports = {
   NARRATION_SLOT_MAP, getSlotList, computeSlotTotal, buildSlotInstruction, DESCRIPTION_TAIL_NOUN_LIST, hasCompleteTailNoun,
+  cutAtTailNoun,
   normalizeSlotMap, hasEmptyRequiredSlot, hasValuelessSlot, hasValueToken, assembleNarration, countWord, truncateSlot,
   trimToCompletePhrase, hasFinalConsonant, attachJosa,
 };
