@@ -7,7 +7,7 @@ import { createRequire } from 'node:module';
 
 const require = createRequire(import.meta.url);
 const {
-  createRunController, RUN_PHASE_MAP, RUN_ERROR_MAP, SESSION_END_TIMEOUT_MS, VIEWER_RELOAD_TIMEOUT_MS,
+  createRunController, RUN_PHASE_MAP, RUN_ERROR_MAP, SESSION_END_TIMEOUT_MS, VIEWER_RELOAD_TIMEOUT_MS, LIVE_WAIT_MS,
 } = require('../src/main/lab/run-controller.js');
 const { createRunRecorder } = require('../src/main/lab/run-recorder.js');
 const { createOutputWriter } = require('../src/main/lab/output-writer.js');
@@ -17,31 +17,56 @@ function createHarness({
   isStartable = true, isLiveAfterClick = true, isSessionEnding = true, startOutputError = null,
   reloadBehavior = 'ok', stopOutputError = null, finalizeError = null, clickPauseResult = true, isSessionEndImmediate = false,
   recordPath = '/out/pipeline-1.jsonl', finalize = null, createOutputWriter: createWriter = createOutputWriter,
-  getLayout = undefined,
+  getLayout = undefined, hangCallList = [], lateLiveDelayMs = null, beforeSessionStart = () => {}, onPlayback = undefined,
 } = {}) {
   const clock = { nowMs: new Date(2026, 9, 5, 10, 0, 0).getTime() };
   const callList = [];
   const statusList = [];
   const finalizedList = [];
-  const optionMap = { reloadBehavior };
+  const optionMap = { reloadBehavior, hangCallSet: new Set(hangCallList) };
   let isLive = false;
+  let lateLiveAtMs = null;
   let controller = null;
+  // 응답하지 않는 화면: hangCallSet 에 든 호출은 끝나지 않는다.
+  const hangIfListed = async (name) => { if (optionMap.hangCallSet.has(name)) await new Promise(() => {}); };
+  const goLive = () => {
+    beforeSessionStart();
+    controller.sessionListener.onStart({ isOk: true, sessionId: 'session-1', recordPath });
+    isLive = true;
+  };
   const viewerDriver = {
     reload: async () => {
       callList.push('viewer.reload');
       if (optionMap.reloadBehavior === 'hang') await new Promise(() => {});
       if (optionMap.reloadBehavior === 'reject') throw new Error('production 화면이 없다');
     },
-    selectMode: async ({ mode }) => { callList.push(`viewer.selectMode:${mode}`); return mode; },
-    isStartable: async () => isStartable,
-    isLive: async () => isLive,
+    selectMode: async ({ mode }) => {
+      callList.push(`viewer.selectMode:${mode}`);
+      await hangIfListed('viewer.selectMode');
+      return mode;
+    },
+    isStartable: async () => { await hangIfListed('viewer.isStartable'); return isStartable; },
+    isLive: async () => {
+      await hangIfListed('viewer.isLive');
+      // 늦은 LIVE: 시작 버튼을 누른 뒤 lateLiveDelayMs 가 지나서야 캡처가 붙는다.
+      if (lateLiveAtMs !== null && clock.nowMs >= lateLiveAtMs) {
+        lateLiveAtMs = null;
+        goLive();
+      }
+      return isLive;
+    },
     clickToggle: async () => {
       callList.push('viewer.clickToggle');
+      await hangIfListed('viewer.clickToggle');
       if (!isLive) {
+        if (lateLiveDelayMs !== null) {
+          controller.handleCaptureRequested({ wallMs: clock.nowMs });
+          lateLiveAtMs = clock.nowMs + lateLiveDelayMs;
+          return true;
+        }
         if (!isLiveAfterClick) return true;
         controller.handleCaptureRequested({ wallMs: clock.nowMs });
-        controller.sessionListener.onStart({ isOk: true, sessionId: 'session-1', recordPath });
-        isLive = true;
+        goLive();
       } else {
         isLive = false;
         if (isSessionEndImmediate) controller.sessionListener.onEnd({ isOk: true, sessionId: 'session-1' });
@@ -52,20 +77,30 @@ function createHarness({
     clickPause: async () => { callList.push('viewer.clickPause'); return clickPauseResult; },
   };
   const playerDriver = {
-    setRoiEditing: async ({ isEditing }) => { callList.push(`player.setRoiEditing:${isEditing}`); return { roiNormRect: { x: 0, y: 0, w: 1, h: 1 } }; },
-    load: async ({ fileUrl }) => { callList.push(`player.load:${fileUrl}`); return { durationMs: 60000, videoWidth: 1920, videoHeight: 1080 }; },
+    setRoiEditing: async ({ isEditing }) => {
+      callList.push(`player.setRoiEditing:${isEditing}`);
+      await hangIfListed('player.setRoiEditing');
+      return { roiNormRect: { x: 0, y: 0, w: 1, h: 1 } };
+    },
+    load: async ({ fileUrl }) => {
+      callList.push(`player.load:${fileUrl}`);
+      await hangIfListed('player.load');
+      return { durationMs: 60000, videoWidth: 1920, videoHeight: 1080 };
+    },
     startOutputRecording: async () => {
       callList.push('player.startOutputRecording');
+      await hangIfListed('player.startOutputRecording');
       if (startOutputError) throw new Error(startOutputError);
       return { startedWallMs: clock.nowMs, mimeType: 'audio/webm;codecs=opus' };
     },
     stopOutputRecording: async () => {
       callList.push('player.stopOutputRecording');
+      await hangIfListed('player.stopOutputRecording');
       if (stopOutputError) throw new Error(stopOutputError);
       return { stoppedWallMs: clock.nowMs };
     },
-    play: async () => { callList.push('player.play'); },
-    pause: async () => { callList.push('player.pause'); },
+    play: async () => { callList.push('player.play'); await hangIfListed('player.play'); },
+    pause: async () => { callList.push('player.pause'); await hangIfListed('player.pause'); },
   };
   const labRootDir = fs.mkdtempSync(path.join(os.tmpdir(), 'lab-controller-'));
   const presetList = [];
@@ -93,11 +128,14 @@ function createHarness({
     modelConfig: { bedrockModelId: 'm' },
     getLayout,
     notify: (status) => statusList.push(status),
+    onPlayback,
     onRunFinished: (result) => { finishedResolveList.splice(0).forEach((resolve) => resolve(result)); },
     now: () => clock.nowMs,
     wait: async (ms) => { clock.nowMs += ms; await new Promise((resolve) => { setImmediate(resolve); }); },
   });
-  return { controller, clock, callList, statusList, finalizedList, presetList, labRootDir, waitFinished, optionMap };
+  // viewer 가 스스로 캡처를 멈춘 상황(스트림 끊김 등)을 흉내 낸다.
+  const setLive = (value) => { isLive = value; };
+  return { controller, clock, callList, statusList, finalizedList, presetList, labRootDir, waitFinished, optionMap, setLive };
 }
 
 // 가짜 시계의 wait 는 setImmediate 한 번으로 끝난다. 대기 반복이 몇 바퀴 돌 시간을 준다.
@@ -371,4 +409,111 @@ test('녹음 쓰기는 쓴 바이트 수와 쓰기 실패를 닫을 때 알려 �
   const { byteCount, error } = await failingWriter.close();
   assert.equal(byteCount, 0);
   assert.match(error.message, /ENOSPC/);
+});
+
+const codeListOf = (run) => run.errorList.map((error) => error.code);
+
+test('캡처가 정지 전에 스스로 끝났으면 capture_failed 로 남기고 열린 세션은 닫힐 때까지 기다린다', async () => {
+  const neverEnded = createHarness();
+  await neverEnded.controller.start({ videoPath: '/v.mp4', isEvalPreset: true });
+  neverEnded.setLive(false);
+  neverEnded.callList.length = 0;
+  const stoppedAtMs = neverEnded.clock.nowMs;
+  await neverEnded.controller.stop();
+  const neverEndedRun = neverEnded.finalizedList[0].run;
+  assert.equal(neverEnded.callList.includes('viewer.clickToggle'), false, 'LIVE 가 아니면 시작 버튼을 누르지 않는다');
+  assert.ok(neverEnded.finalizedList[0].atMs - stoppedAtMs >= SESSION_END_TIMEOUT_MS);
+  assert.deepEqual(codeListOf(neverEndedRun), [RUN_ERROR_MAP.captureFailed, RUN_ERROR_MAP.sessionEndTimeout]);
+  assert.match(neverEndedRun.errorList[0].message, /캡처가 정지 전에 끝났다/);
+
+  const lateEnded = createHarness();
+  await lateEnded.controller.start({ videoPath: '/v.mp4', isEvalPreset: true });
+  lateEnded.setLive(false);
+  setImmediate(() => lateEnded.controller.sessionListener.onEnd({ isOk: true, sessionId: 'session-1' }));
+  await lateEnded.controller.stop();
+  const lateEndedRun = lateEnded.finalizedList[0].run;
+  assert.deepEqual(codeListOf(lateEndedRun), [RUN_ERROR_MAP.captureFailed]);
+  assert.equal(lateEndedRun.isSessionEnded, true);
+});
+
+test('LIVE 가 시간 제한 뒤에야 켜지면 마무리에서 정지 버튼을 눌러 세션을 닫는다', async () => {
+  const harness = createHarness({ lateLiveDelayMs: LIVE_WAIT_MS + 2000 });
+  const result = await harness.controller.start({ videoPath: '/v.mp4', isEvalPreset: true });
+  assert.equal(result.isOk, false);
+  const { run } = harness.finalizedList[0];
+  assert.deepEqual(codeListOf(run), [RUN_ERROR_MAP.captureFailed]);
+  assert.equal(run.sessionId, 'session-1');
+  assert.equal(run.isSessionEnded, true, '늦게 열린 세션도 닫고 마무리한다');
+  assert.equal(harness.callList.filter((call) => call === 'viewer.clickToggle').length, 2);
+});
+
+test('마무리 중 화면이 응답하지 않아도 시간 제한 뒤 기록을 남기고 결과 폴더까지 간다', async () => {
+  const caseList = [
+    { hangName: 'player.pause', codeList: [RUN_ERROR_MAP.pageUnresponsive] },
+    { hangName: 'player.stopOutputRecording', codeList: [RUN_ERROR_MAP.outputRecordFailed] },
+    { hangName: 'viewer.clickToggle', codeList: [RUN_ERROR_MAP.pageUnresponsive, RUN_ERROR_MAP.sessionEndTimeout] },
+    { hangName: 'viewer.isLive', codeList: [RUN_ERROR_MAP.pageUnresponsive, RUN_ERROR_MAP.sessionEndTimeout] },
+  ];
+  for (const { hangName, codeList } of caseList) {
+    const harness = createHarness();
+    await harness.controller.start({ videoPath: '/v.mp4', isEvalPreset: true });
+    harness.optionMap.hangCallSet.add(hangName);
+    const stopResult = await harness.controller.stop();
+    assert.equal(stopResult.isOk, true, hangName);
+    assert.equal(harness.finalizedList.length, 1, hangName);
+    assert.deepEqual(codeListOf(harness.finalizedList[0].run), codeList, hangName);
+    assert.equal(harness.controller.getStatus().phase, RUN_PHASE_MAP.done, hangName);
+  }
+});
+
+test('시작 중 화면이 응답하지 않으면 준비 단계에 갇히지 않고 start_failed 로 멈춘다', async () => {
+  const hangNameList = [
+    'viewer.selectMode', 'player.setRoiEditing', 'player.load', 'player.startOutputRecording',
+    'viewer.isStartable', 'viewer.clickToggle', 'viewer.isLive', 'player.play',
+  ];
+  for (const hangName of hangNameList) {
+    const harness = createHarness({ hangCallList: [hangName] });
+    const result = await harness.controller.start({ videoPath: '/v.mp4', isEvalPreset: true });
+    assert.equal(result.isOk, false, hangName);
+    assert.match(result.message, /응답이 없었다/, hangName);
+    const status = harness.controller.getStatus();
+    assert.equal(status.phase, RUN_PHASE_MAP.failed, hangName);
+    assert.equal(status.errorList[0].code, RUN_ERROR_MAP.startFailed, hangName);
+  }
+});
+
+test('이번 실행의 세션이 열리기 전의 종료 알림과 세션 없음 응답은 세션 종료로 보지 않는다', async () => {
+  let earlyHarness = null;
+  earlyHarness = createHarness({
+    isSessionEnding: false,
+    beforeSessionStart: () => earlyHarness.controller.sessionListener.onEnd({ isOk: true, sessionId: 'session-0' }),
+  });
+  await earlyHarness.controller.start({ videoPath: '/v.mp4', isEvalPreset: true });
+  await earlyHarness.controller.stop();
+  assert.deepEqual(codeListOf(earlyHarness.finalizedList[0].run), [RUN_ERROR_MAP.sessionEndTimeout]);
+
+  const notOkHarness = createHarness({ isSessionEnding: false });
+  await notOkHarness.controller.start({ videoPath: '/v.mp4', isEvalPreset: true });
+  notOkHarness.controller.sessionListener.onEnd({ isOk: false, message: '진행 중인 세션이 없습니다' });
+  await notOkHarness.controller.stop();
+  assert.deepEqual(codeListOf(notOkHarness.finalizedList[0].run), [RUN_ERROR_MAP.sessionEndTimeout]);
+});
+
+test('비어 있거나 잘못된 IPC 보고는 던지지 않고 버린다', async () => {
+  const playbackList = [];
+  const harness = createHarness({ onPlayback: (playback) => playbackList.push(playback) });
+  await harness.controller.start({ videoPath: '/v.mp4', isEvalPreset: true });
+  // 해설이 하나라도 있어야 재생 알림과 해설을 맞춰 보는 단계까지 간다.
+  harness.controller.handleViewerEvent({ type: 'caption', ts: 1, text: '해설' });
+  for (const report of [null, undefined, '해설', 42]) {
+    assert.doesNotThrow(() => harness.controller.handleNarrationPlayback(report), String(report));
+    assert.doesNotThrow(() => harness.controller.handleCaptureRequested(report), String(report));
+    assert.doesNotThrow(() => harness.controller.handleOutputChunk(report), String(report));
+  }
+  assert.equal(playbackList.length, 0);
+  harness.controller.handleNarrationPlayback({ ts: 1, text: '해설', wallMs: 1, durationMs: 1 });
+  assert.equal(playbackList.length, 1);
+  assert.equal(playbackList[0].caption.text, '해설');
+  await harness.controller.stop();
+  assert.equal(harness.finalizedList[0].run.playbackList.length, 1);
 });
