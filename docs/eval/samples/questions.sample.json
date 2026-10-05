@@ -1,0 +1,43 @@
+{
+  "generatorModel": "hand-written-sample",
+  "videoList": [
+    {
+      "videoId": "sample-5slides",
+      "domain": "발표",
+      "language": "ko",
+      "file": "out/lab-samples/sample-5slides.mp4",
+      "humanAdList": [
+        { "startMs": 8000, "text": "오른쪽에 '기회'와 '보상' 두 카드가 나란히 있다" },
+        { "startMs": 13000, "text": "보상 제도 타임라인: 스톡옵션·연 2회 정기 연봉 조정 등 분홍 막대가 시기별로 늘어난다" },
+        { "startMs": 27000, "text": "계단 그래프: 연봉 1,000에서 상반기 평가 후 1,250, 하반기 1,500" },
+        { "startMs": 35000, "text": "여행 사진 모음: 제주 돌하르방, 해변의 갈매기, 토끼 귀를 쓴 강아지, 불꽃놀이, 야자수 해변" }
+      ]
+    }
+  ],
+  "questionList": [
+    {
+      "id": "q-001", "videoId": "sample-5slides", "category": "조각", "subcategory": "지시 대상 파악",
+      "question": "발표자가 \"이 부분이 오늘의 핵심\"이라고 한 것은 무엇인가?",
+      "choiceList": ["'기회'와 '보상' 두 카드", "연봉 조정 그래프", "평가 기준표", "여행 사진 모음"],
+      "answerIndex": 0
+    },
+    {
+      "id": "q-002", "videoId": "sample-5slides", "category": "조각", "subcategory": "수치 의미 파악",
+      "question": "발표자가 \"하반기에 250이 올랐다\"고 할 때 250 은 무엇이 늘어난 양인가?",
+      "choiceList": ["반기 연봉 조정에 따른 연봉", "스톡옵션 수량", "평가 점수", "구성원 수"],
+      "answerIndex": 0
+    },
+    {
+      "id": "q-003", "videoId": "sample-5slides", "category": "조각", "subcategory": "지시 대상 파악",
+      "question": "발표자가 \"사진들을 한번 보시죠\"라고 한 화면에 없는 것은?",
+      "choiceList": ["토끼 귀를 쓴 강아지", "불꽃놀이", "눈 덮인 산", "야자수가 있는 해변"],
+      "answerIndex": 2
+    },
+    {
+      "id": "q-004", "videoId": "sample-5slides", "category": "통합", "subcategory": "교차 조회",
+      "question": "발표자가 \"제도가 하나씩 늘어났다\"고 한 화면에서 가장 먼저 시작된 제도는?",
+      "choiceList": ["스톡옵션", "연 2회 정기 연봉 조정", "수시 연봉 조정 제도", "비포괄임금제"],
+      "answerIndex": 2
+    }
+  ]
+}
