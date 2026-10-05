@@ -1,0 +1,83 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+  <meta charset="UTF-8" />
+  <title>seeon 파이프라인 흐름</title>
+  <style>
+    :root {
+      color-scheme: dark; font-family: -apple-system, "Apple SD Gothic Neo", sans-serif;
+      --blue: #0a84ff; --green: #30d158; --amber: #ffb340; --red: #ff453a; --grey: #48484a;
+    }
+    html, body { margin: 0; height: 100%; background: #111114; color: #f2f2f7; font-size: 13px; }
+    body { display: flex; flex-direction: column; }
+    header { padding: 10px 14px 8px; border-bottom: 1px solid #2c2c2e; display: flex; flex-direction: column; gap: 8px; }
+    .title-row { display: flex; align-items: baseline; gap: 12px; }
+    .title { font-size: 15px; font-weight: 600; }
+    .run-text { color: #a1a1a6; flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+    .track-row { display: grid; grid-template-columns: repeat(6, minmax(0, 1fr)); gap: 6px; }
+    .track { background: #1c1c1e; border-radius: 8px; padding: 6px 8px; border-left: 4px solid var(--grey); min-width: 0; }
+    .track-label { display: flex; align-items: center; gap: 6px; font-weight: 600; }
+    .dot { width: 10px; height: 10px; border-radius: 50%; background: var(--grey); flex: none; }
+    .track-detail { color: #8e8e93; font-size: 11px; margin-top: 3px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+    .state-active { border-left-color: var(--blue); } .state-active .dot { background: var(--blue); box-shadow: 0 0 6px var(--blue); }
+    .state-pass { border-left-color: var(--green); } .state-pass .dot { background: var(--green); }
+    .state-skip { border-left-color: var(--amber); } .state-skip .dot { background: var(--amber); }
+    .state-fail { border-left-color: var(--red); } .state-fail .dot { background: var(--red); }
+    details.session { color: #a1a1a6; font-size: 12px; }
+    details.session summary { cursor: pointer; }
+    .session-list { max-height: 96px; overflow-y: auto; margin-top: 4px; padding-left: 4px; }
+    .session-row { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+    .filter-row { display: flex; flex-wrap: wrap; gap: 6px 12px; align-items: center; font-size: 12px; }
+    .filter-group { display: flex; flex-wrap: wrap; gap: 4px; align-items: center; }
+    .filter-group-label { color: #8e8e93; margin-right: 2px; }
+    .chip { font: inherit; font-size: 12px; padding: 2px 8px; border-radius: 999px; border: 1px solid #48484a; background: #2c2c2e; color: inherit; cursor: pointer; }
+    .chip.off { opacity: 0.35; text-decoration: line-through; }
+    label.toggle { display: flex; align-items: center; gap: 4px; }
+    #flowList { flex: 1; overflow-y: auto; padding: 10px 14px 24px; display: flex; flex-direction: column; gap: 8px; }
+    /* 고정 높이 flex 열에서 overflow:hidden 줄이 0 높이로 줄지 않게 한다. */
+    #flowList > * { flex-shrink: 0; }
+    .empty { color: #636366; padding: 24px 0; text-align: center; }
+    .card { background: #1c1c1e; border-radius: 10px; padding: 8px 10px; border-left: 4px solid var(--grey); }
+    .card.outcome-played { border-left-color: var(--green); }
+    .card.outcome-dropped { border-left-color: var(--amber); }
+    .card.outcome-blocked { border-left-color: var(--red); }
+    .card.outcome-pending { border-left-color: var(--blue); }
+    .card-head { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
+    .clock { font-variant-numeric: tabular-nums; color: #a1a1a6; }
+    .badge { font-size: 11px; padding: 1px 8px; border-radius: 999px; background: #3a3a3c; }
+    .badge.outcome-played { background: #1f4d2b; color: #9df5b0; }
+    .badge.outcome-dropped { background: #5c4113; color: #ffd28a; }
+    .badge.outcome-blocked { background: #5c1d19; color: #ffaaa4; }
+    .badge.outcome-pending { background: #10365e; color: #9ccaff; }
+    .outcome-text { color: #d1d1d6; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; flex: 1; }
+    .step-list { margin-top: 6px; display: flex; flex-direction: column; gap: 2px; }
+    .step { display: grid; grid-template-columns: 56px 190px 16px minmax(0, 1fr); gap: 6px; align-items: baseline; font-size: 12px; }
+    .step-kind { color: #8e8e93; }
+    .step-label { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+    .step-mark.verdict-pass { color: var(--green); } .step-mark.verdict-skip { color: var(--amber); }
+    .step-mark.verdict-fail { color: var(--red); } .step-mark.verdict-info { color: #8e8e93; }
+    .step-detail { color: #aeaeb2; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+    .asr-row { font-size: 11px; color: #8e8e93; padding: 0 10px; border-left: 2px solid #3a3a3c; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  </style>
+</head>
+<body>
+  <header>
+    <div class="title-row">
+      <span class="title">파이프라인 흐름</span>
+      <span class="run-text" id="runText">실행 없음</span>
+    </div>
+    <div class="track-row" id="trackRow" aria-label="단계 신호등"></div>
+    <details class="session" id="sessionBox">
+      <summary id="sessionSummary">세션 기록 0건</summary>
+      <div class="session-list" id="sessionList"></div>
+    </details>
+    <div class="filter-row">
+      <div class="filter-group" id="typeFilter"><span class="filter-group-label">유형</span></div>
+      <div class="filter-group" id="outcomeFilter"><span class="filter-group-label">결과</span></div>
+      <label class="toggle"><input type="checkbox" id="asrToggle" /> ASR 입력 보기</label>
+    </div>
+  </header>
+  <main id="flowList" aria-live="polite"></main>
+  <script type="module" src="./flow.js"></script>
+</body>
+</html>

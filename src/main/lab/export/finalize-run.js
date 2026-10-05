@@ -8,6 +8,7 @@ const { buildAdSrt } = require('./srt');
 const { buildSlideList } = require('./slides');
 const { readSessionRecordList, filterRecordKind } = require('./pipeline-records');
 const { buildRunInfo } = require('./run-info');
+const { buildFlowFile } = require('../flow/flow-snapshot');
 
 const RESULT_FILE_MAP = {
   runInfo: 'run.json',
@@ -20,6 +21,7 @@ const RESULT_FILE_MAP = {
   slideDir: 'slides',
   slideList: 'slides.json',
   pipelineRecords: 'pipeline.jsonl',
+  flow: 'flow.json',
 };
 
 const FINALIZE_ERROR_MAP = {
@@ -31,6 +33,7 @@ const FINALIZE_ERROR_MAP = {
   noOutputAudio: 'no_output_audio',
   slideCopyFailed: 'slide_copy_failed',
   writeFailed: 'write_failed',
+  flowFailed: 'flow_failed',
 };
 
 // 이 오류가 하나라도 있으면 결과물에 빠진 것이 있다(run.json.isComplete=false).
@@ -71,6 +74,18 @@ async function copySlideList({ slideList, runDir, fsApi, errorList }) {
     }
   }
   return copiedList;
+}
+
+// flow.json 은 흐름을 눈으로 보는 보조 파일이라 만들거나 쓰지 못해도 결과물 완전성에 넣지 않는다(INCOMPLETE_CODE_LIST 밖).
+async function writeFlowFileSafely({ fsApi, runDir, recordList, run, toMediaMs, errorList }) {
+  try {
+    const flowFile = buildFlowFile({ recordList, run, toMediaMs });
+    await fsApi.writeFile(path.join(runDir, RESULT_FILE_MAP.flow), `${JSON.stringify(flowFile, null, 2)}\n`, 'utf8');
+    return flowFile.flowList.length;
+  } catch (error) {
+    errorList.push({ code: FINALIZE_ERROR_MAP.flowFailed, message: `${RESULT_FILE_MAP.flow}: ${error.message}` });
+    return null;
+  }
 }
 
 async function readRecordListSafely({ run, readRecords, errorList }) {
@@ -135,6 +150,7 @@ async function finalizeRun({ run, modelConfig, fsApi = fs.promises, readRecords 
     [RESULT_FILE_MAP.pipelineRecords, recordList.map((record) => JSON.stringify(record)).join('\n') + (recordList.length ? '\n' : '')],
   ];
   for (const [name, content] of fileList) await writeResultFile({ fsApi, runDir, name, content, errorList });
+  const flowCount = await writeFlowFileSafely({ fsApi, runDir, recordList, run, toMediaMs, errorList });
 
   const hasOutputAudio = await fsApi.stat(path.join(runDir, RESULT_FILE_MAP.outputAudio))
     .then((stat) => stat.size > 0).catch(() => false);
@@ -150,6 +166,7 @@ async function finalizeRun({ run, modelConfig, fsApi = fs.promises, readRecords 
     slideCount: slideList.length,
     recordCount: recordList.length,
     playerTimeCount: run.playerTimeList.length,
+    flowCount,
   };
   const runInfo = buildRunInfo({
     run, modelConfig, captureStartWallMs, adTiming: summarizeAdTiming({ adList }), countMap, errorList, isComplete,

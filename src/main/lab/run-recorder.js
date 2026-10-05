@@ -12,13 +12,22 @@ function createRunRecorder({ now = Date.now } = {}) {
       playStartWallMs: null, videoEndedWallMs: null,
       sessionId: null, recordPath: null, isSessionEnded: false, roiNormRect: null,
       asrEventList: [], captionEventList: [], playbackList: [], playerTimeList: [], rendererDropList: [], errorList: [],
+      debugEventList: [],
     };
     return run;
+  }
+
+  // 흐름 창용 debug 기록. main 기록의 ts 는 결정 시각이라 언제 받았는지(receivedWallMs)를 함께 적는다.
+  function addDebug(entry) {
+    if (!isRecording() || !entry || typeof entry !== 'object') return;
+    const { type, ...rest } = entry;
+    run.debugEventList.push({ ...rest, receivedWallMs: now() });
   }
 
   return {
     start,
     isRecording,
+    addDebug,
     markCaptureRequested({ wallMs }) {
       if (isRecording() && run.captureRequestedWallMs === null) run.captureRequestedWallMs = wallMs;
     },
@@ -51,6 +60,7 @@ function createRunRecorder({ now = Date.now } = {}) {
       if (!isRecording() || !event) return;
       if (event.type === 'asr') run.asrEventList.push(event);
       else if (event.type === 'caption') run.captionEventList.push(event);
+      else if (event.type === 'debug') addDebug(event);
     },
     addPlayback(report) {
       if (isRecording() && report) run.playbackList.push(report);

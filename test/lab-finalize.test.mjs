@@ -102,7 +102,7 @@ test('결과 폴더 마무리는 정해진 파일을 모두 쓰고 그 세션 �
   const { runDir, recordPath } = prepareRunDir();
   const result = await finalizeRun({ run: buildRun({ runDir, recordPath }), modelConfig: { bedrockModelId: 'm' } });
   assert.deepEqual(fs.readdirSync(runDir).sort(), [
-    'ad-timeline.json', 'ad.srt', 'output-audio.webm', 'pipeline.jsonl', 'run.json', 's-condition.txt', 'slides', 'slides.json', 'transcript.json', 'transcript.txt',
+    'ad-timeline.json', 'ad.srt', 'flow.json', 'output-audio.webm', 'pipeline.jsonl', 'run.json', 's-condition.txt', 'slides', 'slides.json', 'transcript.json', 'transcript.txt',
   ]);
   assert.deepEqual(fs.readdirSync(path.join(runDir, 'slides')), ['slide-1.jpg']);
   const runInfo = JSON.parse(fs.readFileSync(path.join(runDir, 'run.json'), 'utf8'));

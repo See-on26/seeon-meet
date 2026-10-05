@@ -112,8 +112,11 @@ test('해설 음성 길이는 WAV 머리로 구하고 WAV 가 아니면 null 이
   assert.equal(readWavDurationMs(null), null);
 });
 
-test('pipeline-event 는 asr·caption 만 넘기고 음성 데이터 대신 길이를 싣는다', () => {
-  assert.equal(toForwardedPipelineEvent({ type: 'debug', stage: 'x' }), null);
+test('pipeline-event 는 asr·caption·debug 만 넘기고 음성 데이터 대신 길이를 싣는다', () => {
+  assert.equal(toForwardedPipelineEvent({ type: 'summary', text: 'x' }), null);
+  assert.deepEqual(toForwardedPipelineEvent({
+    type: 'debug', stage: 'router', verdict: 'skip', reason: '후보 없음', detail: '후보=[없음]', narrationType: null, ts: 7, extra: 'x',
+  }), { type: 'debug', stage: 'router', verdict: 'skip', reason: '후보 없음', detail: '후보=[없음]', narrationType: null, ts: 7 });
   assert.deepEqual(toForwardedPipelineEvent({ type: 'asr', ts: 1, endTs: 2, text: '말', segmentList: [{ startSec: 0 }] }), {
     type: 'asr', ts: 1, endTs: 2, text: '말', segmentList: [{ startSec: 0 }],
   });
@@ -168,9 +171,11 @@ test('실험 viewer preload 는 production API 전부 + 재생 시작 알림을 
   assert.deepEqual(productionKeyList.filter((key) => !labKeyList.includes(key)), []);
   assert.deepEqual(JSON.parse(storageMap.get('seeon.featureToggles')), { page_transition: false, speaker_identity: false, meeting_summary: false });
   fake.listenerMap['pipeline-event']({}, { type: 'caption', ts: 1, text: '해설', wavData: null });
-  fake.listenerMap['pipeline-event']({}, { type: 'debug' });
+  fake.listenerMap['pipeline-event']({}, { type: 'debug', stage: 'vlm', ts: 1 });
+  fake.listenerMap['pipeline-event']({}, { type: 'summary' });
   fake.exposedMap.seeon.reportLabNarrationPlayback({ entry: { text: '해설', ts: 1 }, durationMs: 900, wallMs: 5 });
-  assert.deepEqual(fake.sentList.map(([channel]) => channel), ['lab-viewer-event', 'lab-narration-playback']);
+  assert.deepEqual(fake.sentList.map(([channel]) => channel), ['lab-viewer-event', 'lab-viewer-event', 'lab-narration-playback']);
+  assert.equal(fake.sentList[1][1].stage, 'vlm');
   delete globalThis.window;
 });
 
@@ -201,8 +206,9 @@ test('실험 기록으로 넘기다 실패해도 production 화면의 pipeline-e
     fake.exposedMap.seeon.onPipelineEvent((payload) => receivedList.push(payload.text));
     assert.doesNotThrow(() => fake.emit('pipeline-event', { type: 'caption', ts: 1, text: '해설', wavData: null }));
     assert.doesNotThrow(() => fake.emit('pipeline-event', { type: 'caption', ts: 2, text: '깨진 음성', wavData: { byteLength: 100 } }));
-    assert.deepEqual(receivedList, ['해설', '깨진 음성'], 'production listener 가 두 이벤트를 모두 받는다');
-    assert.equal(warnList.length, 2);
+    assert.doesNotThrow(() => fake.emit('pipeline-event', { type: 'debug', stage: 'vlm', text: 'debug', ts: 3 }));
+    assert.deepEqual(receivedList, ['해설', '깨진 음성', 'debug'], 'production listener 가 세 이벤트를 모두 받는다');
+    assert.equal(warnList.length, 3);
     assert.match(warnList[0], /실험 기록/);
   } finally {
     console.warn = originalWarn;
