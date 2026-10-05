@@ -8,6 +8,7 @@ const { FRAMES_DIR, DEIXIS_NARRATED_DIR, DEIXIS_SKIPPED_DIR, SLIDES_DIR, SUMMARI
 const { registerIpc } = require('./ipc');
 const { registerPipeline } = require('./caption-pipeline');
 const { registerSummary } = require('./summary');
+const { createDocumentsMeetingArchive, registerMeetingArchive } = require('./archive');
 const { registerCommandShortcut } = require('./shortcut');
 const { registerViewerDisplayMedia } = require('./meeting/session');
 const window = require('./window');
@@ -23,8 +24,10 @@ app.whenReady().then(() => {
   fs.mkdirSync(SUMMARIES_DIR, { recursive: true });
   registerIpc({ getViewerView: window.getViewerView });
 
-  const pipelineHandle = registerPipeline({ getViewerView: window.getViewerView });
-  registerSummary({ getViewerView: window.getViewerView, pipelineHandle });
+  const meetingArchive = createDocumentsMeetingArchive();
+  registerMeetingArchive({ meetingArchive });
+  const pipelineHandle = registerPipeline({ getViewerView: window.getViewerView, meetingArchive });
+  registerSummary({ getViewerView: window.getViewerView, pipelineHandle, meetingArchive });
   window.createWindow();
 
   registerViewerDisplayMedia({ getMeetView: window.getMeetView });

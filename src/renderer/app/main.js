@@ -50,6 +50,7 @@ import { SlideEmbeddingRegistry } from '../core/trigger/slide-embedding-registry
 import { SlideDwellGate, DWELL_STATE_MAP } from '../core/trigger/slide-dwell-gate.js';
 import { computeGridEmbedding } from '../core/trigger/frame-embedding.js';
 import { showModal } from './modal.js';
+import { formatMeetingLabel } from '../core/archive/meeting-label.js';
 
 import { RoiStore, SPEAKER_VERDICT_MAP } from '../core/roi/roi-store.js';
 import { MeetCaptureSession } from '../core/capture/meet-capture-session.js';
@@ -1228,6 +1229,59 @@ window.seeon.onFeatureToggle(({ digit }) => {
 });
 buildFeatureToggleList();
 syncFeatureTogglesToMain();
+
+// 지난 회의: 사용자 문서 폴더(SEEON 회의 기록)에 날짜별로 남긴 요약·대화 스크립트를 앱 안에서 읽는다.
+function setArchiveStatus(text) {
+  $('archiveStatus').textContent = text;
+}
+
+async function showArchiveList() {
+  $('archiveDetail').hidden = true;
+  const list = $('archiveList');
+  list.hidden = false;
+  list.replaceChildren();
+  setArchiveStatus('지난 회의를 불러오는 중이에요');
+  const result = await window.seeon.listMeetingArchive().catch(() => null);
+  const meetingList = result?.isOk ? result.meetingList : [];
+  if (!result?.isOk) { setArchiveStatus('지난 회의를 불러오지 못했어요'); return; }
+  if (!meetingList.length) { setArchiveStatus('아직 저장된 회의가 없어요. 회의를 마치면 여기에 쌓여요'); return; }
+  for (const meeting of meetingList) {
+    const item = document.createElement('li');
+    const button = document.createElement('button');
+    button.type = 'button';
+    button.textContent = formatMeetingLabel({ meeting });
+    button.addEventListener('click', () => showArchiveMeeting({ id: meeting.id }));
+    item.append(button);
+    list.append(item);
+  }
+  setArchiveStatus(`지난 회의 ${meetingList.length}개. 최신 회의부터 있어요`);
+  list.querySelector('button')?.focus();
+}
+
+async function showArchiveMeeting({ id }) {
+  const result = await window.seeon.readMeetingArchive({ id }).catch(() => null);
+  if (!result?.isOk) { setArchiveStatus(result?.message || '회의 기록을 읽지 못했어요'); return; }
+  $('archiveList').hidden = true;
+  $('archiveDetail').hidden = false;
+  $('archiveDetail').dataset.meetingId = id;
+  $('archiveDetailTitle').textContent = formatMeetingLabel({ meeting: { ...result.meeting, hasSummary: Boolean(result.summaryText) } });
+  $('archiveSummary').textContent = result.summaryText || '요약이 없어요. 요약 기능이 꺼져 있었거나 요약을 만들지 못한 회의예요';
+  $('archiveScript').textContent = result.scriptText || '대화 스크립트가 없어요';
+  setArchiveStatus('회의 요약과 대화 스크립트를 열었어요');
+  $('archiveDetailTitle').focus();
+}
+
+$('archiveBtn').addEventListener('click', () => {
+  $('archiveModal').showModal();
+  showArchiveList();
+});
+$('archiveCloseBtn').addEventListener('click', () => $('archiveModal').close());
+$('archiveBackBtn').addEventListener('click', () => showArchiveList());
+$('archiveFolderBtn').addEventListener('click', async () => {
+  const id = $('archiveDetail').hidden ? null : $('archiveDetail').dataset.meetingId;
+  const result = await window.seeon.openMeetingArchiveFolder({ id }).catch(() => null);
+  if (!result?.isOk) setArchiveStatus(result?.message || '폴더를 열지 못했어요');
+});
 
 // 화면 공유가 검게 보일 때 Meet 화면만 다시 불러온다. 회의 중이었다면 다시 참여해야 한다.
 $('meetReloadBtn').addEventListener('click', () => {
