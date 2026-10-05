@@ -35,10 +35,13 @@ const FINALIZE_ERROR_MAP = {
 
 // 이 오류가 하나라도 있으면 결과물에 빠진 것이 있다(run.json.isComplete=false).
 // 녹음(output-audio.webm)은 사람 평가 입력이고, 해설이 왔는데 재생 알림이 없으면 AD 타임라인의 들린 자리가 모두 빠진다.
+// 문자열 코드는 실행 제어기(run-controller.js RUN_ERROR_MAP) 것이다. 녹음 시작·정지·쓰기 실패는 파일이 비지 않아도
+// 끝부분이 빠졌을 수 있어 빠진 것으로 본다. start_failed 는 결과 폴더를 만든 뒤 재생을 시작하지 못한 실행이다.
 const INCOMPLETE_CODE_LIST = [
   FINALIZE_ERROR_MAP.sessionUnknown, FINALIZE_ERROR_MAP.recordReadFailed, FINALIZE_ERROR_MAP.noPlayerTime,
   FINALIZE_ERROR_MAP.noOutputAudio, FINALIZE_ERROR_MAP.noPlaybackReport,
   FINALIZE_ERROR_MAP.writeFailed, 'capture_failed', 'session_end_timeout', 'roi_missing',
+  'output_record_failed', 'start_failed',
 ];
 
 async function writeResultFile({ fsApi, runDir, name, content, errorList }) {
