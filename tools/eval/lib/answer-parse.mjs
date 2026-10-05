@@ -74,10 +74,12 @@ function findJsonAnswerObject(text) {
   return null;
 }
 
+// JSON answer 칸은 프롬프트대로 보기 번호다. 번호 꼴은 보기 글과 같은 방식으로 다듬은 값(앞뒤 따옴표·괄호, 끝 마침표·느낌표를 뗀다)에서 본다.
+// 다듬지 않고 보면 "3!"·'3'·「3」 이 번호로 안 읽히고 보기 글 "3" 으로 읽혀 다른 보기가 된다.
 function readJsonAnswerValue({ value, choiceNumberMap }) {
   if (typeof value === 'number') return isChoiceNumber(value) ? value : null;
   if (typeof value !== 'string') return null;
-  const numberMatch = value.match(JSON_ANSWER_NUMBER_PATTERN);
+  const numberMatch = normalizeChoiceText(value).match(JSON_ANSWER_NUMBER_PATTERN);
   if (numberMatch) return toChoiceNumber(numberMatch[1]);
   return findChoiceTextNumber({ text: value, choiceNumberMap, numberedChoicePattern: JSON_NUMBERED_CHOICE_PATTERN });
 }

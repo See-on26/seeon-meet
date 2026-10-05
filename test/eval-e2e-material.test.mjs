@@ -226,6 +226,24 @@ test('보기 글이 숫자·횟수 꼴이라 답이 보기 번호인지 보기 �
   ]);
 });
 
+test('JSON answer 의 번호를 따옴표·괄호·느낌표·마침표로 꾸며도 보기 글이 아니라 보기 번호로 읽는다', () => {
+  const plainNumberChoiceTextList = choiceTextListOf(['2', '3', '4', '5']);
+  const countChoiceTextList = choiceTextListOf(['2번', '3번', '4번', '5번']);
+  assertChoiceNumberList([
+    ['{"answer": "3!"}', 3, plainNumberChoiceTextList],
+    ['{"answer": "\'3\'"}', 3, plainNumberChoiceTextList],
+    ['{"answer": "「3」"}', 3, plainNumberChoiceTextList],
+    ['{"answer": "\\"3\\""}', 3, plainNumberChoiceTextList],
+    ['{"answer": "3。"}', 3, plainNumberChoiceTextList],
+    ['{"answer": "\'3번\'"}', 3, countChoiceTextList],
+    ['{"answer": "“보기 3번”"}', 3, countChoiceTextList],
+    // 꾸밈을 떼도 번호 꼴이 아니면 전과 같이 보기 글로 읽거나 못 읽는다.
+    ['{"answer": "\'3회\'"}', 2, choiceTextListOf(['2회', '3회', '4회', '5회'])],
+    ['{"answer": "\'2.5\'"}', null, plainNumberChoiceTextList],
+  ]);
+  assert.equal(parseAnswerText('{"answer": "「3」"}', { choiceTextList: plainNumberChoiceTextList }).source, 'json');
+});
+
 test('소수 "N.M" 은 번호 붙인 보기 글로 읽지 않고, 값 전체가 보기 글과 같을 때만 그 보기다', () => {
   const oddChoiceTextList = choiceTextListOf(['3', '5', '7', '9']);
   const decimalMixChoiceTextList = choiceTextListOf(['5', '15', '0.5', '2']);

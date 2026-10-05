@@ -7,12 +7,16 @@ const { formatMediaClock } = require('../../../src/main/lab/export/clock-format.
 const formatPercent = (value) => (value === null || value === undefined ? '–' : `${(value * 100).toFixed(1)}%`);
 const formatRatio = (value) => (value === null || value === undefined ? '–' : value.toFixed(3));
 const formatSpread = ({ mean, std }, format) => (mean === null ? '–' : `${format(mean)}${std === null ? '' : ` ± ${format(std)}`}`);
+const formatPaired = (value, pairCount) => (pairCount ? `${formatRatio(value)} (n=${pairCount})` : '–');
 const formatKb = (byteCount) => `${(byteCount / 1000).toFixed(1)}KB`;
 const formatFlag = (value) => (value === null || value === undefined ? '모름' : value ? '예' : '아니오');
 const escapeCell = (value) => String(value ?? '').replace(/\|/g, '\\|').replace(/\r?\n/g, ' ');
 
 const COUNT_LEGEND_LINE = '글 답에서 읽음 = 요청한 JSON 이 아니라 답 전체가 번호 꼴이거나 보기 글 그대로인 글 답에서 읽은 수(정답률에 들어간다).'
   + ' 응답 오류 = 답 번호를 못 읽었거나 요청이 실패한 수(정답률 분모에서 뺀다).';
+
+const REACH_PAIR_LEGEND_LINE = '도달률·증가폭은 같은 문항·반복에서 S·C(증가폭은 A·S·C)가 모두 답한 짝끼리 셌다(n = 짝 수).'
+  + ' C 를 건너뛰었거나(슬라이드 없음·결과 폴더 못 읽음) 응답 오류인 문항은 빠지므로, 위 조건 표의 CA 로 바로 나눈 값과 다를 수 있다.';
 
 function buildConditionTable(conditionMap, conditionList = CONDITION_LIST) {
   const lineList = [
@@ -31,11 +35,20 @@ function buildGroupTable(groupMap) {
   const lineList = ['| 묶음 | CA A | CA S | CA H | CA C | 도달률 S÷C | 증가폭 (S−A)÷C | AR (S−A)÷(H−A) |', '|---|---|---|---|---|---|---|---|'];
   for (const [groupKey, metric] of Object.entries(groupMap)) {
     const ca = (condition) => formatPercent(metric.conditionMap[condition].ca);
-    lineList.push(`| ${escapeCell(groupKey)} | ${ca('A')} | ${ca('S')} | ${ca('H')} | ${ca('C')} | ${formatRatio(metric.reachRate)}`
-      + ` | ${formatRatio(metric.reachGain)} | ${formatRatio(metric.accuracyRatio)} |`);
+    lineList.push(`| ${escapeCell(groupKey)} | ${ca('A')} | ${ca('S')} | ${ca('H')} | ${ca('C')} | ${formatPaired(metric.reachRate, metric.reachPairCount)}`
+      + ` | ${formatPaired(metric.reachGain, metric.reachGainPairCount)} | ${formatRatio(metric.accuracyRatio)} |`);
   }
   return lineList.join('\n');
 }
+
+// 요청이 실패한 실행은 표가 정상처럼 보여도 응답 오류만큼 비어 있으므로 보고서 맨 위에 알린다.
+function buildRequestFailLine(runInfo) {
+  if (!runInfo.requestFailCount) return [];
+  return [`- **주의: Bedrock 요청 ${runInfo.requestFailCount}건이 실패했다** — 그 답은 응답 오류로 빠졌다.`
+    + ' 토큰(AWS_BEARER_TOKEN_BEDROCK) 만료·네트워크를 확인하고 같은 명령을 다시 돌린다(실패한 요청만 다시 묻는다).'];
+}
+
+const FILTER_DECISION_LABEL_MAP = { keep: '유지', discard: '폐기', undecided: '판단 못 함' };
 
 function buildGitLine(git) {
   if (!git) return [];
@@ -98,6 +111,7 @@ export function buildE2eReport({ runInfo, metrics, repeatSummary, skippedList, s
     `- 조건 ${runInfo.conditionList.join(', ')} · 반복 ${runInfo.repeatCount}회 · 동시 호출 ${runInfo.concurrency} · 슬라이드 최대 ${runInfo.maxSlideCount}장 · 캐시 ${runInfo.cacheDir || '끔'}`,
     `- 결과 폴더: ${Object.entries(runInfo.runDirMap).map(([videoId, runDir]) => `${videoId}=${runDir}`).join(', ') || '없음'}`,
     ...buildGitLine(runInfo.git),
+    ...buildRequestFailLine(runInfo),
     '',
     '"알 수 없음"은 오답으로 셌다. 응답 오류(답 번호를 못 읽음)는 정답률 분모에서 빼고 따로 셌다.',
     'C 조건 한계: LLM 은 영상을 볼 수 없어 슬라이드 대표 이미지로 "화면"을 대신했다. 슬라이드가 아닌 화면(영상·판서)은 이미지가 부족할 수 있다.',
@@ -110,9 +124,11 @@ export function buildE2eReport({ runInfo, metrics, repeatSummary, skippedList, s
     '',
     COUNT_LEGEND_LINE,
     '',
-    `- 도달률 S÷C: ${formatRatio(overall.reachRate)}`,
-    `- 도달률 증가폭 (S−A)÷C: ${formatRatio(overall.reachGain)}`,
+    `- 도달률 S÷C: ${formatRatio(overall.reachRate)} (S·C 짝 n=${overall.reachPairCount})`,
+    `- 도달률 증가폭 (S−A)÷C: ${formatRatio(overall.reachGain)} (A·S·C 짝 n=${overall.reachGainPairCount})`,
     `- Accuracy Ratio (S−A)÷(H−A): ${formatRatio(overall.accuracyRatio)} (사람 작성 AD 가 있는 문항끼리)`,
+    '',
+    REACH_PAIR_LEGEND_LINE,
     ...(repeatSummary.repeatCount > 1 ? [
       '',
       `반복 ${repeatSummary.repeatCount}회 평균 ± 표본 표준편차: ${CONDITION_LIST.map((condition) => `CA ${condition} ${formatSpread(repeatSummary.caMap[condition], formatPercent)}`).join(' · ')}`
@@ -148,14 +164,16 @@ export function buildE2eReport({ runInfo, metrics, repeatSummary, skippedList, s
 }
 
 export function buildFilterReport({ runInfo, decisionList, filterSummaryMap = null, screenMaterialList = [] }) {
-  const discardedList = decisionList.filter((decision) => decision.decision === 'discard');
+  const countOf = (decision) => decisionList.filter((item) => item.decision === decision).length;
   return [
     '# 3.2 문항 필터 결과',
     '',
     `- 실행: ${runInfo.startedAt} · 문항 셋 ${runInfo.questionPath} · 필터 ${runInfo.filterList.join(', ')} · 답변 모델 ${runInfo.modelId}`,
     ...buildGitLine(runInfo.git),
+    ...buildRequestFailLine(runInfo),
     '- 필터 단계는 "제공된 자료만" 지시 없이 물었다.',
-    `- 유지 ${decisionList.length - discardedList.length}개 · 폐기 ${discardedList.length}개`,
+    `- 유지 ${countOf('keep')}개 · 폐기 ${countOf('discard')}개 · 판단 못 함 ${countOf('undecided')}개`,
+    '- 판단 못 함 = 폐기 사유는 없지만 응답 오류·자료 없음으로 판단하지 못한 필터가 있는 문항이다. 유지로 세지 않는다. 다시 돌리거나 직접 본다.',
     '',
     ...buildRunStatusSection(runInfo.runStatusMap),
     ...(filterSummaryMap ? [
@@ -170,7 +188,7 @@ export function buildFilterReport({ runInfo, decisionList, filterSummaryMap = nu
     '',
     '| 문항 | 결정 | 이유 |',
     '|---|---|---|',
-    ...decisionList.map((decision) => `| ${escapeCell(decision.questionId)} | ${decision.decision === 'discard' ? '폐기' : '유지'}`
+    ...decisionList.map((decision) => `| ${escapeCell(decision.questionId)} | ${FILTER_DECISION_LABEL_MAP[decision.decision] ?? decision.decision}`
       + ` | ${escapeCell(decision.reasonList.join(' / ') || '–')} |`),
     '',
     ...buildScreenMaterialSection(screenMaterialList),

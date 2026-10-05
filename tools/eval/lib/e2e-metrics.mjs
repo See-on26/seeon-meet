@@ -32,7 +32,19 @@ const subtractOrNull = (left, right) => (left === null || right === null ? null 
 const divideOrNull = (numerator, denominator) => (numerator === null || !denominator ? null : numerator / denominator);
 const toPairKey = (answer) => `${answer.questionId}#${answer.repeatIndex}`;
 
+// 같은 문항·반복(questionId#repeatIndex)에서 pairConditionList 의 조건이 모두 답한(응답 오류·건너뜀이 아닌) 짝만 남겨
+// 조건별 정답률을 다시 센다. 조건마다 답한 문항이 다르면(C 를 건너뛴 영상, 응답 오류) 서로 다른 문항을 견주게 된다.
+function summarizePairedCa({ answerList, pairConditionList }) {
+  const validKeySetList = pairConditionList.map((condition) => new Set(answerList
+    .filter((answer) => answer.condition === condition && !answer.isResponseError).map(toPairKey)));
+  const pairKeySet = new Set([...validKeySetList[0]].filter((key) => validKeySetList.every((keySet) => keySet.has(key))));
+  const caOf = (condition) => summarizeCondition(answerList.filter((answer) => answer.condition === condition
+    && pairKeySet.has(toPairKey(answer)))).ca;
+  return { pairCount: pairKeySet.size, caOf };
+}
+
 // 도달률 S÷C, 도달률 증가폭 (S−A)÷C, Accuracy Ratio (S−A)÷(H−A).
+// 도달률은 S·C 짝, 증가폭은 A·S·C 짝으로 센다(짝 수 reachPairCount·reachGainPairCount).
 // AR 은 사람 작성 AD 가 있는 문항끼리 비교해야 하므로 A·S 도 H 답이 있는(응답 오류가 아닌) 문항만으로 다시 센다.
 export function computeDerivedMetric({ answerList }) {
   const conditionMap = summarizeConditionMap({ answerList });
@@ -41,10 +53,14 @@ export function computeDerivedMetric({ answerList }) {
   const withHuman = (condition) => summarizeCondition(answerList.filter((answer) => answer.condition === condition
     && humanKeySet.has(toPairKey(answer)))).ca;
   const caOf = (condition) => conditionMap[condition].ca;
+  const reachPair = summarizePairedCa({ answerList, pairConditionList: ['S', 'C'] });
+  const reachGainPair = summarizePairedCa({ answerList, pairConditionList: ['A', 'S', 'C'] });
   return {
     conditionMap,
-    reachRate: divideOrNull(caOf('S'), caOf('C')),
-    reachGain: divideOrNull(subtractOrNull(caOf('S'), caOf('A')), caOf('C')),
+    reachRate: divideOrNull(reachPair.caOf('S'), reachPair.caOf('C')),
+    reachPairCount: reachPair.pairCount,
+    reachGain: divideOrNull(subtractOrNull(reachGainPair.caOf('S'), reachGainPair.caOf('A')), reachGainPair.caOf('C')),
+    reachGainPairCount: reachGainPair.pairCount,
     accuracyRatio: divideOrNull(subtractOrNull(withHuman('S'), withHuman('A')), subtractOrNull(caOf('H'), withHuman('A'))),
   };
 }

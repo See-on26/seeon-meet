@@ -87,6 +87,15 @@ function buildLanguageSectionList(modeMetrics) {
     ].join('\n'));
 }
 
+// 판정기 호출이 Bedrock 에 닿지 못한(http·no_token) 실행은 표가 정상처럼 보여도 그 위치가 빠져 있으므로 맨 위에 알린다.
+function buildRequestFailLine(requestFailure) {
+  if (!requestFailure?.callCount) return [];
+  const kindText = Object.entries(requestFailure.byKindMap).map(([kind, count]) => `${kind} ${count}`).join(' · ');
+  return [`- **주의: 판정기 호출 ${requestFailure.callCount}회가 Bedrock 에 닿지 못했다** (${kindText})`
+    + ` — 판정 결과를 모르는 위치 ${requestFailure.rowCount}개(모드·반복 합계)가 경로 오류다(판정기 성능에서 빠진다).`
+    + ' 토큰(AWS_BEARER_TOKEN_BEDROCK) 만료·네트워크를 확인하고 같은 명령을 다시 돌린다(실패한 호출만 다시 묻는다).'];
+}
+
 function buildModeSection(modeMetrics) {
   const formatCountMap = (countMap) => Object.entries(countMap).map(([key, count]) => `${key} ${count}`).join(', ');
   const pathErrorList = modeMetrics.repeatList.map((repeat) => `반복 ${repeat.repeatIndex + 1}: ${repeat.pathError.total}건`
@@ -133,6 +142,7 @@ export function buildDetectionReport({ runInfo, modeMetricsList }) {
       ? ['- 알려진 차이: 실회의 균형 모드는 look-ahead 2.5초 + 보류 2.5초만 기다려, 뒤 맥락 7초 창에 실제로 모이는 ASR 은 약 5초 분량이다.']
       : []),
     `- 기준 커밋 HEAD ${runInfo.git.head || '?'} · production ${runInfo.git.productionMergeBase || '?'}`,
+    ...buildRequestFailLine(runInfo.requestFailure),
     '',
     '판정 뒤 단계는 우회했다(생성·전달 단계의 걸러냄이라 판정 성능이 아니다):',
     ...BYPASSED_STAGE_LIST.map((stage) => `- ${stage}`),

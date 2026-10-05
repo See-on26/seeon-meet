@@ -6,7 +6,7 @@ import { validateDetectionItemList, formatIssueList, ISSUE_LEVEL_MAP } from './d
 import { createMethodologyMatcher, MATCHER_KIND_MAP } from './methodology-matcher.mjs';
 import { createFetchRecorder } from './fetch-recorder.mjs';
 import { createCacheStore } from './cache-store.mjs';
-import { createJudgeRunner } from './judge-runner.mjs';
+import { createJudgeRunner, PATH_ERROR_MAP } from './judge-runner.mjs';
 import { buildScorePlan, evaluateScorePlan } from './score-rows.mjs';
 import { buildModeMetrics, listErrorCase } from './detection-metrics.mjs';
 import { buildDetectionReport } from './detection-report.mjs';
@@ -80,6 +80,28 @@ export function resolveScoreOption(values) {
 }
 
 const toJsonl = (rowList) => rowList.map((row) => JSON.stringify(row)).join('\n') + (rowList.length ? '\n' : '');
+
+// 판정기 호출이 Bedrock 에 닿지 못한 경로 오류. parse·empty_text 는 모델이 낸 응답이라 측정 대상이고, 이 둘은 실행 실패다.
+const REQUEST_FAIL_KIND_LIST = [PATH_ERROR_MAP.http, PATH_ERROR_MAP.noToken];
+
+export function summarizeRequestFailure({ rawList, rowList }) {
+  const failedCallList = rawList.filter((raw) => REQUEST_FAIL_KIND_LIST.includes(raw.pathError));
+  const byKindMap = {};
+  for (const raw of failedCallList) byKindMap[raw.pathError] = (byKindMap[raw.pathError] || 0) + 1;
+  return {
+    callCount: failedCallList.length,
+    rowCount: rowList.filter((row) => REQUEST_FAIL_KIND_LIST.includes(row.pathError)).length,
+    byKindMap,
+  };
+}
+
+// 토큰 만료·네트워크 오류면 표는 정상처럼 보여도 그 위치가 빠져 있다. 마지막 줄로 크게 알린다.
+function formatRequestFailLine({ requestFailure, totalCallCount }) {
+  const kindText = Object.entries(requestFailure.byKindMap).map(([kind, count]) => `${kind} ${count}`).join(' · ');
+  return `[score] 실패: 판정기 호출 ${requestFailure.callCount}회가 Bedrock 에 닿지 못했다 (${kindText}) — 전체 ${totalCallCount}회 중.`
+    + ` 결과 파일은 썼지만 판정 결과를 모르는 위치 ${requestFailure.rowCount}개(모드·반복 합계)가 경로 오류다(판정기 성능에서 빠진다).`
+    + ' 토큰(AWS_BEARER_TOKEN_BEDROCK) 만료·네트워크를 확인한다. 실패한 호출은 캐시에 넣지 않으므로 같은 명령을 다시 돌리면 그것만 다시 묻는다(종료 코드 1).';
+}
 
 export async function runScoreCommand({
   argList,
@@ -180,6 +202,7 @@ export async function runScoreCommand({
 
   const outDir = values['out-dir'] || path.join(REPO_ROOT, 'out', 'eval', `detection-${formatRunStamp(startedAt)}`);
   fs.mkdirSync(outDir, { recursive: true });
+  const requestFailure = summarizeRequestFailure({ rawList: allRawList, rowList: allRowList });
   const runInfo = {
     startedAt: startedAt.toISOString(),
     inputPath: path.resolve(values.in),
@@ -196,6 +219,7 @@ export async function runScoreCommand({
     repeatCount,
     concurrency,
     cacheDir,
+    requestFailure,
     git: await readGit(),
   };
   fs.writeFileSync(path.join(outDir, 'metrics.json'), JSON.stringify({ runInfo, modeMetricsList }, null, 2));
@@ -203,5 +227,9 @@ export async function runScoreCommand({
   fs.writeFileSync(path.join(outDir, 'errors.jsonl'), toJsonl(listErrorCase({ rowList: allRowList })));
   fs.writeFileSync(path.join(outDir, 'raw.jsonl'), toJsonl(allRawList));
   log(`[score] 결과 → ${outDir}`);
+  if (requestFailure.callCount) {
+    log(formatRequestFailLine({ requestFailure, totalCallCount: allRawList.length }));
+    return 1;
+  }
   return 0;
 }

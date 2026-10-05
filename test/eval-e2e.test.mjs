@@ -7,8 +7,9 @@ import { readRunMaterial } from '../tools/eval/lib/e2e-material.mjs';
 import { INSTRUCTION_KIND_MAP } from '../tools/eval/lib/e2e-prompt.mjs';
 import { computeDerivedMetric, buildE2eMetrics, summarizeRepeatMetric } from '../tools/eval/lib/e2e-metrics.mjs';
 import { buildAnswerCsv, ANSWER_CSV_COLUMN_LIST } from '../tools/eval/lib/answer-csv.mjs';
+import { buildE2eReport, buildFilterReport } from '../tools/eval/lib/e2e-report.mjs';
 import {
-  decideFilter, summarizeFilterDecision, buildAnswerTaskList, runAnswerTaskList, TASK_SKIP_REASON_MAP, BEDROCK_REQUEST_LIMIT_MAP,
+  decideFilter, summarizeFilterDecision, countFilterDecision, buildAnswerTaskList, runAnswerTaskList, TASK_SKIP_REASON_MAP, BEDROCK_REQUEST_LIMIT_MAP,
 } from '../tools/eval/lib/e2e-runner.mjs';
 import { createCacheStore } from '../tools/eval/lib/cache-store.mjs';
 import { runE2eCommand, isSameModel } from '../tools/eval/lib/e2e-command.mjs';
@@ -74,6 +75,48 @@ test('AR 은 H 답이 응답 오류인 문항을 A·S 짝에서도 뺀다', () =
   assert.equal(computeDerivedMetric({ answerList }).accuracyRatio, 1, 'q-1 만으로 (1−0)÷(1−0)');
 });
 
+// 영상 v1 문항 10개는 S 8개·C 9개·A 4개를 맞히고, v2 문항 10개는 S 2개·A 1개를 맞히고 C 는 건너뛰었다(no_slide).
+function buildUnpairedReachAnswerList() {
+  const answerList = [];
+  for (const [videoId, correctCountMap] of [['v1', { S: 8, C: 9, A: 4 }], ['v2', { S: 2, A: 1 }]]) {
+    for (let index = 0; index < 10; index += 1) {
+      for (const [condition, correctCount] of Object.entries(correctCountMap)) {
+        answerList.push(answer({ questionId: `${videoId}-q${index}`, videoId, condition, isCorrect: index < correctCount }));
+      }
+    }
+  }
+  return answerList;
+}
+
+test('도달률·증가폭은 같은 문항·반복에서 S·C(증가폭은 A·S·C)가 모두 답한 짝끼리 세고 짝 수를 남긴다', () => {
+  const answerList = buildUnpairedReachAnswerList();
+  const metric = computeDerivedMetric({ answerList });
+  assert.equal(metric.conditionMap.S.ca, 0.5, '조건 표의 CA 는 답한 전부');
+  assert.ok(Math.abs(metric.reachRate - 0.8 / 0.9) < 1e-9, `C 가 있는 v1 짝만으로 0.8÷0.9 (지금 ${metric.reachRate})`);
+  assert.equal(metric.reachPairCount, 10);
+  assert.ok(Math.abs(metric.reachGain - (0.8 - 0.4) / 0.9) < 1e-9, `v1 짝만으로 (0.8−0.4)÷0.9 (지금 ${metric.reachGain})`);
+  assert.equal(metric.reachGainPairCount, 10);
+
+  const withErrorList = answerList.map((item) => (item.questionId === 'v1-q0' && item.condition === 'C' ? { ...item, isResponseError: true, isCorrect: false } : item));
+  const withError = computeDerivedMetric({ answerList: withErrorList });
+  assert.equal(withError.reachPairCount, 9, 'C 가 응답 오류인 문항은 짝에서 빠진다');
+  assert.ok(Math.abs(withError.reachRate - (7 / 9) / (8 / 9)) < 1e-9);
+  const withoutA = computeDerivedMetric({ answerList: answerList.filter((item) => item.condition !== 'A') });
+  assert.equal(withoutA.reachGain, null);
+  assert.equal(withoutA.reachGainPairCount, 0);
+
+  const report = buildE2eReport({
+    runInfo: {
+      startedAt: 't', questionPath: 'q.json', questionCount: 20, videoCount: 2, modelId: 'm', generatorModel: 'g', isSameModelWarning: false,
+      conditionList: ['A', 'S', 'H', 'C'], repeatCount: 1, concurrency: 1, maxSlideCount: 20, cacheDir: null, runDirMap: {}, runStatusMap: {},
+    },
+    metrics: buildE2eMetrics({ answerList }), repeatSummary: summarizeRepeatMetric({ answerList }), skippedList: [],
+  });
+  assert.match(report, /도달률 S÷C: 0\.889 \(S·C 짝 n=10\)/);
+  assert.match(report, /도달률 증가폭 \(S−A\)÷C: 0\.444 \(A·S·C 짝 n=10\)/);
+  assert.match(report, /\| 0\.889 \(n=10\) \| 0\.444 \(n=10\) \|/);
+});
+
 test('answers.csv 는 문항×조건 한 줄이고 알 수 없음은 오답(0), 응답 오류는 칸을 비운다', () => {
   const csv = buildAnswerCsv({
     modelId: 'anthropic.claude-sonnet-5',
@@ -101,6 +144,25 @@ test('필터: N·V 는 풀리면 폐기, C 는 못 풀면 폐기, 응답 오류�
   });
   assert.equal(decisionList[0].decision, 'discard');
   assert.deepEqual(decisionList[0].reasonList, ['V: 화면만으로 풀림 — 화면만으로 충분하다']);
+});
+
+test('필터: 판단하지 못한 필터가 있고 폐기 사유가 없는 문항은 유지가 아니라 "판단 못 함" 이다', () => {
+  const decisionList = summarizeFilterDecision({
+    questionSet: { questionList: [question, { ...question, id: 'q-2' }, { ...question, id: 'q-3' }] },
+    answerList: [
+      answer({ questionId: 'q-1', condition: 'N', isCorrect: false }), answer({ questionId: 'q-1', condition: 'C', isResponseError: true }),
+      answer({ questionId: 'q-2', condition: 'N', isCorrect: true }), answer({ questionId: 'q-2', condition: 'C', isResponseError: true }),
+      answer({ questionId: 'q-3', condition: 'N', isCorrect: false }), answer({ questionId: 'q-3', condition: 'C', isCorrect: true }),
+    ],
+  });
+  assert.deepEqual(decisionList.map((decision) => [decision.questionId, decision.decision]), [
+    ['q-1', 'undecided'], ['q-2', 'discard'], ['q-3', 'keep'],
+  ]);
+  assert.deepEqual(decisionList[0].reasonList, ['C: 응답 오류']);
+  assert.deepEqual(countFilterDecision({ decisionList }), { keep: 1, discard: 1, undecided: 1 });
+  const report = buildFilterReport({ runInfo: { startedAt: 't', questionPath: 'q.json', filterList: ['N', 'C'], modelId: 'm', runStatusMap: {} }, decisionList });
+  assert.match(report, /유지 1개 · 폐기 1개 · 판단 못 함 1개/);
+  assert.match(report, /\| q-1 \| 판단 못 함 \| C: 응답 오류 \|/);
 });
 
 test('문항 생성 모델과 답변 모델이 같으면 알아본다', () => {
@@ -295,4 +357,41 @@ test('반복·동시 호출·슬라이드 수는 1 이상의 정수만 받는다
     });
     assert.equal(code, 2, optionList.join(' '));
   }
+});
+
+test('Bedrock 요청이 실패하면 결과는 쓰되 크게 알리고 1 로 끝난다(평가·필터 모두)', async () => {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'e2e-fail-'));
+  const questionFile = path.join(dir, 'questions.json');
+  fs.writeFileSync(questionFile, JSON.stringify(questionSet));
+  const runDir = writeRunDir();
+  const expiredAnswer = async () => { throw new Error('Bedrock(e2e 답변) HTTP 403 {"message":"The security token included in the request is expired"}'); };
+
+  const evalLogList = [];
+  const evalOutDir = path.join(dir, 'out-eval');
+  const evalCode = await runE2eCommand({
+    argList: ['--questions', questionFile, '--run', `v1=${runDir}`, '--no-cache', '--out-dir', evalOutDir],
+    env: { AWS_BEARER_TOKEN_BEDROCK: 'token-for-test' }, log: (line) => evalLogList.push(line), requestAnswer: expiredAnswer,
+  });
+  assert.equal(evalCode, 1);
+  assert.deepEqual(fs.readdirSync(evalOutDir).sort(), ['answers.csv', 'answers.jsonl', 'metrics.json', 'report.md']);
+  const evalLogText = evalLogList.join('\n');
+  assert.match(evalLogText, /\[e2e\] 실패: Bedrock 요청 4건이 실패했다 \(전체 4건\)/);
+  assert.match(evalLogText, /HTTP 403/);
+  assert.match(evalLogText, /캐시에 넣지 않으므로 같은 명령을 다시 돌리면 그것만 다시 묻는다/);
+  assert.match(evalLogList.at(-1), /실패: Bedrock 요청/, '마지막 줄에 남긴다');
+  assert.match(fs.readFileSync(path.join(evalOutDir, 'report.md'), 'utf8').split('\n').slice(0, 12).join('\n'), /주의: Bedrock 요청 4건이 실패/);
+  assert.equal(JSON.parse(fs.readFileSync(path.join(evalOutDir, 'metrics.json'), 'utf8')).runInfo.requestFailCount, 4);
+
+  const filterLogList = [];
+  const filterOutDir = path.join(dir, 'out-filter');
+  const filterCode = await runE2eCommand({
+    argList: ['--questions', questionFile, '--run', `v1=${runDir}`, '--filter', 'N,V,C', '--no-cache', '--out-dir', filterOutDir],
+    env: { AWS_BEARER_TOKEN_BEDROCK: 'token-for-test' }, log: (line) => filterLogList.push(line), requestAnswer: expiredAnswer,
+  });
+  assert.equal(filterCode, 1);
+  const filterJson = JSON.parse(fs.readFileSync(path.join(filterOutDir, 'filter.json'), 'utf8'));
+  assert.equal(filterJson.decisionList[0].decision, 'undecided');
+  assert.deepEqual(filterJson.decisionCountMap, { keep: 0, discard: 0, undecided: 1 });
+  assert.match(fs.readFileSync(path.join(filterOutDir, 'report.md'), 'utf8'), /판단 못 함 1개/);
+  assert.match(filterLogList.join('\n'), /\[e2e\] 실패: Bedrock 요청 3건이 실패했다/);
 });

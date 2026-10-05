@@ -298,6 +298,41 @@ test('score 는 판정을 돌려 report·metrics·errors·raw 를 쓴다', async
   assert.equal(errorList.length, 6, '모드 3개 × 지표 2개');
 });
 
+test('판정기 호출이 Bedrock 에 닿지 못하면(http·no_token) 결과는 쓰되 크게 알리고 1 로 끝난다', async () => {
+  for (const [source, kind] of [['error', 'http'], ['fallback', 'no_token']]) {
+    const { dir, inFile } = prepareInput();
+    const outDir = path.join(dir, `out-${kind}`);
+    const logList = [];
+    let installedFetch = null;
+    const code = await runScoreCommand({
+      argList: ['--in', inFile, '--no-cache', '--matcher', 'regex', '--repeat', '2', '--out-dir', outDir],
+      env: { AWS_BEARER_TOKEN_BEDROCK: 'token-for-test' },
+      log: (line) => logList.push(line),
+      baseFetch: async () => new Response('{"message":"The security token included in the request is expired"}', { status: 403 }),
+      installFetch: (fetchImpl) => { installedFetch = fetchImpl; },
+      createRouter: () => ({
+        route: async () => {
+          if (source === 'error') await installedFetch('https://bedrock.example/router', {});
+          return { candidateList: [], blockedReason: null, source };
+        },
+      }),
+      createJudge: () => ({ judge: async () => ({ hasCue: false, reason: null, source: 'bedrock' }) }),
+      createMatcher: async () => REGEX_MATCHER,
+      readGit: async () => ({ head: 'abc', productionMergeBase: 'def' }),
+    });
+    assert.equal(code, 1, kind);
+    assert.deepEqual(fs.readdirSync(outDir).sort(), ['errors.jsonl', 'metrics.json', 'raw.jsonl', 'report.md']);
+    const logText = logList.join('\n');
+    assert.match(logText, new RegExp(`\\[score\\] 실패: 판정기 호출 2회가 Bedrock 에 닿지 못했다 \\(${kind} 2\\)`), logText);
+    assert.match(logText, /캐시에 넣지 않으므로 같은 명령을 다시 돌리면 그것만 다시 묻는다/);
+    assert.match(logList.at(-1), /실패: 판정기 호출/);
+    const report = fs.readFileSync(path.join(outDir, 'report.md'), 'utf8');
+    assert.match(report.split('\n').slice(0, 12).join('\n'), /주의: 판정기 호출 2회가 Bedrock 에 닿지 못했다/);
+    const { runInfo } = JSON.parse(fs.readFileSync(path.join(outDir, 'metrics.json'), 'utf8'));
+    assert.deepEqual(runInfo.requestFailure, { callCount: 2, rowCount: 2, byKindMap: { [kind]: 2 } });
+  }
+});
+
 test('score 는 기본으로 균형(delayed) 모드·항목 전체 맥락으로 돌리고 --after-ms 로 뒤 창만 바꿀 수 있다', async () => {
   const { dir, inFile } = prepareInput();
   const outDir = path.join(dir, 'out-default');

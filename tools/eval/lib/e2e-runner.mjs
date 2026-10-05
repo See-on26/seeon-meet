@@ -223,6 +223,8 @@ export function decideFilter({ answer }) {
     : { decision: FILTER_DECISION_MAP.keep, reason: null };
 }
 
+// 문항 결정: 폐기 사유가 하나라도 있으면 폐기, 없는데 판단하지 못한 필터(응답 오류·자료 없음)가 있으면 판단 못 함,
+// 모든 필터가 판단해 폐기 사유가 없을 때만 유지다. 판단 못 한 문항을 유지로 세면 토큰이 만료된 실행이 "모두 유지" 로 보인다.
 export function summarizeFilterDecision({ questionSet, answerList, skippedList = [] }) {
   return questionSet.questionList.map((question) => {
     const filterResultList = answerList.filter((answer) => answer.questionId === question.id)
@@ -230,14 +232,23 @@ export function summarizeFilterDecision({ questionSet, answerList, skippedList =
     const skippedFilterList = skippedList.filter((skipped) => skipped.questionId === question.id)
       .map((skipped) => ({ filter: skipped.condition, decision: FILTER_DECISION_MAP.undecided, reason: `자료 없음(${skipped.reason})` }));
     const resultList = [...filterResultList, ...skippedFilterList];
-    const isDiscarded = resultList.some((result) => result.decision === FILTER_DECISION_MAP.discard);
+    const hasDecision = (decision) => resultList.some((result) => result.decision === decision);
+    let decision = FILTER_DECISION_MAP.keep;
+    if (hasDecision(FILTER_DECISION_MAP.discard)) decision = FILTER_DECISION_MAP.discard;
+    else if (hasDecision(FILTER_DECISION_MAP.undecided)) decision = FILTER_DECISION_MAP.undecided;
     return {
       questionId: question.id,
-      decision: isDiscarded ? FILTER_DECISION_MAP.discard : FILTER_DECISION_MAP.keep,
+      decision,
       reasonList: resultList.filter((result) => result.reason).map((result) => `${result.filter}: ${result.reason}`),
       filterResultList: resultList,
     };
   });
+}
+
+export function countFilterDecision({ decisionList }) {
+  return Object.fromEntries(Object.values(FILTER_DECISION_MAP).map((decision) => [
+    decision, decisionList.filter((item) => item.decision === decision).length,
+  ]));
 }
 
 export { INSTRUCTION_KIND_MAP };

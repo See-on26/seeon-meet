@@ -5,7 +5,9 @@ import { parseArgs } from 'node:util';
 import { validateQuestionSet, formatIssueList, ISSUE_LEVEL_MAP } from './dataset-validate.mjs';
 import { readRunMaterial, CONDITION_LIST, FILTER_LIST, DEFAULT_MAX_SLIDE_COUNT } from './e2e-material.mjs';
 import { INSTRUCTION_KIND_MAP } from './e2e-prompt.mjs';
-import { buildAnswerTaskList, runAnswerTaskList, summarizeFilterDecision, BEDROCK_REQUEST_LIMIT_MAP } from './e2e-runner.mjs';
+import {
+  buildAnswerTaskList, runAnswerTaskList, summarizeFilterDecision, countFilterDecision, BEDROCK_REQUEST_LIMIT_MAP,
+} from './e2e-runner.mjs';
 import { buildE2eMetrics, summarizeRepeatMetric, summarizeConditionMap } from './e2e-metrics.mjs';
 import { buildE2eReport, buildFilterReport } from './e2e-report.mjs';
 import { buildAnswerCsv } from './answer-csv.mjs';
@@ -162,6 +164,15 @@ function logConditionSummary({ log, summaryMap }) {
 }
 
 const toJsonl = (rowList) => rowList.map((row) => JSON.stringify(row)).join('\n') + (rowList.length ? '\n' : '');
+const ERROR_MESSAGE_PREVIEW_LENGTH = 200;
+
+// 토큰 만료·네트워크 오류로 요청이 실패하면 표는 정상처럼 보여도 그만큼 비어 있다. 마지막 줄로 크게 알린다.
+function formatRequestFailLine({ requestFailList, totalCount }) {
+  const firstMessage = String(requestFailList[0].errorMessage).slice(0, ERROR_MESSAGE_PREVIEW_LENGTH);
+  return `[e2e] 실패: Bedrock 요청 ${requestFailList.length}건이 실패했다 (전체 ${totalCount}건) — 결과 파일은 썼지만 그 답은 응답 오류로 빠졌다.`
+    + ` 첫 오류: ${firstMessage}`
+    + ' / 토큰(AWS_BEARER_TOKEN_BEDROCK) 만료·네트워크를 확인한다. 실패한 요청은 캐시에 넣지 않으므로 같은 명령을 다시 돌리면 그것만 다시 묻는다(종료 코드 1).';
+}
 
 export async function runE2eCommand({
   argList, log = console.log, env = process.env, requestAnswer = null, now = () => new Date(), readGit = readGitInfo,
@@ -251,12 +262,14 @@ export async function runE2eCommand({
   const stamp = formatRunStamp(startedAt);
   const outDir = values['out-dir'] || path.join(REPO_ROOT, 'out', 'eval', `${isFilterMode ? 'e2e-filter' : 'e2e'}-${stamp}`);
   fs.mkdirSync(outDir, { recursive: true });
+  const requestFailList = answerList.filter((item) => item.isResponseError && item.errorMessage);
   const runInfo = {
     startedAt: startedAt.toISOString(), questionPath: path.resolve(values.questions), modelId,
     generatorModel: questionSet.generatorModel, isSameModelWarning, repeatCount, concurrency, maxSlideCount, cacheDir,
     answerMaxTokens: ANSWER_MAX_TOKENS, requestLimitMap: BEDROCK_REQUEST_LIMIT_MAP,
     runDirMap: resolvedRunDirMap, runStatusMap, questionCount: questionSet.questionList.length, videoCount: questionSet.videoList.length,
     cacheHitCount: answerList.filter((item) => item.isCacheHit).length,
+    requestFailCount: requestFailList.length,
     ...(isFilterMode ? { filterList: kindList } : { conditionList: kindList }),
     git: await readGit(),
   };
@@ -265,7 +278,7 @@ export async function runE2eCommand({
   if (isFilterMode) {
     const decisionList = summarizeFilterDecision({ questionSet, answerList, skippedList });
     fs.writeFileSync(path.join(outDir, 'filter.json'), `${JSON.stringify({
-      runInfo, decisionList, filterSummaryMap: summaryMap, skippedList, screenMaterialList,
+      runInfo, decisionCountMap: countFilterDecision({ decisionList }), decisionList, filterSummaryMap: summaryMap, skippedList, screenMaterialList,
     }, null, 2)}\n`);
     fs.writeFileSync(path.join(outDir, 'report.md'), buildFilterReport({
       runInfo, decisionList, filterSummaryMap: summaryMap, screenMaterialList,
@@ -280,10 +293,10 @@ export async function runE2eCommand({
     fs.writeFileSync(path.join(outDir, 'report.md'), buildE2eReport({ runInfo, metrics, repeatSummary, skippedList, screenMaterialList }));
   }
   logConditionSummary({ log, summaryMap });
-  const requestFailCount = answerList.filter((item) => item.isResponseError && item.errorMessage).length;
-  if (requestFailCount) {
-    log(`[e2e] 주의: 요청 실패 ${requestFailCount}건 — 실패한 답은 캐시에 넣지 않으므로 같은 명령을 다시 돌리면 그것만 다시 묻는다`);
-  }
   log(`[e2e] 결과 → ${outDir}`);
+  if (requestFailList.length) {
+    log(formatRequestFailLine({ requestFailList, totalCount: answerList.length }));
+    return 1;
+  }
   return 0;
 }
