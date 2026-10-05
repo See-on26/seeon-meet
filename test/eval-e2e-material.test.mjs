@@ -166,6 +166,47 @@ test('"N번이"는 맞다·정답이라고 할 때만 답으로 센다', () => {
   }
 });
 
+const salaryChoiceTextList = choiceTextListOf(['1,000만 원', '1,250만 원', '1,500만 원', '1,750만 원']);
+const plainNumberChoiceTextList = choiceTextListOf(['2', '3', '4', '5']);
+
+test('천 단위 쉼표 값은 번호로 읽지 않고, 보기 글과 같으면 그 보기다', () => {
+  const rowList = [
+    ['정답은 1,200명', choiceTextList, null],
+    ['The answer is 1,250', choiceTextList, null],
+    ['정답은 1,500만원입니다', salaryChoiceTextList, null],
+    ['정답은 1,500만 원입니다', salaryChoiceTextList, 3],
+    ['1,500만 원', salaryChoiceTextList, 3],
+    ['정답은 3, 전환율', choiceTextList, 3],
+    // 보기 글 안의 "2번입니다"는 따로 세지 않는다.
+    ['정답은 상반기 1번, 하반기 2번입니다', choiceTextListOf(['연 1번', '연 2번', '상반기 1번, 하반기 2번', '분기마다']), 3],
+    // 보기 글이 맨숫자면 "3"이 보기 번호인지 값인지 알 수 없다.
+    ['정답은 3', plainNumberChoiceTextList, null],
+    ['3', plainNumberChoiceTextList, null],
+    ['정답은 3번', plainNumberChoiceTextList, 3],
+  ];
+  for (const [text, rowChoiceTextList, expected] of rowList) {
+    assert.equal(parseAnswerText(text, { choiceTextList: rowChoiceTextList }).choiceNumber, expected, text);
+  }
+});
+
+test('아니라고 한 번호는 답이 아니다', () => {
+  const rowList = [
+    ['3번이 맞지는 않습니다', null],
+    ['3번이 정답은 아닙니다', null],
+    ['3번이 정답이 아님', null],
+    ['정답은 3번이 아닙니다', null],
+    ['정답: 3번 아님', null],
+    ['3번이 맞지않습니다', null],
+    ['3번이 아니라 2번입니다', 2],
+    ['정답은 3번이 아니고 2번', 2],
+    ['정답은 2번이고 3번이 아닙니다', 2],
+    ['3번이 맞습니다', 3],
+  ];
+  for (const [text, expected] of rowList) {
+    assert.equal(parseAnswerText(text, { choiceTextList }).choiceNumber, expected, text);
+  }
+});
+
 test('1~5 정수가 아닌 답 번호는 모두 응답 오류다', () => {
   const responseError = { chosenIndex: null, isUnknown: false, isCorrect: false, isResponseError: true };
   for (const choiceNumber of [undefined, Number.NaN, 7, 0, 2.5, '1']) {

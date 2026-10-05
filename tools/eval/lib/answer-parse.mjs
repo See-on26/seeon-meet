@@ -18,24 +18,31 @@ const NUMBERED_CHOICE_PATTERN = /^\s*(?:보기\s*)?(\d+)\s*(?:[.):]|번\s*[.):]?
 const ANSWER_FRAME_PATTERN = /^\s*(?:(?:정답|답)\s*(?:은|는)?\s*[:：]?|(?:the\s+)?answer(?:\s+is)?\s*[:：]?)?\s*(.*?)\s*(?:입니다|이다)?\s*[.。!]?\s*$/is;
 const EDGE_TRIM_PATTERN = /^[\s"'“”‘’「」『』]+|[\s"'“”‘’「」『』.。!]+$/g;
 
-// "정답은 N"·"answer is N" 의 N 뒤에 올 수 있는 것: 번(번째 말고), 닫는 따옴표·괄호, 소수점이 아닌 문장부호,
-// "입니다", 띄어 쓴 여는 괄호(뒤에 붙인 설명), 줄 끝·글 끝. 숫자·소수점·%·단위(배·개·명·percent·times …)가
-// 붙으면 보기 번호가 아니라 답으로 낸 값이므로 읽지 않는다. 값이 보기 글과 같으면 보기 글 쪽에서 읽는다.
-const CHOICE_NUMBER_END = String.raw`(?=\s*번(?!\s*째)|["'“”‘’)\]」』]|[,，;!?。、]|\.(?!\d)|입니다|\s+[(\[]|[ \t]*(?:\r?\n|$))`;
+// "정답은 N"·"answer is N" 의 N 뒤에 올 수 있는 것: 번(번째 말고), 닫는 따옴표·괄호, 소수점·천 단위 쉼표가 아닌
+// 문장부호, "입니다", 띄어 쓴 여는 괄호(뒤에 붙인 설명), 줄 끝·글 끝. 숫자·소수점·쉼표 뒤 숫자·%·단위(배·개·명·
+// percent·times …)가 붙으면 보기 번호가 아니라 답으로 낸 값이므로 읽지 않는다. 값이 보기 글과 같으면 보기 글 쪽에서 읽는다.
+const CHOICE_NUMBER_END = String.raw`(?=\s*번(?!\s*째)|["'“”‘’)\]」』]|[;!?。、]|[,，](?!\d)|\.(?!\d)|입니다|\s+[(\[]|[ \t]*(?:\r?\n|$))`;
 
 // JSON 이 아닌 답에서 답 번호를 가리키는 꼴. 번호는 (\d+) 로 다 읽은 뒤 범위를 본다(12 를 1 로 읽지 않게).
+// d 플래그로 번호가 끝나는 자리를 받아, 그 뒤에서 아니라고 했는지 본다.
 const TEXT_ANSWER_PATTERN_LIST = [
   // 정답은 2번 · 답: "3" · 정답은 보기 2번. "오답"처럼 한글 뒤에 붙은 "답"은 세지 않는다.
-  new RegExp(String.raw`(?<![가-힣])(?:정답|답)\s*(?:은|는)?\s*[:：=]?\s*["'“”‘’]?\s*(?:보기\s*)?(\d+)${CHOICE_NUMBER_END}`, 'g'),
-  // 보기 3번이 맞습니다 · 4번이 정답 · 2번입니다. "N번이 아닌·틀린·맞지 않"처럼 아니라고 한 번호는 세지 않는다.
-  /(?<!\d)(?:보기\s*)?(\d+)\s*번(?:이\s*(?:맞(?!지\s*않)|정답(?!\s*이\s*아[니닌닙]))|입니다)/g,
+  new RegExp(String.raw`(?<![가-힣])(?:정답|답)\s*(?:은|는)?\s*[:：=]?\s*["'“”‘’]?\s*(?:보기\s*)?(\d+)${CHOICE_NUMBER_END}`, 'gd'),
+  // 보기 3번이 맞습니다 · 4번이 정답 · 2번입니다
+  /(?<!\d)(?:보기\s*)?(\d+)\s*번(?:이\s*(?:맞|정답)|입니다)/gd,
   // The answer is 3 · Answer: 4 · 끊긴 JSON 의 "answer": 3
-  new RegExp(String.raw`\banswer\b["']?\s*(?:is\b|[:：=])?\s*(?:(?:choice|option)\s*)?["'(\[]?\s*(\d+)${CHOICE_NUMBER_END}`, 'gi'),
+  new RegExp(String.raw`\banswer\b["']?\s*(?:is\b|[:：=])?\s*(?:(?:choice|option)\s*)?["'(\[]?\s*(\d+)${CHOICE_NUMBER_END}`, 'gid'),
   // 끝을 번호로 맺은 답: …맞으므로 2번
-  /(?<!\d)(\d+)\s*번\s*[.!。]?\s*$/g,
+  /(?<!\d)(\d+)\s*번\s*[.!。]?\s*$/gd,
   // 답 전체가 번호: 5 · 2번 · 3번입니다.
-  /^\s*(?:보기\s*)?(\d+)\s*번?\s*(?:입니다)?\s*\.?\s*$/g,
+  /^\s*(?:보기\s*)?(\d+)\s*번?\s*(?:입니다)?\s*\.?\s*$/gd,
 ];
+
+// 번호 바로 뒤에서 그 번호를 아니라고 한 말: 3번이 아닙니다 · 3번이 맞지는 않습니다 · 3번이 정답은 아님 · 3번 틀림.
+// 아니라고 한 번호는 답이 아니다("3번이 아니라 2번입니다"의 3).
+const NEGATED_NUMBER_TAIL_PATTERN = /^\s*번?\s*(?:이|은|는|도)?\s*(?:(?:맞|정답|답)\S*\s*)?(?:아니|아닌|아닙|아님|않|틀|오답)/;
+// 맨숫자 보기("3")는 보기 번호와 헷갈리므로 보기 글이 같아도 번호 꼴과 함께 견준다.
+const PLAIN_NUMBER_PATTERN = /^\d+$/;
 
 function normalizeChoiceText(text) {
   return String(text).normalize('NFC').replace(/\s+/g, ' ').replace(EDGE_TRIM_PATTERN, '').toLowerCase();
@@ -83,16 +90,27 @@ function readJsonAnswerValue({ value, choiceNumberMap }) {
   return findChoiceTextNumber({ text: value, choiceNumberMap });
 }
 
-// 답 꼴과 보기 글에서 가리킨 번호를 모두 모은다. 서로 다른 번호가 둘 이상이거나 범위 밖이면 못 읽은 것이다.
-function readTextAnswer({ text, choiceNumberMap }) {
-  const namedNumberSet = new Set();
-  for (const pattern of TEXT_ANSWER_PATTERN_LIST) {
-    for (const match of text.matchAll(pattern)) namedNumberSet.add(Number(match[1]));
-  }
+// 답 전체(또는 "정답:"·"입니다" 를 뗀 나머지)가 보기 글과 같으면 그 보기.
+function findReplyChoice({ text, choiceNumberMap }) {
   const framedText = text.match(ANSWER_FRAME_PATTERN)?.[1] ?? text;
   for (const candidateText of [text, framedText]) {
     const choiceNumber = findChoiceTextNumber({ text: candidateText, choiceNumberMap });
-    if (choiceNumber) namedNumberSet.add(choiceNumber);
+    if (choiceNumber) return { choiceNumber, isPlainNumber: PLAIN_NUMBER_PATTERN.test(normalizeChoiceText(candidateText)) };
+  }
+  return null;
+}
+
+// 답이 보기 글 그대로면 그 보기다(글 안의 숫자는 따로 세지 않는다). 아니면 답 꼴에서 가리킨 번호를 모두 모은다.
+// 아니라고 한 번호는 빼고, 서로 다른 번호가 둘 이상이거나 범위 밖이면 못 읽은 것이다.
+function readTextAnswer({ text, choiceNumberMap }) {
+  const replyChoice = findReplyChoice({ text, choiceNumberMap });
+  if (replyChoice && !replyChoice.isPlainNumber) return replyChoice.choiceNumber;
+  const namedNumberSet = new Set(replyChoice ? [replyChoice.choiceNumber] : []);
+  for (const pattern of TEXT_ANSWER_PATTERN_LIST) {
+    for (const match of text.matchAll(pattern)) {
+      const isNegated = NEGATED_NUMBER_TAIL_PATTERN.test(text.slice(match.indices[1][1]));
+      if (!isNegated) namedNumberSet.add(Number(match[1]));
+    }
   }
   if (namedNumberSet.size !== 1) return null;
   const [choiceNumber] = namedNumberSet;
