@@ -37,6 +37,29 @@ test('형용사 관형형 + 쪽·부분·거·것·곳 은 2-2 이고 "싼" 처�
   assert.deepEqual(matchKoreanTokenList({ text: '말하는 것', tokenList: verbTokenList }), [], '동사 관형형은 2-2 가 아니다');
 });
 
+test('하다형 형용사(어근 + 하/XSA)도 2-2·"더 + 형용사" 로 잡고 어근부터 트리거로 읽는다', () => {
+  const cleanTokenList = [
+    token('깨끗', 'XR', 0, 2), token('하', 'XSA', 2, 1), token('ᆫ', 'ETM', 2, 1), token('쪽', 'NNB', 4, 1),
+    token('으로', 'JKB', 5, 2), token('가', 'VV', 8, 1), token('죠', 'EF', 9, 1),
+  ];
+  assert.deepEqual(summarize(matchKoreanTokenList({ text: '깨끗한 쪽으로 가죠', tokenList: cleanTokenList })), ['adjective_noun:깨끗한 쪽@0-5']);
+  const simpleTokenList = [
+    token('단순', 'NNG', 0, 2), token('하', 'XSA', 2, 1), token('ᆫ', 'ETM', 2, 1), token('쪽', 'NNB', 4, 1),
+    token('이', 'JKS', 5, 1), token('낫', 'VA-I', 7, 1), token('다', 'EF', 8, 1),
+  ];
+  assert.deepEqual(summarize(matchKoreanTokenList({ text: '단순한 쪽이 낫다', tokenList: simpleTokenList })), ['adjective_noun:단순한 쪽@0-5']);
+  const naturalTokenList = [token('자연', 'NNG', 0, 2), token('스럽', 'XSA-I', 2, 3), token('은', 'ETM', 4, 1), token('쪽', 'NNB', 6, 1)];
+  assert.deepEqual(summarize(matchKoreanTokenList({ text: '자연스러운 쪽', tokenList: naturalTokenList })), ['adjective_noun:자연스러운 쪽@0-7']);
+  const complexTokenList = [token('더', 'MAG', 0, 1), token('복잡', 'XR', 2, 2), token('하', 'XSA', 4, 1), token('다', 'EF', 5, 1)];
+  assert.deepEqual(summarize(matchKoreanTokenList({ text: '더 복잡하다', tokenList: complexTokenList })), ['change:더 복잡하@0-5']);
+  const importantTokenList = [token('더', 'MAG', 0, 1), token('중요', 'NNG', 2, 2), token('하', 'XSA', 4, 1), token('어요', 'EF', 4, 2)];
+  assert.deepEqual(summarize(matchKoreanTokenList({ text: '더 중요해요', tokenList: importantTokenList })), ['change:더 중요해@0-5']);
+  const studyTokenList = [token('공부', 'NNG', 0, 2), token('하', 'XSV', 2, 1), token('ᆫ', 'ETM', 2, 1), token('것', 'NNB', 4, 1)];
+  assert.deepEqual(matchKoreanTokenList({ text: '공부한 것', tokenList: studyTokenList }), [], '하다형 동사 관형형(XSV)은 2-2 가 아니다');
+  const organizeTokenList = [token('더', 'MAG', 0, 1), token('정리', 'NNG', 2, 2), token('하', 'XSV', 4, 1), token('다', 'EC', 5, 1)];
+  assert.deepEqual(matchKoreanTokenList({ text: '더 정리하다', tokenList: organizeTokenList }), [], '"더 + 하다형 동사" 는 3-2 가 아니다');
+});
+
 test('숫자+단위는 3-1, 변화·비교·결론은 3-2, 척도 형용사는 3-3 이다', () => {
   const text = '더 높다 결국 두 배 넓죠';
   const tokenList = [
@@ -103,4 +126,11 @@ test('Kiwi 모델이 있으면 실제 형태소 분석으로 샘플 트리거를
     'scale:넓@9-10', 'value:열 배@18-21',
   ]);
   assert.deepEqual(summarize(matcher.match({ text: '저기요 잠깐만요, 보여서 좋네요', language: 'ko' })), []);
+});
+
+test('Kiwi 모델이 있으면 하다형 형용사도 실제 형태소 분석으로 잡는다', { skip: hasKiwiModel() ? false : 'Kiwi 모델 없음 (tools/eval/setup-kiwi.sh)' }, async () => {
+  const matcher = await createMethodologyMatcher({ kind: MATCHER_KIND_MAP.kiwi });
+  assert.deepEqual(summarize(matcher.match({ text: '깨끗한 쪽으로 가죠', language: 'ko' })), ['adjective_noun:깨끗한 쪽@0-5']);
+  assert.deepEqual(summarize(matcher.match({ text: '더 복잡하다', language: 'ko' })), ['change:더 복잡하@0-5']);
+  assert.deepEqual(summarize(matcher.match({ text: '공부한 것', language: 'ko' })), []);
 });

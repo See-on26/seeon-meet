@@ -16,6 +16,9 @@ const MAX_UNIT_TOKEN_COUNT = 2;
 const isAdjective = (token) => token.tag === 'VA' || token.tag.startsWith('VA-');
 const isVerb = (token) => token.tag === 'VV' || token.tag.startsWith('VV-');
 const isNoun = (token) => token.tag.startsWith('NN');
+// 하다형·스럽다형 형용사의 접미사(하/XSA, 스럽/XSA-I)와 그 앞 어근(깨끗/XR, 단순/NNG).
+const isAdjectiveSuffix = (token) => token.tag === 'XSA' || token.tag.startsWith('XSA-');
+const isAdjectiveRoot = (token) => token.tag === 'XR' || token.tag === 'NNG';
 const tokenEnd = (token) => token.position + token.length;
 
 function buildCandidate({ type, text, start, end, isApproximate }) {
@@ -43,12 +46,35 @@ function collectUnitTokenList({ tokenList, fromIndex, previousEnd }) {
   return unitList;
 }
 
-// 형용사 관형형(어간 + ㄴ/은) 바로 뒤의 쪽·부분·거·것·곳.
-function isAdjectiveNounAt({ tokenList, index }) {
-  const [stem, ending, referent] = tokenList.slice(index, index + 3);
-  if (!stem || !ending || !referent) return false;
-  const isAdjectiveStem = isAdjective(stem) || (isVerb(stem) && ADJECTIVE_LIKE_VERB_LIST.includes(stem.form));
-  return isAdjectiveStem && ending.tag === 'ETM' && isNoun(referent) && ADJECTIVE_REFERENT_LIST.includes(referent.form);
+// Kiwi 는 "깨끗한" 을 깨끗/XR + 하/XSA + ᆫ/ETM 으로 나눈다. 어근부터 접미사까지를 형용사 어간으로 읽어
+// 트리거가 "한 쪽" 이 아니라 "깨끗한 쪽" 이 되게 한다. 하/XSV(공부한·정리한)는 동사라 넣지 않는다.
+function readDerivedAdjectiveList({ tokenList, index }) {
+  const [root, suffix] = tokenList.slice(index, index + 2);
+  return root && suffix && isAdjectiveRoot(root) && isAdjectiveSuffix(suffix) ? [root, suffix] : null;
+}
+
+function readAdjectiveStemList({ tokenList, index }) {
+  const stem = tokenList[index];
+  if (!stem) return null;
+  if (isAdjective(stem) || (isVerb(stem) && ADJECTIVE_LIKE_VERB_LIST.includes(stem.form))) return [stem];
+  return readDerivedAdjectiveList({ tokenList, index });
+}
+
+// 형용사 관형형(어간 + ㄴ/은) 바로 뒤의 쪽·부분·거·것·곳. 맞으면 어간부터 지시 명사까지의 토큰 목록.
+function readAdjectiveNounList({ tokenList, index }) {
+  const stemList = readAdjectiveStemList({ tokenList, index });
+  if (!stemList) return null;
+  const [ending, referent] = tokenList.slice(index + stemList.length, index + stemList.length + 2);
+  if (!ending || !referent) return null;
+  const isReferent = ending.tag === 'ETM' && isNoun(referent) && ADJECTIVE_REFERENT_LIST.includes(referent.form);
+  return isReferent ? [...stemList, ending, referent] : null;
+}
+
+// "더" 바로 뒤의 형용사 어간(높/VA, 복잡/XR + 하/XSA).
+function readComparativeAdjectiveList({ tokenList, index }) {
+  const adjective = tokenList[index];
+  if (!adjective) return null;
+  return isAdjective(adjective) ? [adjective] : readDerivedAdjectiveList({ tokenList, index });
 }
 
 // Kiwi 토큰({ form, tag, position, length })을 회의록 말주머니와 품사 단위로 대조한다.
@@ -63,7 +89,8 @@ export function matchKoreanTokenList({ text, tokenList }) {
     if (isAdjective(token) && DEMONSTRATIVE_ADVERB_STEM_LIST.includes(token.form) && next?.form === '게' && next.tag === 'EC') {
       push(TARGET_TYPE_MAP.demonstrative, [token, next]);
     }
-    if (isAdjectiveNounAt({ tokenList, index })) push(TARGET_TYPE_MAP.adjectiveNoun, tokenList.slice(index, index + 3));
+    const adjectiveNounList = readAdjectiveNounList({ tokenList, index });
+    if (adjectiveNounList) push(TARGET_TYPE_MAP.adjectiveNoun, adjectiveNounList);
     const isNumber = token.tag === 'SN'
       || ((token.tag === 'MM' || token.tag === 'NR') && NATIVE_NUMERAL_LIST.includes(token.form));
     if (isNumber) {
@@ -72,9 +99,9 @@ export function matchKoreanTokenList({ text, tokenList }) {
     }
     if (isVerb(token) && CHANGE_VERB_STEM_LIST.includes(token.form)) push(TARGET_TYPE_MAP.change, [token]);
     if (CONCLUSION_WORD_LIST.includes(token.form)) push(TARGET_TYPE_MAP.change, [token]);
-    if (token.form === COMPARATIVE_ADVERB && token.tag === 'MAG' && next && isAdjective(next)) {
-      push(TARGET_TYPE_MAP.change, [token, next]);
-    }
+    const comparativeList = token.form === COMPARATIVE_ADVERB && token.tag === 'MAG'
+      ? readComparativeAdjectiveList({ tokenList, index: index + 1 }) : null;
+    if (comparativeList) push(TARGET_TYPE_MAP.change, [token, ...comparativeList]);
     if (isAdjective(token) && SCALE_ADJECTIVE_STEM_LIST.includes(token.form)) push(TARGET_TYPE_MAP.scale, [token]);
   });
   return candidateList;
