@@ -128,6 +128,14 @@ test('JSON 이 아니면 답 전체가 번호 꼴이거나 보기 글 그대로�
     ['The answer is 3', 3],
     ['the answer is 3.', 3],
     ['THE ANSWER IS 3', 3],
+    // 따옴표·괄호로 감싸거나 느낌표를 붙인 번호도 보기가 숫자 꼴이 아니면 그 번호다.
+    ['"3"', 3],
+    ['답: "3"', 3],
+    ['정답은 "3"입니다', 3],
+    ['3!', 3],
+    ['「3」', 3],
+    ['"3번"', 3],
+    ['3번!', 3],
     ['알 수 없음', 5],
     ['정답: 알 수 없음', 5],
     ['전환율', 3],
@@ -172,7 +180,6 @@ test('답 전체가 정해진 꼴이 아니면 글 안의 번호를 찾지 않�
     ['정답: 3\n근거: 전사에 있음', null],
     ['정답은 3, 전환율', null],
     ['Answer: 5 (알 수 없음)', null],
-    ['답: "3"', null],
     ['정답은 3배 증가', null, timesChoiceTextList],
     ['답: 2.5배', null, timesChoiceTextList],
     ['정답은 30%', null],
@@ -200,6 +207,14 @@ test('보기 글이 숫자·횟수 꼴이라 답이 보기 번호인지 보기 �
     ['정답은 3번입니다', null, countChoiceTextList],
     ['3', null, timesCountChoiceTextList],
     ['3', null, timesChoiceTextList],
+    // 따옴표·괄호·느낌표로 꾸민 번호도 같은 보기와 견준다.
+    ['"3"', null, plainNumberChoiceTextList],
+    ['답: "3"', null, plainNumberChoiceTextList],
+    ['정답은 "3"입니다', null, plainNumberChoiceTextList],
+    ['3!', null, plainNumberChoiceTextList],
+    ['「3」', null, plainNumberChoiceTextList],
+    ['"3번"', null, countChoiceTextList],
+    ['3번!', null, countChoiceTextList],
     // 보기 글로만 읽히거나 두 읽기가 같은 보기를 가리키면 그 보기다.
     ['3회', 2, timesCountChoiceTextList],
     ['정답은 3회입니다', 2, timesCountChoiceTextList],
@@ -208,6 +223,24 @@ test('보기 글이 숫자·횟수 꼴이라 답이 보기 번호인지 보기 �
     ['20', 2, choiceTextListOf(['10', '20', '30', '40'])],
     // JSON 의 answer 는 보기 번호로 받는다.
     ['{"answer": 3}', 3, plainNumberChoiceTextList],
+  ]);
+});
+
+test('소수 "N.M" 은 번호 붙인 보기 글로 읽지 않고, 값 전체가 보기 글과 같을 때만 그 보기다', () => {
+  const oddChoiceTextList = choiceTextListOf(['3', '5', '7', '9']);
+  const decimalMixChoiceTextList = choiceTextListOf(['5', '15', '0.5', '2']);
+  assertChoiceNumberList([
+    ['2.5', null, oddChoiceTextList],
+    ['정답은 2.5입니다', null, oddChoiceTextList],
+    ['1.5', null, decimalMixChoiceTextList],
+    ['3.4', null, choiceTextListOf(['2', '3', '4', '5'])],
+    ['{"answer": "2.5"}', null, oddChoiceTextList],
+    ['0.5', 3, decimalMixChoiceTextList],
+    ['{"answer": "0.5"}', 3, decimalMixChoiceTextList],
+    // 보기 목록 꼴의 번호("2. 5"·"2) 5")는 그대로 읽는다.
+    ['2. 5', 2, oddChoiceTextList],
+    ['2) 5', 2, oddChoiceTextList],
+    ['{"answer": "2. 5"}', 2, oddChoiceTextList],
   ]);
 });
 

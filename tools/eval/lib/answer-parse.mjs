@@ -15,10 +15,11 @@ export const ANSWER_SOURCE_MAP = { json: 'json', text: 'text' };
 const JSON_OBJECT_PATTERN = /\{[^{}]*\}/g;
 // JSON answer 가 글이면 번호만 적힌 것("3", "3번", "보기 3번")을 받는다.
 const JSON_ANSWER_NUMBER_PATTERN = /^\s*(?:보기\s*)?(\d+)\s*번?\s*\.?\s*$/;
+// 번호 붙인 보기 글에서 번호 뒤의 "." 은 뒤에 숫자가 오지 않을 때만 구분자다. 소수 "2.5" 를 "2. 5"(2번 보기 글 5)로 읽지 않는다.
 // JSON answer 의 번호 붙인 보기 글: "5. 알 수 없음"·"보기 1번: 재구매율".
-const JSON_NUMBERED_CHOICE_PATTERN = /^\s*(?:보기\s*)?(\d+)\s*(?:[.):]|번\s*[.):]?)\s*(.+)$/s;
+const JSON_NUMBERED_CHOICE_PATTERN = /^\s*(?:보기\s*)?(\d+)\s*(?:\.(?!\d)|[):]|번\s*(?:\.(?!\d)|[):])?)\s*(.+)$/s;
 // 글 답의 번호 붙인 보기 글은 보기 목록 꼴("5. 알 수 없음"·"1) 재구매율")만 받는다.
-const TEXT_NUMBERED_CHOICE_PATTERN = /^(\d+)\s*[.)]\s*(.+)$/s;
+const TEXT_NUMBERED_CHOICE_PATTERN = /^(\d+)\s*(?:\.(?!\d)|\))\s*(.+)$/s;
 
 // 글 답 전체가 번호인 꼴: 3 · 3번 · 보기 3번 · 정답은 3번입니다 · 정답: 3 · 답: 3번. 끝의 마침표 하나는 받는다.
 // 번호는 (\d+) 로 다 읽은 뒤 범위를 본다(12 를 1 로 읽지 않게).
@@ -81,10 +82,26 @@ function readJsonAnswerValue({ value, choiceNumberMap }) {
   return findChoiceTextNumber({ text: value, choiceNumberMap, numberedChoicePattern: JSON_NUMBERED_CHOICE_PATTERN });
 }
 
-// 글 답 전체(또는 "정답은 …입니다" 를 뗀 나머지)가 보기 글 그대로면 그 보기.
-function findReplyChoiceTextNumber({ reply, choiceNumberMap }) {
+// 글 답 전체와, "정답은 …입니다"·"The answer is …" 를 뗀 나머지. 번호 꼴과 보기 글을 같은 후보에서 본다.
+function buildReplyCandidateTextList(reply) {
   const framedTextList = ANSWER_FRAME_PATTERN_LIST.map((pattern) => reply.match(pattern)?.[1]).filter(Boolean);
-  for (const candidateText of [reply, ...framedTextList]) {
+  return [reply, ...framedTextList];
+}
+
+// 후보를 보기 글과 같은 방식으로 다듬은 뒤(앞뒤 따옴표·괄호, 끝 마침표·느낌표를 뗀다) 번호 꼴인지 본다.
+// 다듬는 방식이 다르면 "3"·「3」·3! 이 번호로는 안 읽히고 보기 글 '3' 으로만 읽혀, 보기 번호와 견주지 못한다.
+function findReplyNumber(candidateTextList) {
+  for (const candidateText of candidateTextList) {
+    const normalizedText = normalizeChoiceText(candidateText);
+    const numberMatch = REPLY_NUMBER_PATTERN_LIST.map((pattern) => normalizedText.match(pattern)).find(Boolean);
+    if (numberMatch) return toChoiceNumber(numberMatch[1]);
+  }
+  return null;
+}
+
+// 후보 가운데 보기 글 그대로인 것이 있으면 그 보기.
+function findReplyChoiceTextNumber({ candidateTextList, choiceNumberMap }) {
+  for (const candidateText of candidateTextList) {
     const choiceNumber = findChoiceTextNumber({ text: candidateText, choiceNumberMap, numberedChoicePattern: TEXT_NUMBERED_CHOICE_PATTERN });
     if (choiceNumber) return choiceNumber;
   }
@@ -102,9 +119,9 @@ function hasCountChoiceElsewhere({ choiceTextList, choiceNumber }) {
 // 형식을 어긴 글 답은 답 전체가 번호 꼴이거나 보기 글 그대로일 때만 읽는다. 글 안에서 번호를 찾지 않는다.
 // 번호로도 보기 글로도 읽히는데 둘이 다른 보기를 가리키면 못 읽은 것이다.
 function readTextAnswer({ reply, choiceTextList, choiceNumberMap }) {
-  const numberMatch = REPLY_NUMBER_PATTERN_LIST.map((pattern) => reply.match(pattern)).find(Boolean);
-  const replyNumber = numberMatch ? toChoiceNumber(numberMatch[1]) : null;
-  const choiceTextNumber = findReplyChoiceTextNumber({ reply, choiceNumberMap });
+  const candidateTextList = buildReplyCandidateTextList(reply);
+  const replyNumber = findReplyNumber(candidateTextList);
+  const choiceTextNumber = findReplyChoiceTextNumber({ candidateTextList, choiceNumberMap });
   if (!replyNumber) return choiceTextNumber;
   const isAmbiguous = (choiceTextNumber !== null && choiceTextNumber !== replyNumber)
     || hasCountChoiceElsewhere({ choiceTextList, choiceNumber: replyNumber });
