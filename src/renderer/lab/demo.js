@@ -33,7 +33,9 @@ function dispatch(action) {
 
 window.labDemo.onCard((card) => dispatch({ type: DEMO_ACTION_MAP.card, card }));
 window.addEventListener('keydown', (event) => {
-  const actionType = readKeyAction({ code: event.code });
+  const actionType = readKeyAction({
+    code: event.code, metaKey: event.metaKey, ctrlKey: event.ctrlKey, altKey: event.altKey,
+  });
   if (!actionType) return;
   event.preventDefault();
   dispatch({ type: actionType });

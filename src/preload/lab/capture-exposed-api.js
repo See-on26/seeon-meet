@@ -12,4 +12,20 @@ function captureExposedApi({ contextBridge, load }) {
   return capturedMap;
 }
 
-module.exports = { captureExposedApi };
+// 가로챈 API 를 이름마다 모두 다시 노출한다. extensionMap 의 이름은 그 API 에 실험용 함수를 덧붙여 노출한다.
+// 덧붙일 API 를 받지 못했으면(production preload 가 이름을 바꿨거나 노출하지 않음) 그 API 없이 조용히 돌지 않게
+// 아무것도 노출하기 전에 멈춘다.
+function exposeCapturedApi({ contextBridge, capturedMap, extensionMap = {} }) {
+  for (const key of Object.keys(extensionMap)) {
+    const api = capturedMap[key];
+    if (!api || typeof api !== 'object') {
+      const capturedKeyText = Object.keys(capturedMap).join(', ') || '없음';
+      throw new Error(`[lab] production viewer preload 가 window.${key} 을 노출하지 않았다 (받은 이름: ${capturedKeyText}) — 실험용 함수를 덧붙일 수 없다`);
+    }
+  }
+  for (const [key, api] of Object.entries(capturedMap)) {
+    contextBridge.exposeInMainWorld(key, extensionMap[key] ? { ...api, ...extensionMap[key] } : api);
+  }
+}
+
+module.exports = { captureExposedApi, exposeCapturedApi };

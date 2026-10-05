@@ -23,7 +23,9 @@ export function createDemoState() {
   return { cardList: [], fontSizePx: DEMO_FONT_SIZE_MAP.initial, isRationaleVisible: false };
 }
 
-export function readKeyAction({ code }) {
+// ⌘·Ctrl·Option 을 함께 누른 키는 창의 기본 동작(⌘C 복사, ⌘=·⌘− 확대·축소)으로 둔다. Shift 는 + 를 치려고 누르므로 본다.
+export function readKeyAction({ code, metaKey = false, ctrlKey = false, altKey = false }) {
+  if (metaKey || ctrlKey || altKey) return null;
   return KEY_ACTION_MAP[code] || null;
 }
 

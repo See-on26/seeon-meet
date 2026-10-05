@@ -3,11 +3,22 @@
 # 같은 이름의 .script.json 에 구간별 원본 시각(말 시작·끝, 무발화 끝)을 남겨 전사 시각을 맞춰 볼 수 있게 한다.
 #   tools/lab/make-sample-video.sh <슬라이드 세션 폴더> [출력 mp4]
 # 슬라이드 세션 폴더 = slide-1 … slide-5 아래 base.jpg 가 있는 폴더(앱이 out/slides/session-<id>/ 에 같은 구조로 남긴다).
-# 폴더를 주지 않으면 이 영상을 처음 만든 맥의 폴더를 쓰므로, 다른 맥에서는 첫 인자로 꼭 준다.
+# 슬라이드 세션 폴더는 꼭 준다. 없으면 사용법을 찍고 종료 코드 2 로 멈춘다.
 set -euo pipefail
 
+print_usage() {
+  echo "사용법: tools/lab/make-sample-video.sh <슬라이드 세션 폴더> [출력 mp4]" >&2
+  echo "  슬라이드 세션 폴더 = slide-1 … slide-5 아래 base.jpg 가 있는 폴더(앱이 out/slides/session-<id>/ 에 같은 구조로 남긴다)" >&2
+}
+
+if [ $# -lt 1 ] || [ -z "$1" ]; then
+  echo "[sample] 슬라이드 세션 폴더를 주지 않았다" >&2
+  print_usage
+  exit 2
+fi
+
 ROOT_DIR="$(cd "$(dirname "$0")/../.." && pwd)"
-SLIDE_ROOT="${1:-~/personal/seeon-gpu-server-resource/meet-verify-data/verify-gpu-out/slides/session-1790959342346}"
+SLIDE_ROOT="$1"
 OUT_FILE="${2:-$ROOT_DIR/out/lab-samples/sample-5slides.mp4}"
 FFMPEG="${FFMPEG:-$(command -v ffmpeg || echo /opt/homebrew/bin/ffmpeg)}"
 FFPROBE="${FFPROBE:-$(command -v ffprobe || echo /opt/homebrew/bin/ffprobe)}"
@@ -39,8 +50,7 @@ for segment in "${SEGMENT_LIST[@]}"; do
   fi
 done
 if [ "$missing_count" -gt 0 ]; then
-  echo "사용법: tools/lab/make-sample-video.sh <슬라이드 세션 폴더> [출력 mp4]" >&2
-  echo "  슬라이드 세션 폴더 = slide-1 … slide-5 아래 base.jpg 가 있는 폴더(앱이 out/slides/session-<id>/ 에 같은 구조로 남긴다)" >&2
+  print_usage
   exit 2
 fi
 

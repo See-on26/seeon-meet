@@ -1,6 +1,7 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
+import { EventEmitter } from 'node:events';
 import { createRequire } from 'node:module';
 import {
   computeContainRect, rectFromPoints, isUsableNormRect, normToContentPx, pxToContentNorm, FULL_NORM_RECT,
@@ -18,7 +19,7 @@ const { computeDrainDeadlineMs, computeDrainTargetMs } = require('../src/main/la
 const { buildSelectModeScript, buildClickScript, VIEWER_SELECTOR_MAP, READ_MODE_SCRIPT } = require('../src/main/lab/viewer-driver.js');
 const { buildPlayerCallScript } = require('../src/main/lab/player-driver.js');
 const { readWavDurationMs, toForwardedPipelineEvent, buildPlaybackReport } = require('../src/preload/lab/forward-event.js');
-const { captureExposedApi } = require('../src/preload/lab/capture-exposed-api.js');
+const { captureExposedApi, exposeCapturedApi } = require('../src/preload/lab/capture-exposed-api.js');
 const { isRoiPayloadShape } = require('../src/main/ipc.js');
 const { createRunRecorder } = require('../src/main/lab/run-recorder.js');
 const { buildAdTimeline } = require('../src/main/lab/export/ad-timeline.js');
@@ -171,6 +172,87 @@ test('실험 viewer preload 는 production API 전부 + 재생 시작 알림을 
   fake.exposedMap.seeon.reportLabNarrationPlayback({ entry: { text: '해설', ts: 1 }, durationMs: 900, wallMs: 5 });
   assert.deepEqual(fake.sentList.map(([channel]) => channel), ['lab-viewer-event', 'lab-narration-playback']);
   delete globalThis.window;
+});
+
+// 실제 ipcRenderer 처럼 한 채널에 여러 listener 가 붙고 등록한 순서로 부른다(EventEmitter).
+function installFakeElectronEmitter({ isSendFailing }) {
+  const fake = installFakeElectron();
+  const emitter = new EventEmitter();
+  fake.ipcRenderer.on = (channel, listener) => emitter.on(channel, listener);
+  fake.ipcRenderer.send = (channel, payload) => {
+    if (isSendFailing(channel)) throw new Error('An object could not be cloned.');
+    fake.sentList.push([channel, payload]);
+  };
+  fake.emit = (channel, payload) => emitter.emit(channel, {}, payload);
+  return fake;
+}
+
+test('실험 기록으로 넘기다 실패해도 production 화면의 pipeline-event listener 는 같은 이벤트를 받는다', () => {
+  const fake = installFakeElectronEmitter({ isSendFailing: (channel) => channel === 'lab-viewer-event' });
+  globalThis.window = { localStorage: { setItem: () => {}, getItem: () => null } };
+  const originalWarn = console.warn;
+  const warnList = [];
+  console.warn = (...argList) => warnList.push(argList.join(' '));
+  try {
+    delete require.cache[require.resolve('../src/preload/viewer.js')];
+    delete require.cache[require.resolve('../src/preload/lab-viewer.js')];
+    require('../src/preload/lab-viewer.js');
+    const receivedList = [];
+    fake.exposedMap.seeon.onPipelineEvent((payload) => receivedList.push(payload.text));
+    assert.doesNotThrow(() => fake.emit('pipeline-event', { type: 'caption', ts: 1, text: '해설', wavData: null }));
+    assert.doesNotThrow(() => fake.emit('pipeline-event', { type: 'caption', ts: 2, text: '깨진 음성', wavData: { byteLength: 100 } }));
+    assert.deepEqual(receivedList, ['해설', '깨진 음성'], 'production listener 가 두 이벤트를 모두 받는다');
+    assert.equal(warnList.length, 2);
+    assert.match(warnList[0], /실험 기록/);
+  } finally {
+    console.warn = originalWarn;
+    delete globalThis.window;
+  }
+});
+
+test('가로챈 API 는 이름마다 모두 다시 노출하고 덧붙일 API 를 못 받았으면 분명한 오류로 멈춘다', () => {
+  const exposedMap = {};
+  const contextBridge = { exposeInMainWorld: (key, api) => { exposedMap[key] = api; } };
+  const capturedMap = captureExposedApi({
+    contextBridge,
+    load: () => {
+      contextBridge.exposeInMainWorld('seeon', { ping: () => 'pong' });
+      contextBridge.exposeInMainWorld('seeonDebug', { level: 1 });
+    },
+  });
+  const reportLabNarrationPlayback = () => {};
+  exposeCapturedApi({ contextBridge, capturedMap, extensionMap: { seeon: { reportLabNarrationPlayback } } });
+  assert.deepEqual(Object.keys(exposedMap), ['seeon', 'seeonDebug']);
+  assert.deepEqual(Object.keys(exposedMap.seeon), ['ping', 'reportLabNarrationPlayback']);
+  assert.equal(exposedMap.seeon.reportLabNarrationPlayback, reportLabNarrationPlayback);
+  assert.deepEqual(exposedMap.seeonDebug, { level: 1 });
+
+  const emptyExposedMap = {};
+  assert.throws(
+    () => exposeCapturedApi({
+      contextBridge: { exposeInMainWorld: (key, api) => { emptyExposedMap[key] = api; } },
+      capturedMap: { seeonDebug: {} }, extensionMap: { seeon: { reportLabNarrationPlayback } },
+    }),
+    /window\.seeon 을 노출하지 않았다.*seeonDebug/,
+  );
+  assert.deepEqual(emptyExposedMap, {}, '멈출 때는 아무것도 노출하지 않는다');
+});
+
+test('실험 viewer preload 는 production viewer preload 가 seeon 을 노출하지 않으면 분명한 오류로 멈춘다', () => {
+  installFakeElectron();
+  globalThis.window = { localStorage: { setItem: () => {}, getItem: () => null } };
+  const viewerPath = require.resolve('../src/preload/viewer.js');
+  const labViewerPath = require.resolve('../src/preload/lab-viewer.js');
+  try {
+    // 이미 불러온 모듈로 두면 require 가 다시 실행하지 않아 아무것도 노출되지 않는다.
+    require.cache[viewerPath] = { id: viewerPath, filename: viewerPath, loaded: true, exports: {} };
+    delete require.cache[labViewerPath];
+    assert.throws(() => require('../src/preload/lab-viewer.js'), /window\.seeon 을 노출하지 않았다/);
+  } finally {
+    delete require.cache[viewerPath];
+    delete require.cache[labViewerPath];
+    delete globalThis.window;
+  }
 });
 
 // lab main 이 받는 채널 그대로 기록기에 넣는다. 실제 IPC 처럼 구조화 복제한 값을 넘긴다.
