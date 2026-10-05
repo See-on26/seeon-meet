@@ -3,6 +3,7 @@
 //   node tools/eval/detection-eval.mjs score --in labeled.jsonl [--mode delayed|realtime_mix|listening|all] [--repeat N]
 const COMMAND_MAP = {
   extract: async (argList) => (await import('./lib/extract-command.mjs')).runExtractCommand({ argList }),
+  score: async (argList) => (await import('./lib/score-command.mjs')).runScoreCommand({ argList }),
 };
 
 const [commandName, ...argList] = process.argv.slice(2);
