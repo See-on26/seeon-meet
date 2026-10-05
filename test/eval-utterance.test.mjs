@@ -72,6 +72,17 @@ test('맥락 창 프리셋: 기본 item 은 항목 전체, symmetric7 은 앞뒤
   assert.throws(() => resolveContextWindow({ mode: 'delayed', preset: 'wide' }), /--context/);
 });
 
+test('맥락 창 ms 옵션은 0 이상의 숫자만 받고 undefined·null 이면 프리셋을 쓴다', () => {
+  const symmetric = { preset: 'symmetric7', beforeMs: 7000, afterMs: 7000, anchorTs: null };
+  assert.deepEqual(resolveContextWindow({ mode: 'delayed', preset: 'symmetric7', beforeMs: undefined, afterMs: undefined }), symmetric);
+  assert.deepEqual(resolveContextWindow({ mode: 'delayed', preset: 'symmetric7', beforeMs: null, afterMs: null }), symmetric);
+  assert.deepEqual(resolveContextWindow({ mode: 'delayed', preset: 'symmetric7', beforeMs: 0, afterMs: 0 }), { ...symmetric, beforeMs: 0, afterMs: 0 });
+  for (const invalid of ['3000', Number.NaN, -1, Infinity]) {
+    assert.throws(() => resolveContextWindow({ mode: 'delayed', preset: 'symmetric7', beforeMs: invalid }), /--before-ms/);
+    assert.throws(() => resolveContextWindow({ mode: 'delayed', preset: 'symmetric7', afterMs: invalid }), /--after-ms/);
+  }
+});
+
 test('라우터 입력은 판정 발화를 빼고 앞·뒤 맥락 창으로 만든다', () => {
   const utteranceList = buildUtteranceList({ item: threeSentenceItem });
   const mix = buildRouterInput({ utteranceList, index: 1, contextWindow: resolveContextWindow({ mode: 'realtime_mix', preset: 'production' }) });

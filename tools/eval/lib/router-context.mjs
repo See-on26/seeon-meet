@@ -31,6 +31,17 @@ const SYMMETRIC_CONTEXT_MS = 7000;
 // 텍스트 항목에는 화면 전환이 없으므로 항목 시작(0ms)을 전환 시각으로 본다.
 const ITEM_START_TS = 0;
 
+// ms 옵션은 undefined·null 이면 주지 않은 것으로 보고 프리셋 값을 쓴다.
+// 그 밖에는 0 이상의 유한한 숫자여야 한다. 문자열·NaN 을 조용히 프리셋으로 바꾸면 다른 맥락 창으로 평가하게 된다.
+function resolveMsOption({ value, fallback, optionName }) {
+  if (value === undefined || value === null) return fallback;
+  if (typeof value !== 'number' || !Number.isFinite(value) || value < 0) {
+    const shown = typeof value === 'string' ? JSON.stringify(value) : String(value);
+    throw new Error(`${optionName} 는 0 이상의 숫자(ms)다 (지금: ${shown})`);
+  }
+  return value;
+}
+
 // item: 항목 전체(평가 셋은 트리거 문장 앞뒤 약 7초 분량으로 만든다). symmetric7: 앞뒤 7초.
 // production: 모드 정책 그대로(균형이면 앞 60초를 전환 시각에 고정·뒤 7초). beforeMs·afterMs 를 주면 프리셋보다 앞선다.
 // 길이 null 은 자르지 않는다는 뜻이다.
@@ -49,8 +60,8 @@ export function resolveContextWindow({ mode, preset = CONTEXT_PRESET_MAP.item, b
   if (!presetWindow) throw new Error(`--context 는 ${Object.values(CONTEXT_PRESET_MAP).join('|')} 중 하나다 (지금: ${preset})`);
   return {
     preset,
-    beforeMs: Number.isFinite(beforeMs) ? beforeMs : presetWindow.beforeMs,
-    afterMs: Number.isFinite(afterMs) ? afterMs : presetWindow.afterMs,
+    beforeMs: resolveMsOption({ value: beforeMs, fallback: presetWindow.beforeMs, optionName: '--before-ms' }),
+    afterMs: resolveMsOption({ value: afterMs, fallback: presetWindow.afterMs, optionName: '--after-ms' }),
     anchorTs: presetWindow.anchorTs,
   };
 }
