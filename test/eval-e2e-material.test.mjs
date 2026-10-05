@@ -76,3 +76,58 @@ test('답 번호는 JSON 을 먼저 읽고 아니면 느슨하게 찾으며 못 
   assert.deepEqual(scoreAnswer({ question, choiceNumber: 5 }), { chosenIndex: 4, isUnknown: true, isCorrect: false, isResponseError: false });
   assert.deepEqual(scoreAnswer({ question, choiceNumber: null }), { chosenIndex: null, isUnknown: false, isCorrect: false, isResponseError: true });
 });
+
+const choiceTextList = buildChoiceList({ question });
+
+test('읽을 수 없는 답에서 보기를 지어내지 않는다', () => {
+  const rowList = [
+    ['{"answer": 12}', null],
+    ['{"answer": true}', null],
+    ['{"answer": "2번 같아요"}', null],
+    ['1번은 오답이고 정답은 3번입니다', 3],
+    ['3개의 막대 중 두 번째가 맞으므로 2번', 2],
+    ['정답은 2번입니다. 아니, 보기 3번이 맞습니다', null],
+    ['3번이 아니라 2번입니다', null],
+    ['정답: 7', null],
+    ['보기 13번이 맞습니다', null],
+    ['2. 재구매율', null],
+  ];
+  for (const [text, expected] of rowList) {
+    assert.equal(parseAnswerText(text, { choiceTextList }).choiceNumber, expected, text);
+  }
+  assert.deepEqual(parseAnswerText('{"answer": "2번", "reason": "보기 1번은 오답 1개를 포함"}', { choiceTextList }),
+    { choiceNumber: 2, reason: '보기 1번은 오답 1개를 포함' });
+});
+
+test('흔한 답 꼴과 보기 글 그대로의 답을 읽는다', () => {
+  const rowList = [
+    ['정답은 2번', 2],
+    ['정답은 2번입니다.', 2],
+    ['보기 3번이 맞습니다', 3],
+    ['{"answer": "3번"}', 3],
+    ['{"answer": "3"}', 3],
+    ['답: "3"', 3],
+    ['The answer is 3', 3],
+    ['알 수 없음', 5],
+    ['정답: 알 수 없음', 5],
+    ['{"answer": "알 수 없음"}', 5],
+    ['{"answer": "5. 알 수 없음"}', 5],
+    ['전환율', 3],
+    ['{"answer": "이탈률"}', 2],
+    ['1. 재구매율', 1],
+  ];
+  for (const [text, expected] of rowList) {
+    assert.equal(parseAnswerText(text, { choiceTextList }).choiceNumber, expected, text);
+  }
+  // 보기 목록을 안 줘도 "알 수 없음"은 늘 5번이다.
+  assert.equal(parseAnswerText('알 수 없음').choiceNumber, 5);
+  assert.equal(parseAnswerText('{"answer": "5. 알 수 없음"}').choiceNumber, 5);
+  assert.equal(parseAnswerText('전환율').choiceNumber, null);
+});
+
+test('1~5 정수가 아닌 답 번호는 모두 응답 오류다', () => {
+  const responseError = { chosenIndex: null, isUnknown: false, isCorrect: false, isResponseError: true };
+  for (const choiceNumber of [undefined, Number.NaN, 7, 0, 2.5, '1']) {
+    assert.deepEqual(scoreAnswer({ question, choiceNumber }), responseError, String(choiceNumber));
+  }
+});

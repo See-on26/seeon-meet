@@ -1,32 +1,119 @@
+import { UNKNOWN_CHOICE_TEXT } from './eval-types.mjs';
 import { UNKNOWN_CHOICE_INDEX } from './e2e-prompt.mjs';
 
 const CHOICE_COUNT_WITH_UNKNOWN = 5;
+const UNKNOWN_CHOICE_NUMBER = UNKNOWN_CHOICE_INDEX + 1;
 const isChoiceNumber = (value) => Number.isInteger(value) && value >= 1 && value <= CHOICE_COUNT_WITH_UNKNOWN;
+const toChoiceNumber = (digitText) => {
+  const choiceNumber = Number(digitText);
+  return isChoiceNumber(choiceNumber) ? choiceNumber : null;
+};
 
-// 답 번호(1~5)를 읽는다. JSON 이 아니면 "정답: 3" 꼴을 찾고, 그래도 없으면 응답 오류(choiceNumber null)다.
-export function parseAnswerText(text) {
-  if (typeof text !== 'string' || !text.trim()) return { choiceNumber: null, reason: null };
-  const cleaned = text.replace(/```(?:json)?/g, '');
-  const jsonMatch = cleaned.match(/\{[^{}]*\}/);
-  if (jsonMatch) {
-    try {
-      const parsed = JSON.parse(jsonMatch[0]);
-      const choiceNumber = Number(parsed.answer);
-      if (isChoiceNumber(choiceNumber)) {
-        return { choiceNumber, reason: typeof parsed.reason === 'string' ? parsed.reason : null };
-      }
-    } catch {
-      // JSON 이 아니면 아래에서 느슨하게 찾는다.
-    }
-  }
-  const looseMatch = cleaned.match(/(?:answer|정답|답)\s*["']?\s*[:：=]?\s*(\d)/i) || cleaned.trim().match(/^([1-5])(?:\D|$)/);
-  const choiceNumber = looseMatch ? Number(looseMatch[1]) : null;
-  return { choiceNumber: isChoiceNumber(choiceNumber) ? choiceNumber : null, reason: null };
+const JSON_OBJECT_PATTERN = /\{[^{}]*\}/g;
+// JSON answer 가 글이면 번호만 적힌 것("3", "3번", "보기 3번")을 받는다.
+const JSON_ANSWER_NUMBER_PATTERN = /^\s*(?:보기\s*)?(\d+)\s*번?\s*\.?\s*$/;
+// "5. 알 수 없음"·"보기 1번: 재구매율" 처럼 번호를 앞에 붙인 보기 글.
+const NUMBERED_CHOICE_PATTERN = /^\s*(?:보기\s*)?(\d+)\s*(?:[.):]|번\s*[.):]?)\s*(.+)$/s;
+// "정답: 알 수 없음"·"알 수 없음입니다." 의 앞뒤 말을 떼고 보기 글과 견준다.
+const ANSWER_FRAME_PATTERN = /^\s*(?:(?:정답|답)\s*(?:은|는)?\s*[:：]?|(?:the\s+)?answer(?:\s+is)?\s*[:：]?)?\s*(.*?)\s*(?:입니다|이다)?\s*[.。!]?\s*$/is;
+const EDGE_TRIM_PATTERN = /^[\s"'“”‘’「」『』]+|[\s"'“”‘’「」『』.。!]+$/g;
+
+// JSON 이 아닌 답에서 답 번호를 가리키는 꼴. 번호는 (\d+) 로 다 읽은 뒤 범위를 본다(12 를 1 로 읽지 않게).
+const TEXT_ANSWER_PATTERN_LIST = [
+  // 정답은 2번 · 답: "3" · 정답은 보기 2번. "오답"처럼 한글 뒤에 붙은 "답"은 세지 않는다.
+  /(?<![가-힣])(?:정답|답)\s*(?:은|는)?\s*[:：=]?\s*["'“”‘’]?\s*(?:보기\s*)?(\d+)/g,
+  // 보기 3번이 맞습니다 · 2번입니다
+  /(?<!\d)(?:보기\s*)?(\d+)\s*번\s*(?:이|입니다)/g,
+  // The answer is 3 · Answer: 4 · 끊긴 JSON 의 "answer": 3
+  /\banswer\b["']?\s*(?:is\b|[:：=])?\s*(?:(?:choice|option)\s*)?["'(\[]?\s*(\d+)/gi,
+  // 끝을 번호로 맺은 답: …맞으므로 2번
+  /(?<!\d)(\d+)\s*번\s*[.!。]?\s*$/g,
+  // 답 전체가 번호: 5 · 2번 · 3번입니다.
+  /^\s*(?:보기\s*)?(\d+)\s*번?\s*(?:입니다)?\s*\.?\s*$/g,
+];
+
+function normalizeChoiceText(text) {
+  return String(text).normalize('NFC').replace(/\s+/g, ' ').replace(EDGE_TRIM_PATTERN, '').toLowerCase();
 }
 
-// "알 수 없음"은 오답이다. 응답 오류는 정답률 분모에서 빼고 따로 센다.
+// 보기 글 → 번호. 보기를 안 줘도 "알 수 없음"은 늘 5번이다.
+function buildChoiceNumberMap(choiceTextList) {
+  const choiceNumberMap = new Map();
+  choiceTextList.forEach((choiceText, index) => {
+    const key = normalizeChoiceText(choiceText);
+    if (key && !choiceNumberMap.has(key)) choiceNumberMap.set(key, index + 1);
+  });
+  const unknownKey = normalizeChoiceText(UNKNOWN_CHOICE_TEXT);
+  if (!choiceNumberMap.has(unknownKey)) choiceNumberMap.set(unknownKey, UNKNOWN_CHOICE_NUMBER);
+  return choiceNumberMap;
+}
+
+// 답이 보기 글 그대로면 그 번호. 앞에 번호를 붙였으면 번호와 글이 같은 보기를 가리켜야 한다.
+function findChoiceTextNumber({ text, choiceNumberMap }) {
+  const directNumber = choiceNumberMap.get(normalizeChoiceText(text));
+  if (directNumber) return directNumber;
+  const numberedMatch = text.match(NUMBERED_CHOICE_PATTERN);
+  if (!numberedMatch) return null;
+  const textNumber = choiceNumberMap.get(normalizeChoiceText(numberedMatch[2]));
+  return textNumber && textNumber === Number(numberedMatch[1]) ? textNumber : null;
+}
+
+function findJsonAnswerObject(text) {
+  for (const [objectText] of text.matchAll(JSON_OBJECT_PATTERN)) {
+    try {
+      const parsed = JSON.parse(objectText);
+      if (parsed && typeof parsed === 'object' && !Array.isArray(parsed) && Object.hasOwn(parsed, 'answer')) return parsed;
+    } catch {
+      // JSON 이 아닌 중괄호는 건너뛴다.
+    }
+  }
+  return null;
+}
+
+function readJsonAnswerValue({ value, choiceNumberMap }) {
+  if (typeof value === 'number') return isChoiceNumber(value) ? value : null;
+  if (typeof value !== 'string') return null;
+  const numberMatch = value.match(JSON_ANSWER_NUMBER_PATTERN);
+  if (numberMatch) return toChoiceNumber(numberMatch[1]);
+  return findChoiceTextNumber({ text: value, choiceNumberMap });
+}
+
+// 답 꼴과 보기 글에서 가리킨 번호를 모두 모은다. 서로 다른 번호가 둘 이상이거나 범위 밖이면 못 읽은 것이다.
+function readTextAnswer({ text, choiceNumberMap }) {
+  const namedNumberSet = new Set();
+  for (const pattern of TEXT_ANSWER_PATTERN_LIST) {
+    for (const match of text.matchAll(pattern)) namedNumberSet.add(Number(match[1]));
+  }
+  const framedText = text.match(ANSWER_FRAME_PATTERN)?.[1] ?? text;
+  for (const candidateText of [text, framedText]) {
+    const choiceNumber = findChoiceTextNumber({ text: candidateText, choiceNumberMap });
+    if (choiceNumber) namedNumberSet.add(choiceNumber);
+  }
+  if (namedNumberSet.size !== 1) return null;
+  const [choiceNumber] = namedNumberSet;
+  return isChoiceNumber(choiceNumber) ? choiceNumber : null;
+}
+
+// 답 번호(1~5)를 읽는다. answer 칸이 있는 JSON 이 있으면 그 값만으로 정하고 글을 다시 뒤지지 않는다.
+// JSON 이 없으면 답 꼴("정답은 2번"·"보기 3번이 맞습니다"·"The answer is 3"·번호만)과 보기 글 그대로의 답을 읽는다.
+// choiceTextList 는 응시자에게 보인 보기(5번 "알 수 없음" 포함)이고, 주면 보기 글로 낸 답도 번호로 바꾼다.
+export function parseAnswerText(text, { choiceTextList = [] } = {}) {
+  if (typeof text !== 'string' || !text.trim()) return { choiceNumber: null, reason: null };
+  const cleaned = text.replace(/```(?:json)?/g, '');
+  const choiceNumberMap = buildChoiceNumberMap(choiceTextList);
+  const answerObject = findJsonAnswerObject(cleaned);
+  if (answerObject) {
+    return {
+      choiceNumber: readJsonAnswerValue({ value: answerObject.answer, choiceNumberMap }),
+      reason: typeof answerObject.reason === 'string' ? answerObject.reason : null,
+    };
+  }
+  return { choiceNumber: readTextAnswer({ text: cleaned, choiceNumberMap }), reason: null };
+}
+
+// "알 수 없음"은 오답이다. 1~5 정수가 아닌 답은 응답 오류로, 정답률 분모에서 빼고 따로 센다.
 export function scoreAnswer({ question, choiceNumber }) {
-  if (choiceNumber === null) return { chosenIndex: null, isUnknown: false, isCorrect: false, isResponseError: true };
+  if (!isChoiceNumber(choiceNumber)) return { chosenIndex: null, isUnknown: false, isCorrect: false, isResponseError: true };
   const chosenIndex = choiceNumber - 1;
   return {
     chosenIndex,
