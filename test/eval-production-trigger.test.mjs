@@ -58,6 +58,55 @@ test('추상적 척도는 production 트리거가 없다', () => {
   assert.deepEqual(extractProductionCandidateList({ text: '음, 대기 시간이 꽤 길죠. 그래서 개선이 필요합니다.' }), []);
 });
 
+test('(^|\\s) 로 시작하는 일치는 앞 낱말 속 같은 글자열이 아니라 실제 자리를 쓴다', () => {
+  const differenceText = '숫자가 많이 차이가 나는데 이 차이가 중요합니다';
+  assert.deepEqual(spanList(extractProductionCandidateList({ text: differenceText })), [
+    ['change', 'data', '차이가', 7, 10],
+    ['demonstrative', 'demonstrative', '이 차이가', 15, 20],
+    ['change', 'data', '차이가', 17, 20],
+  ]);
+  assert.equal(detectProductionFiredTrigger({ text: differenceText }).start, 15);
+
+  const fileText = '로그 파일을 보면 그 파일을 열어야 해요';
+  const fileCandidateList = extractProductionCandidateList({ text: fileText });
+  assert.deepEqual(
+    spanList(fileCandidateList.filter(({ kind }) => kind === 'demonstrative')),
+    [['demonstrative', 'demonstrative', '그 파일을', 10, 15]],
+  );
+  assert.deepEqual(spanList(fileCandidateList), [
+    ['demonstrative', 'demonstrative', '그 파일을', 10, 15],
+    ['demonstrative', 'pointing', '열', 16, 17],
+  ], '"열어야"의 열은 production 가리킴 명사 글자열 오탐 그대로다');
+  assert.deepEqual(detectProductionFiredTrigger({ text: fileText }), {
+    kind: 'demonstrative', trigger: '그 파일을', type: 'demonstrative', start: 10, end: 15,
+  });
+
+  const directionText = '마감을 금요일로 옮기고 일로 오세요';
+  assert.deepEqual(spanList(extractProductionCandidateList({ text: directionText })), [
+    ['demonstrative', 'demonstrative', '일로', 13, 15],
+  ]);
+  assert.equal(detectProductionFiredTrigger({ text: directionText }).start, 13);
+});
+
+test('글자열 포함으로 잡는 트리거는 낱말 속 첫 자리도 그대로 후보다', () => {
+  assert.deepEqual(spanList(extractProductionCandidateList({ text: '보여서 좋고 여서 가자' })), [
+    ['demonstrative', 'demonstrative', '여서', 1, 3],
+    ['demonstrative', 'demonstrative', '여서', 7, 9],
+  ]);
+});
+
+test('첫 지시 관형사 뒤가 때·정도 같은 비지시 명사여도 뒤의 지시 관형사+명사를 뽑는다', () => {
+  const nonReferentText = '그 때 이 사람이 왔고 저 사람이 갔다';
+  assert.deepEqual(spanList(extractProductionCandidateList({ text: nonReferentText })), [
+    ['demonstrative', 'demonstrative', '이 사람이', 4, 9],
+    ['demonstrative', 'demonstrative', '저 사람이', 13, 18],
+  ]);
+  assert.deepEqual(spanList(extractProductionCandidateList({ text: '이 정도면 됩니다. 그 방식으로 가죠' })), [
+    ['demonstrative', 'demonstrative', '그 방식으로', 11, 17],
+  ]);
+  assert.equal(detectProductionFiredTrigger({ text: nonReferentText }), null, '실제 발동은 production 첫 일치 그대로라 발동하지 않는다');
+});
+
 test('실제로 발동하는 1건은 제품의 활성 종류 기준이다', () => {
   assert.deepEqual(detectProductionFiredTrigger({ text: '음, 대기 시간이 꽤 길죠. 평균 40분인데 업계 평균은 10분이거든요.' }), {
     kind: 'demonstrative', trigger: '이거', type: 'demonstrative', start: 35, end: 37,
