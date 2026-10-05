@@ -33,7 +33,7 @@ function isMicToggleInput({ input }) {
 }
 
 // Shift 를 누르면 key 가 '!'·'@' 처럼 바뀌므로 자판 위치(code)로 숫자를 읽는다.
-const FEATURE_TOGGLE_CODE_PATTERN = /^Digit([1-7])$/;
+const FEATURE_TOGGLE_CODE_PATTERN = /^Digit([1-3])$/;
 
 function readFeatureToggleDigit({ input }) {
   if (!input || input.type !== 'keyDown' || input.isAutoRepeat) return null;
@@ -85,7 +85,7 @@ function registerCommandShortcut({ getViewerView, getMeetView = () => null }) {
   attachShortcutListener({ webContents: viewerView.webContents, getViewerView });
   const meetView = getMeetView();
   if (meetView) attachShortcutListener({ webContents: meetView.webContents, getViewerView });
-  console.log(`[shortcut] 커맨드 단축키 등록 (${meetView ? '뷰어+Meet' : '뷰어'}) — Ctrl+${Object.keys(USER_COMMAND_KEY_MAP).join('/')} · 회의 요약 토글 Ctrl+${SUMMARY_TOGGLE_KEY} · 마이크 질문 Ctrl+${MIC_TOGGLE_KEY} · 기능 토글 Ctrl+Shift+1~7`);
+  console.log(`[shortcut] 커맨드 단축키 등록 (${meetView ? '뷰어+Meet' : '뷰어'}) — Ctrl+${Object.keys(USER_COMMAND_KEY_MAP).join('/')} · 회의 요약 토글 Ctrl+${SUMMARY_TOGGLE_KEY} · 마이크 질문 Ctrl+${MIC_TOGGLE_KEY} · 기능 토글 Ctrl+Shift+1~3`);
 }
 
 module.exports = {

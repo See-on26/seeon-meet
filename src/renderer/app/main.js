@@ -13,7 +13,7 @@ import {
 import { CONTEXT_TOKEN_BUDGET } from '../core/mode/context-budget.js';
 import {
   createFeatureToggleStore, FEATURE_KEY_MAP, FEATURE_KEY_LIST, FEATURE_LABEL_MAP,
-  readFeatureKeyFromDigit, listDisabledNarrationClass, listDisabledFeatureLabel,
+  readFeatureKeyFromDigit, listDisabledNarrationClass, listDisabledFeatureLabel, isFeatureLockedDuringCapture,
 } from '../core/mode/feature-toggle-store.js';
 
 import { DelayBuffer, isCaptionDroppable, EXCESS_DROP_MS } from '../core/audio-renderer/delay-buffer.js';
@@ -758,6 +758,8 @@ function resolveDomSpeakerForPoll() {
 
 async function pollSpeakerIdentity() {
   if (!isPipelineEnabled() || isExperimentPaused || !captureSource.isActive) return;
+  // 화자 안내를 끄면 안내만 막는 것이 아니라 화자 판별(DOM·VLM) 자체를 하지 않는다.
+  if (!featureToggleStore.isOn(FEATURE_KEY_MAP.speakerIdentity)) return;
   if (isSpeakerRequestInFlight) return;
   if (performance.now() - lastAudioActiveAt > SPEAKER_VOICE_IDLE_MS) return;
   const wordBudget = buildWordBudget({ narrationType: NARRATION_TYPE_MAP.speakerIdentity });
@@ -816,6 +818,7 @@ async function pollSpeakerIdentity() {
 }
 
 function getSpeakerHint() {
+  if (!featureToggleStore.isOn(FEATURE_KEY_MAP.speakerIdentity)) return null;
   const domName = roiStore.getCurrentSpeakerName();
   if (domName) return domName;
   const isFresh = performance.now() - lastResolvedSpeakerAt <= SPEAKER_HINT_TTL_MS;
@@ -934,8 +937,6 @@ const SCREEN_DEPENDENCY_LABEL_MAP = {
 async function runDeixisDecision({ source, utterance, triggerList, region, pointingOrderHint,
   captureTs, videoTimeMs, eventVideoTimeMs = null,
   triggerUtterance = utterance, leadText = '', followText = '', isSentenceWaited = false }) {
-  // 지시·발화 기반을 모두 끄면 라우터가 고를 후보가 없으므로 캡처·판정을 하지 않는다.
-  if (!featureToggleStore.isOn(FEATURE_KEY_MAP.deixis) && !featureToggleStore.isOn(FEATURE_KEY_MAP.speechBased)) return;
   lastDeixisDecidedAt = performance.now();
   const label = triggerList.join(', ') || '-';
   const mode = getCurrentMode();
@@ -1107,10 +1108,6 @@ const USER_COMMAND_LABEL_MAP = {
 // 프리셋 커맨드(command)와 자유 자연어 질문(questionText)을 함께 처리한다.
 // 자유 질문이면 최근 발화(recentTranscript)를 근거로 붙인다 — 심화 질의응답 경로.
 async function askQuestion({ command = null, questionText = null, inputSource = 'typed' }) {
-  if (!featureToggleStore.isOn(FEATURE_KEY_MAP.manualQuestion)) {
-    announce(QUESTION_OFF_TEXT);
-    return;
-  }
   if (command && isDuplicateCommand({ command })) return;
   if (!captureSource.isActive) {
     announce('회의 캡처를 시작해야 질문할 수 있어요');
@@ -1148,12 +1145,19 @@ function handleUserCommand({ command }) {
 window.seeon.onUserCommand(handleUserCommand);
 
 // 기능별 켜기·끄기(C15). 페이지 전환·화자 안내를 꺼도 데이터는 계속 모으고 main 이 캡션만 내보내지 않는다.
-const QUESTION_OFF_TEXT = '질문 기능이 꺼져 있어요. Control Shift 6 으로 켤 수 있어요';
 
 // 설정 스위치는 스크린리더가 바뀐 상태(aria-checked)를 읽으므로 화면 알림만 띄운다. 단축키는 따로 읽어 준다.
 let isSwitchToggle = false;
 
+function isFeatureLockedNow(key) {
+  return isFeatureLockedDuringCapture(key) && captureSource.isActive;
+}
+
 function toggleFeature({ key, isFromSwitch = false }) {
+  if (isFeatureLockedNow(key)) {
+    announce(`${FEATURE_LABEL_MAP[key]}는 회의 캡처를 시작하기 전에만 바꿀 수 있어요`);
+    return;
+  }
   isSwitchToggle = isFromSwitch;
   try {
     featureToggleStore.toggle(key);
@@ -1199,6 +1203,8 @@ function syncFeatureToggleUi() {
     const isOn = featureToggleStore.isOn(button.dataset.feature);
     button.classList.toggle('on', isOn);
     button.setAttribute('aria-checked', String(isOn));
+    // 잠긴 스위치도 초점을 받아 눌렀을 때 왜 못 바꾸는지 들을 수 있게 disabled 대신 aria-disabled 를 쓴다.
+    button.setAttribute('aria-disabled', String(isFeatureLockedNow(button.dataset.feature)));
     button.textContent = isOn ? '켜짐' : '꺼짐';
   }
 }
@@ -1239,7 +1245,7 @@ window.seeon.onMeetReloaded(({ reason }) => {
 });
 
 // 실제 키 입력은 main 이 먼저 받아 막는다(before-input-event). 여기는 main 을 거치지 않은 입력용이다.
-const FEATURE_TOGGLE_CODE_PATTERN = /^Digit([1-7])$/;
+const FEATURE_TOGGLE_CODE_PATTERN = /^Digit([1-3])$/;
 
 document.addEventListener('keydown', (event) => {
   if (!(event.ctrlKey || event.metaKey) || event.altKey) return;
@@ -1469,7 +1475,6 @@ setInterval(() => {
 
 async function handleSilenceTrigger({ silenceMs }) {
   if (!isPipelineEnabled()) return;
-  if (!featureToggleStore.isOn(FEATURE_KEY_MAP.silenceBased)) return;
   const sessionSeq = experimentSeq;
   const slideLabel = slideRegistry.currentLabel();
   const recentTranscript = transcriptWindow.getBefore({
@@ -1624,6 +1629,7 @@ async function attemptStartExperiment() {
     setPauseUi(false);
     $('pauseBtn').disabled = false;
     setToggleUi(true);
+    syncFeatureToggleUi();
     renderModeButtons();
 
     if (!audioTrack) {
@@ -1696,6 +1702,7 @@ function stopExperiment() {
   $('stRes').textContent = $('stDelay').textContent = '–';
   $('stBuffer').textContent = '–';
   setToggleUi(false);
+  syncFeatureToggleUi();
   renderModeButtons();
   markDebug({
     stage: DEBUG_STAGE_MAP.session, verdict: DEBUG_VERDICT_MAP.info,
@@ -1796,11 +1803,6 @@ function submitTypedQuestion() {
   const input = $('cmdInput');
   const text = input.value.trim();
   if (!text) return;
-  // 꺼져 있으면 입력한 질문을 지우지 않고 안내만 한다.
-  if (!featureToggleStore.isOn(FEATURE_KEY_MAP.manualQuestion)) {
-    announce(QUESTION_OFF_TEXT);
-    return;
-  }
   input.value = '';
   askQuestion({ questionText: text });
 }
@@ -1851,11 +1853,6 @@ function askQuestionFromAudioWithinHold(event) {
 }
 
 async function askQuestionFromAudio({ buffer, startTs }) {
-  // 녹음 중에 질문 기능을 껐으면 음성 인식을 돌리지 않는다.
-  if (!featureToggleStore.isOn(FEATURE_KEY_MAP.manualQuestion)) {
-    announce(QUESTION_OFF_TEXT);
-    return;
-  }
   announce('질문을 듣고 있어요');
   const result = await window.seeon.sendQuestionAudio({ buffer, startTs }).catch(() => null);
   if (!result?.isOk) {
@@ -1885,17 +1882,8 @@ micQuestionController = new MicQuestionController({
   onAnswerSettled: () => narrationGate.release(),
 });
 
-// 녹음 중이면 기능을 꺼도 멈출 수는 있게 새로 시작할 때만 막는다.
-function toggleMicQuestion() {
-  if (micQuestionController.phase === MIC_PHASE_MAP.idle
-    && !featureToggleStore.isOn(FEATURE_KEY_MAP.manualQuestion)) {
-    announce(QUESTION_OFF_TEXT);
-    return;
-  }
-  micQuestionController.toggle();
-}
-$('cmdMic').addEventListener('click', toggleMicQuestion);
-window.seeon.onMicToggle(toggleMicQuestion);
+$('cmdMic').addEventListener('click', () => { micQuestionController.toggle(); });
+window.seeon.onMicToggle(() => { micQuestionController.toggle(); });
 for (const chip of $('cmdChips').querySelectorAll('.chip')) {
   chip.addEventListener('click', () => handleUserCommand({ command: chip.dataset.command }));
 }

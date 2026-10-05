@@ -671,10 +671,6 @@ function registerPipeline({ getViewerView }) {
   }) => {
     const startedAt = Date.now();
     const silenceSec = Math.round(silenceMs / 1000);
-    // 무발화 해설을 끄면 판정·묘사 모델을 부르지 않는다.
-    if (!featureGate.isEnabled(NARRATION_CLASS_MAP.silenceBased)) {
-      return { isOk: true, status: 'feature_off' };
-    }
     const result = await silenceNarrator.run({
       slideLabel, transcript: recentTranscript, silenceMs,
       describe: () => agentFieldMap[NARRATION_TYPE_MAP.visualDescription].generate({
@@ -821,9 +817,8 @@ function registerPipeline({ getViewerView }) {
         if (isRouterMode) {
           const routed = await routerClient.route({ utterance, before: beforeText, after: afterText });
           judgeReason = routed.blockedReason;
-          const disabledClassList = featureGate.getDisabledClassList();
           const { selected, excludedList } = selectGeneratableCandidate({
-            candidateList: routed.candidateList, isScaleEnabled: config.isScaleEnabled, disabledClassList,
+            candidateList: routed.candidateList, isScaleEnabled: config.isScaleEnabled,
           });
           selectedCandidate = selected;
           if (excludedList.length) {
@@ -842,15 +837,12 @@ function registerPipeline({ getViewerView }) {
               ? `확정 ${selectedCandidate.type}/${selectedCandidate.subKind || '-'}`
               : `후보 없음${judgeReason ? ` (${judgeReason})` : ''}`,
             detail: `발화="${utterance}" 후보=[${routed.candidateList.map((c) => `${c.type}/${c.subKind || '-'}`).join(', ') || '없음'}]`
-              + ` 경로=${routed.source}`
-              + (disabledClassList.length ? ` 꺼진 분류=[${disabledClassList.join(', ')}]` : ''),
+              + ` 경로=${routed.source}`,
           });
         } else {
           const verdict = await judgeClient.judge({ utterance, before: beforeText, after: afterText });
           judgeReason = verdict.reason;
-          if (verdict.shouldCaption && featureGate.isEnabled(NARRATION_CLASS_MAP.deixis)) {
-            selectedCandidate = { type: NARRATION_TYPE_MAP.deixis, subKind: null };
-          }
+          if (verdict.shouldCaption) selectedCandidate = { type: NARRATION_TYPE_MAP.deixis, subKind: null };
           markDebug({
             stage: DEBUG_STAGE_MAP.router, ts,
             verdict: selectedCandidate ? DEBUG_VERDICT_MAP.pass : DEBUG_VERDICT_MAP.skip,

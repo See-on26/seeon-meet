@@ -3,14 +3,13 @@ import assert from 'node:assert/strict';
 import { createRequire } from 'node:module';
 import {
   createFeatureToggleStore, FEATURE_KEY_LIST, FEATURE_KEY_MAP, FEATURE_TOGGLE_STORAGE_KEY,
-  readFeatureKeyFromDigit, listDisabledNarrationClass, listDisabledFeatureLabel,
+  readFeatureKeyFromDigit, listDisabledNarrationClass, listDisabledFeatureLabel, isFeatureLockedDuringCapture,
 } from '../src/renderer/core/mode/feature-toggle-store.js';
 import { NarrationQueue, QUEUE_DROP_REASON_MAP } from '../src/renderer/core/audio-renderer/narration-queue.js';
 
 const require = createRequire(import.meta.url);
 const { readFeatureToggleDigit, readCommandFromInput, isSummaryToggleInput } = require('../src/main/shortcut.js');
 const { createFeatureGate } = require('../src/main/caption-pipeline/orchestrator/feature-gate.js');
-const { selectGeneratableCandidate } = require('../src/main/caption-pipeline/orchestrator/candidate-selector.js');
 
 function createMemoryStorage(initialMap = {}) {
   const map = new Map(Object.entries(initialMap));
@@ -21,15 +20,29 @@ function createMemoryStorage(initialMap = {}) {
   };
 }
 
-test('기능 토글은 7개이고 단축키 숫자 1~7 순서와 같다', () => {
-  assert.deepEqual(FEATURE_KEY_LIST, [
-    'page_transition', 'deixis', 'speech_based', 'silence_based', 'speaker_identity',
-    'manual_question', 'meeting_summary',
-  ]);
+test('켜고 끄는 기능은 부가 정보 2종(페이지 전환·화자)과 회의 요약이고 단축키 숫자 1~3 순서와 같다', () => {
+  assert.deepEqual(FEATURE_KEY_LIST, ['page_transition', 'speaker_identity', 'meeting_summary']);
   assert.equal(readFeatureKeyFromDigit('1'), FEATURE_KEY_MAP.pageTransition);
-  assert.equal(readFeatureKeyFromDigit('7'), FEATURE_KEY_MAP.meetingSummary);
-  assert.equal(readFeatureKeyFromDigit('8'), null);
+  assert.equal(readFeatureKeyFromDigit('2'), FEATURE_KEY_MAP.speakerIdentity);
+  assert.equal(readFeatureKeyFromDigit('3'), FEATURE_KEY_MAP.meetingSummary);
+  assert.equal(readFeatureKeyFromDigit('4'), null);
   assert.equal(readFeatureKeyFromDigit('0'), null);
+});
+
+test('정보 공백 해설(지시·발화·무발화)과 질문은 끌 수 없다', () => {
+  for (const key of ['deixis', 'speech_based', 'silence_based', 'manual_question']) {
+    assert.equal(FEATURE_KEY_LIST.includes(key), false, key);
+  }
+  const store = createFeatureToggleStore({ storage: createMemoryStorage() });
+  for (const narrationClass of ['deixis', 'speech_based', 'silence_based', 'user_command']) {
+    assert.equal(store.isClassOn(narrationClass), true, narrationClass);
+  }
+});
+
+test('화자 안내만 회의 캡처 중에는 바꿀 수 없다', () => {
+  assert.equal(isFeatureLockedDuringCapture(FEATURE_KEY_MAP.speakerIdentity), true);
+  assert.equal(isFeatureLockedDuringCapture(FEATURE_KEY_MAP.pageTransition), false);
+  assert.equal(isFeatureLockedDuringCapture(FEATURE_KEY_MAP.meetingSummary), false);
 });
 
 test('저장된 값이 없으면 전부 켜짐으로 시작한다', () => {
@@ -51,53 +64,55 @@ test('바꾼 값은 저장소에 남아 다음 실행에도 유지된다', () =>
 
 test('저장 값이 깨졌거나 모르는 키가 있으면 무시하고 켜짐으로 본다', () => {
   const broken = createFeatureToggleStore({ storage: createMemoryStorage({ [FEATURE_TOGGLE_STORAGE_KEY]: '{not json' }) });
-  assert.equal(broken.isOn(FEATURE_KEY_MAP.deixis), true);
+  assert.equal(broken.isOn(FEATURE_KEY_MAP.pageTransition), true);
 
+  // 예전 7개 토글 시절에 저장된 deixis·silence_based 같은 키는 무시한다.
   const odd = createFeatureToggleStore({ storage: createMemoryStorage({
-    [FEATURE_TOGGLE_STORAGE_KEY]: JSON.stringify({ deixis: 'no', unknown_key: false, silence_based: false }),
+    [FEATURE_TOGGLE_STORAGE_KEY]: JSON.stringify({ page_transition: 'no', deixis: false, speaker_identity: false }),
   }) });
-  assert.equal(odd.isOn(FEATURE_KEY_MAP.deixis), true);
-  assert.equal(odd.isOn(FEATURE_KEY_MAP.silenceBased), false);
-  assert.equal(odd.isOn('unknown_key'), false);
+  assert.equal(odd.isOn(FEATURE_KEY_MAP.pageTransition), true);
+  assert.equal(odd.isOn(FEATURE_KEY_MAP.speakerIdentity), false);
+  assert.equal(odd.isClassOn('deixis'), true);
 });
 
 test('저장소가 없거나 쓰기에 실패해도 메모리 상태로 동작한다', () => {
   const store = createFeatureToggleStore({ storage: null });
-  assert.equal(store.toggle(FEATURE_KEY_MAP.deixis), false);
+  assert.equal(store.toggle(FEATURE_KEY_MAP.pageTransition), false);
   const failing = createFeatureToggleStore({ storage: { getItem: () => null, setItem: () => { throw new Error('quota'); } } });
-  assert.equal(failing.toggle(FEATURE_KEY_MAP.deixis), false);
-  assert.equal(failing.isOn(FEATURE_KEY_MAP.deixis), false);
+  assert.equal(failing.toggle(FEATURE_KEY_MAP.pageTransition), false);
+  assert.equal(failing.isOn(FEATURE_KEY_MAP.pageTransition), false);
 });
 
 test('바뀔 때마다 구독자에게 키와 상태를 알린다', () => {
   const store = createFeatureToggleStore({ storage: createMemoryStorage() });
   const changeList = [];
   store.subscribe((change) => changeList.push(change));
-  store.toggle(FEATURE_KEY_MAP.silenceBased);
-  store.set(FEATURE_KEY_MAP.silenceBased, false);
-  store.set(FEATURE_KEY_MAP.silenceBased, true);
+  store.toggle(FEATURE_KEY_MAP.pageTransition);
+  store.set(FEATURE_KEY_MAP.pageTransition, false);
+  store.set(FEATURE_KEY_MAP.pageTransition, true);
   assert.deepEqual(changeList, [
-    { key: 'silence_based', isOn: false },
-    { key: 'silence_based', isOn: true },
+    { key: 'page_transition', isOn: false },
+    { key: 'page_transition', isOn: true },
   ]);
 });
 
-test('꺼진 기능을 재생 분류로 바꾼다 — 질문은 user_command, 요약은 해설이 아니다', () => {
+test('꺼진 기능을 재생 분류로 바꾼다 — 요약은 해설이 아니다', () => {
   const store = createFeatureToggleStore({ storage: createMemoryStorage() });
   store.set(FEATURE_KEY_MAP.pageTransition, false);
-  store.set(FEATURE_KEY_MAP.manualQuestion, false);
+  store.set(FEATURE_KEY_MAP.speakerIdentity, false);
   store.set(FEATURE_KEY_MAP.meetingSummary, false);
-  assert.deepEqual(listDisabledNarrationClass({ store }), ['page_transition', 'user_command']);
+  assert.deepEqual(listDisabledNarrationClass({ store }), ['page_transition', 'speaker_identity']);
   assert.equal(store.isClassOn('page_transition'), false);
-  assert.equal(store.isClassOn('user_command'), false);
+  assert.equal(store.isClassOn('speaker_identity'), false);
   assert.equal(store.isClassOn('deixis'), true);
   assert.equal(store.isClassOn(undefined), true);
 });
 
-test('Ctrl/Cmd+Shift+1~7 은 기능 토글 단축키다', () => {
+test('Ctrl/Cmd+Shift+1~3 은 기능 토글 단축키다', () => {
   const base = { type: 'keyDown', control: true, shift: true };
   assert.equal(readFeatureToggleDigit({ input: { ...base, key: '!', code: 'Digit1' } }), '1');
-  assert.equal(readFeatureToggleDigit({ input: { ...base, key: '&', code: 'Digit7' } }), '7');
+  assert.equal(readFeatureToggleDigit({ input: { ...base, key: '#', code: 'Digit3' } }), '3');
+  assert.equal(readFeatureToggleDigit({ input: { ...base, key: '$', code: 'Digit4' } }), null);
   // 맥에서 Cmd+Shift+3/4/5 는 OS 스크린샷이 먼저 가져가므로 안내는 Control 로 한다. Cmd 도 받기는 한다.
   assert.equal(readFeatureToggleDigit({ input: { ...base, control: false, meta: true, key: '@', code: 'Digit2' } }), '2');
   assert.equal(readFeatureToggleDigit({ input: { ...base, key: '*', code: 'Digit8' } }), null);
@@ -126,22 +141,6 @@ test('main 기능 게이트는 알려진 분류만 받아 꺼짐 여부를 답�
   assert.equal(gate.isEnabled('page_transition'), true);
 });
 
-const deixis = { type: 'deixis', subKind: 'simple', anchor: '이거', ts: 1 };
-const valueToMeaning = { type: 'interpretation', subKind: 'value_to_meaning', anchor: '30%', ts: 1 };
-
-test('발화 기반을 끄면 값·의미 후보를 생성 전에 빼고 지시 후보가 남는다', () => {
-  const { selected } = selectGeneratableCandidate({
-    candidateList: [valueToMeaning, deixis], disabledClassList: ['speech_based'],
-  });
-  assert.equal(selected.type, 'deixis');
-  assert.deepEqual(selected.mergedAnchorList, undefined);
-});
-
-test('지시를 끄면 지시 후보만 남은 발화는 고르지 않는다', () => {
-  const { selected } = selectGeneratableCandidate({ candidateList: [deixis], disabledClassList: ['deixis'] });
-  assert.equal(selected, null);
-});
-
 test('재생 대기 줄은 꺼진 분류의 해설을 꺼내지 않고 기능 꺼짐으로 버린다', () => {
   const disabledSet = new Set(['speaker_identity']);
   const queue = new NarrationQueue({ now: () => 0, isEntryEnabled: (entry) => !disabledSet.has(entry.narrationClass) });
@@ -164,5 +163,5 @@ test('꺼진 기능 이름을 설정 순서대로 돌려준다 — 캡처 시작
   assert.deepEqual(listDisabledFeatureLabel({ store }), []);
   store.set(FEATURE_KEY_MAP.meetingSummary, false);
   store.set(FEATURE_KEY_MAP.pageTransition, false);
-  assert.deepEqual(listDisabledFeatureLabel({ store }), ['페이지 전환 해설', '회의 요약']);
+  assert.deepEqual(listDisabledFeatureLabel({ store }), ['페이지 전환 안내', '회의 요약']);
 });

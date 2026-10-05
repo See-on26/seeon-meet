@@ -1,45 +1,38 @@
 import { NARRATION_CLASS_MAP } from '../constants.js';
 
+// 켜고 끄는 기능은 부가 정보 2종(페이지 전환 안내·화자 안내)과 회의 요약이다.
+// 정보 공백 해설(지시·발화·무발화)과 질문은 항상 동작한다.
 export const FEATURE_KEY_MAP = {
   pageTransition: 'page_transition',
-  deixis: 'deixis',
-  speechBased: 'speech_based',
-  silenceBased: 'silence_based',
   speakerIdentity: 'speaker_identity',
-  manualQuestion: 'manual_question',
   meetingSummary: 'meeting_summary',
 };
 
-// 순서가 단축키 Ctrl+Shift+1~7 과 설정 패널 순서다.
+// 순서가 단축키 Ctrl+Shift+1~3 과 설정 패널 순서다.
 export const FEATURE_KEY_LIST = [
   FEATURE_KEY_MAP.pageTransition,
-  FEATURE_KEY_MAP.deixis,
-  FEATURE_KEY_MAP.speechBased,
-  FEATURE_KEY_MAP.silenceBased,
   FEATURE_KEY_MAP.speakerIdentity,
-  FEATURE_KEY_MAP.manualQuestion,
   FEATURE_KEY_MAP.meetingSummary,
 ];
 
 export const FEATURE_LABEL_MAP = {
-  [FEATURE_KEY_MAP.pageTransition]: '페이지 전환 해설',
-  [FEATURE_KEY_MAP.deixis]: '지시 대상 해설',
-  [FEATURE_KEY_MAP.speechBased]: '발화 기반 해설',
-  [FEATURE_KEY_MAP.silenceBased]: '무발화 해설',
+  [FEATURE_KEY_MAP.pageTransition]: '페이지 전환 안내',
   [FEATURE_KEY_MAP.speakerIdentity]: '화자 안내',
-  [FEATURE_KEY_MAP.manualQuestion]: '질문 기능',
   [FEATURE_KEY_MAP.meetingSummary]: '회의 요약',
 };
 
 // 기능을 끄면 막을 재생 분류. 회의 요약은 해설이 아니라서 없다.
 const NARRATION_CLASS_BY_FEATURE_MAP = {
   [FEATURE_KEY_MAP.pageTransition]: NARRATION_CLASS_MAP.pageTransition,
-  [FEATURE_KEY_MAP.deixis]: NARRATION_CLASS_MAP.deixis,
-  [FEATURE_KEY_MAP.speechBased]: NARRATION_CLASS_MAP.speechBased,
-  [FEATURE_KEY_MAP.silenceBased]: NARRATION_CLASS_MAP.silenceBased,
   [FEATURE_KEY_MAP.speakerIdentity]: NARRATION_CLASS_MAP.speakerIdentity,
-  [FEATURE_KEY_MAP.manualQuestion]: NARRATION_CLASS_MAP.userCommand,
 };
+
+// 화자 안내는 끄면 화자 판별 자체를 하지 않으므로, 회의 도중 켜고 끄지 않고 캡처 시작 전에만 정한다.
+const CAPTURE_LOCKED_FEATURE_LIST = [FEATURE_KEY_MAP.speakerIdentity];
+
+export function isFeatureLockedDuringCapture(key) {
+  return CAPTURE_LOCKED_FEATURE_LIST.includes(key);
+}
 
 export const FEATURE_TOGGLE_STORAGE_KEY = 'seeon.featureToggles';
 
