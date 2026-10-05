@@ -187,3 +187,19 @@ test('숫자가 든 답은 "알 수 없지만" 같은 말이 있어도 버리지
   assert.equal(imageCallList.length, 0);
   assert.match(result.text, /500만원/);
 });
+
+test('설명 문장 뒤에 NEED_IMAGE 를 붙여도 저장 이미지로 다시 묻고, 토큰을 소리 내 읽지 않는다', async () => {
+  const { answerer, imageCallList } = makeAnswerer({
+    textReplyList: ['기록에는 빨간 막대가 우리 회사인지에 대한 정보가 없습니다. NEED_IMAGE'], imageReply: '빨간 막대가 저희 회사예요',
+  });
+  const result = await answerer.answer({ route: 'past_slide', slideMajorList: [3], questionText: '빨간 막대가 우리 회사야?', wordBudget });
+  assert.equal(imageCallList.length, 1);
+  assert.equal(result.text, '빨간 막대가 저희 회사예요');
+  assert.doesNotMatch(result.text, /NEED_IMAGE/);
+});
+
+test('답 길이 규칙은 답을 찾았을 때만 적용한다 — 못 찾으면 토큰만 내게 한다', async () => {
+  const { answerer, textCallList } = makeAnswerer({ textReplyList: ['하반기에 500 올랐어요'] });
+  await answerer.answer({ route: 'past_slide', slideMajorList: [3], questionText: '얼마 올랐어?', wordBudget });
+  assert.match(textCallList[0].prompt, /답을 찾았으면 .*1~2문장/);
+});

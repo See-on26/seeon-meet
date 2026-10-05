@@ -1,4 +1,5 @@
 const { formatElapsed } = require('../context/clock-format');
+const { buildAnswerLengthRule } = require('./answer-length-rule');
 
 const NEED_IMAGE_TOKEN = 'NEED_IMAGE';
 const SLIDE_TEXT_EVIDENCE_LIMIT = 1500;
@@ -14,7 +15,7 @@ function buildAnswerRuleList({ minWordCount, maxWordCount, notFoundToken = 'NONE
     '규칙:',
     '(1) 아래 기록에 근거해서만 답한다. 지어내지 않는다.',
     `(2) 기록에서 답을 찾을 수 없으면 정확히 "${notFoundToken}"만 출력한다. 설명 문장을 붙이지 않는다.`,
-    `(3) ${minWordCount}~${maxWordCount}어절로, 머리말 없이 답만 출력한다.`,
+    `(3) 답을 찾았으면 ${buildAnswerLengthRule({ minWordCount, maxWordCount })} 머리말 없이 답만 출력한다.`,
   ];
 }
 

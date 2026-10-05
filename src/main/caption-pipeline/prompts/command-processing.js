@@ -1,5 +1,6 @@
 const { USER_COMMAND_MAP } = require('../contracts/narration-types');
 const { GROUNDING_NONE_TOKEN, computeMaxChars } = require('../agents/shared/caption-parser');
+const { buildAnswerLengthRule } = require('./answer-length-rule');
 
 const DEFAULT_COMMAND_MIN_WORD_COUNT = 6;
 const DEFAULT_COMMAND_MAX_WORD_COUNT = 25;
@@ -36,7 +37,7 @@ function buildCommandPrompt({ command,
     '',
     '규칙:',
     '(1) 화면에 실제로 보이는 것만 쓴다. 지어내지 않는다.',
-    `(2) ${minWordCount}~${maxWordCount}어절로 답한다 (최대 ${effectiveMaxChars}자).`,
+    `(2) ${buildAnswerLengthRule({ minWordCount, maxWordCount, maxChars: effectiveMaxChars })}`,
     '(3) 머리말·인사말 없이 답만 출력한다.',
     '(4) 이미 안내했던 내용이라도 **다시 답한다** — 사용자가 직접 물었기 때문이다.',
   ].join('\n');
@@ -59,7 +60,7 @@ function buildFreeQuestionPrompt({ questionText,
     '규칙:',
     '(1) 화면에 실제로 보이는 것에 근거해 답한다. 지어내지 않는다.',
     `(2) 화면에서 질문의 답을 찾을 수 없으면 정확히 "${GROUNDING_NONE_TOKEN}"만 출력한다.`,
-    `(3) ${minWordCount}~${maxWordCount}어절로 답한다 (최대 ${effectiveMaxChars}자).`,
+    `(3) ${buildAnswerLengthRule({ minWordCount, maxWordCount, maxChars: effectiveMaxChars })}`,
     '(4) 머리말·인사말 없이 답만 출력한다.',
     '(5) 이미 안내했던 내용이라도 **다시 답한다** — 사용자가 직접 물었기 때문이다.',
   ].filter(Boolean).join('\n');

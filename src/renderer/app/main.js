@@ -1120,7 +1120,7 @@ async function askQuestion({ command = null, questionText = null, inputSource = 
     return;
   }
   const ts = Date.now();
-  const wordBudget = computeAnswerWordBudget({ mode: getCurrentMode() });
+  const wordBudget = computeAnswerWordBudget();
   if (!questionText) {
     await window.seeon.sendPipelineCommand({
       ts, buffer, command, wordBudget, eventVideoTimeMs: captureSource.videoTimeMs,
