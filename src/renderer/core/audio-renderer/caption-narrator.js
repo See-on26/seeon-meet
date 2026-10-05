@@ -2,7 +2,7 @@ import { SIC_CATCHUP_MIN_RATE, SIC_CATCHUP_MAX_RATE, SIC_CATCHUP_RATE_PER_SEC } 
 import { NarrationQueue, shouldInterrupt, QUEUE_DROP_REASON_MAP } from './narration-queue.js';
 import { isImmediateCaption } from './narration-entry.js';
 import {
-  computeGainFromDecibel, createSidePanner, DEFAULT_DUCK_DB, NARRATION_PAN_X,
+  computeGainFromDecibel, createSidePanner, DEFAULT_DUCK_DB, NARRATION_PAN_X, buildPlayStartInfo,
 } from './narration-mixer.js';
 
 const START_LEAD_SEC = 0.02;
@@ -12,12 +12,14 @@ export function computeCatchupRate({ pausedSec, minRate, maxRate, ratePerSec }) 
 }
 
 export class CaptionNarrator {
-  constructor({ getLiveVideo, onStatus = null, onDrop = null, getRateRange = null, isCatchupDelegated = null,
-    createAudioContext = () => new AudioContext(), now = () => performance.now(),
+  constructor({ getLiveVideo, onStatus = null, onDrop = null, onPlayStart = null, getRateRange = null, isCatchupDelegated = null,
+    createAudioContext = () => new AudioContext(), now = () => performance.now(), wallNow = () => Date.now(),
     isEntryEnabled = () => true }) {
     this.getLiveVideo = getLiveVideo;
     this.onStatus = onStatus || (() => {});
     this.onDrop = onDrop || (() => {});
+    this.onPlayStart = onPlayStart || (() => {});
+    this.wallNow = wallNow;
     this.createAudioContext = createAudioContext;
     this.now = now;
     this.getRateRange = getRateRange
@@ -135,12 +137,22 @@ export class CaptionNarrator {
       this.currentSource = source;
       this.currentStartSec = this.audioContext.currentTime + START_LEAD_SEC;
       source.start(this.currentStartSec);
+      this._notifyPlayStart({ entry, durationSec: this.currentNarrationSec });
       this.onStatus(isAnswer ? '질문 답 재생 중(회의음 줄임)…' : '캡션 내레이션 재생 중…');
     } catch (error) {
       if (token !== this.playToken) return;
       this.onStatus(`내레이션 재생 실패: ${error.message}`);
       this.currentNarrationSec = 0;
       this._onNarrationEnded();
+    }
+  }
+
+  // 알림을 받는 쪽이 실패해도 재생은 계속한다.
+  _notifyPlayStart({ entry, durationSec }) {
+    try {
+      this.onPlayStart(buildPlayStartInfo({ entry, durationSec, wallMs: this.wallNow() + START_LEAD_SEC * 1000 }));
+    } catch (error) {
+      console.warn(`[narrator] 재생 시작 알림 실패(무시): ${error.message}`);
     }
   }
 

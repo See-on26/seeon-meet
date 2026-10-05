@@ -55,6 +55,7 @@ import { formatMeetingLabel } from '../core/archive/meeting-label.js';
 import { RoiStore, SPEAKER_VERDICT_MAP } from '../core/roi/roi-store.js';
 import { MeetCaptureSession } from '../core/capture/meet-capture-session.js';
 import { wallToVideoTimeMs, resolveSpeechEndWallTs } from '../core/capture/video-time.js';
+import { LAB_PLAYER_URL_PATTERN } from '../lab/lab-constants.js';
 
 const $ = (id) => document.getElementById(id);
 
@@ -96,10 +97,22 @@ function readLocalStorage() {
 const featureToggleStore = createFeatureToggleStore({ storage: readLocalStorage() });
 const isNarrationEntryEnabled = (entry) => featureToggleStore.isClassOn(entry.narrationClass);
 
+// 해설이 들리기 시작한 순간을 실험 모드(lab-viewer preload)에 알린다. 제품 앱에는 받는 쪽이 없어 아무 일도 하지 않는다.
+// "들은 자리"는 교차 모드면 지연 재생 위치, 동시 모드면 원본 현재 위치다. 둘 다 캡처 영상 시각 축이다.
+function reportNarrationPlayStart(info) {
+  window.seeon.reportLabNarrationPlayback?.({
+    ...info,
+    mode: getCurrentMode(),
+    playbackVideoTimeMs: delayBuffer ? delayBuffer.getDelayedTimeMs() : null,
+    liveVideoTimeMs: captureSource.videoTimeMs,
+  });
+}
+
 const narrator = new CaptionNarrator({
   getLiveVideo: getPlaybackVideo,
   onStatus: handleNarrationStatus,
   onDrop: handleNarrationDrop,
+  onPlayStart: reportNarrationPlayStart,
   isEntryEnabled: isNarrationEntryEnabled,
   getRateRange: () => getCatchupRateRange({ mode: getCurrentMode() }),
   isCatchupDelegated: () => Boolean(delayBuffer),
@@ -239,6 +252,7 @@ function startNarrationPlayer({ stream }) {
   if (policy?.isMixed) {
     narrationMixer = new NarrationMixer({
       onStatus: handleNarrationStatus, onDrop: handleNarrationDrop, isEntryEnabled: isNarrationEntryEnabled,
+      onPlayStart: reportNarrationPlayStart,
     });
     narrationMixer.start(stream);
 
@@ -1829,8 +1843,10 @@ function handleCaptureEnded() {
   showNotice('회의 캡처가 종료되었습니다 — 회의를 나갔거나 Meet 창이 닫혔습니다.');
 }
 
+// 실험 모드는 Meet 대신 녹화 영상 재생 화면을 캡처한다. 그 화면이 보내는 주소도 회의 주소로 받는다.
 function isCaptureStartable() {
-  return MEET_MEETING_URL_PATTERN.test(latestMeetUrl) && latestMeetTileCount > 0;
+  const isMeetingUrl = MEET_MEETING_URL_PATTERN.test(latestMeetUrl) || LAB_PLAYER_URL_PATTERN.test(latestMeetUrl);
+  return isMeetingUrl && latestMeetTileCount > 0;
 }
 
 function syncToggleAvailability() {
