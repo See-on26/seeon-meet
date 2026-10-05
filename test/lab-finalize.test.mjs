@@ -199,3 +199,36 @@ test('시각이 빠진 재생 알림이 와도 재생 중인 해설이 끝나는
   recorder.addPlayback({ durationMs: 3000 });
   assert.equal(recorder.getPlayingUntilWallMs(), 5000);
 });
+
+test('viewer 소리 녹음이 비었거나 없으면 결과물이 빠진 것으로 본다', async () => {
+  const emptyCase = prepareRunDir();
+  fs.writeFileSync(path.join(emptyCase.runDir, RESULT_FILE_MAP.outputAudio), '');
+  const emptyResult = await finalizeRun({ run: buildRun(emptyCase), modelConfig: {} });
+  assert.equal(emptyResult.isComplete, false);
+  assert.ok(emptyResult.errorList.some((error) => error.code === 'no_output_audio'));
+
+  const missingCase = prepareRunDir();
+  fs.rmSync(path.join(missingCase.runDir, RESULT_FILE_MAP.outputAudio));
+  const missingResult = await finalizeRun({ run: buildRun(missingCase), modelConfig: {} });
+  assert.equal(missingResult.isComplete, false);
+  const runInfo = JSON.parse(fs.readFileSync(path.join(missingCase.runDir, 'run.json'), 'utf8'));
+  assert.equal(runInfo.isComplete, false);
+  assert.deepEqual(runInfo.errorList.map((error) => error.code), ['record_line_broken', 'no_output_audio']);
+});
+
+test('해설은 왔는데 재생 시작 알림이 하나도 없으면 결과물이 빠진 것으로 본다', async () => {
+  const { runDir, recordPath } = prepareRunDir();
+  const result = await finalizeRun({ run: buildRun({ runDir, recordPath, patch: { playbackList: [] } }), modelConfig: {} });
+  assert.equal(result.isComplete, false);
+  assert.deepEqual(result.errorList.map((error) => error.code), ['record_line_broken', 'no_playback_report']);
+});
+
+test('해설이 하나도 없던 실행은 재생 알림이 없어도 녹음·기록이 있으면 완전하다', async () => {
+  const { runDir, recordPath } = prepareRunDir();
+  const result = await finalizeRun({
+    run: buildRun({ runDir, recordPath, patch: { captionEventList: [], playbackList: [] } }),
+    modelConfig: {},
+  });
+  assert.equal(result.isComplete, true);
+  assert.deepEqual(result.errorList.map((error) => error.code), ['record_line_broken']);
+});

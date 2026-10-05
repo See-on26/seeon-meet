@@ -34,8 +34,10 @@ const FINALIZE_ERROR_MAP = {
 };
 
 // 이 오류가 하나라도 있으면 결과물에 빠진 것이 있다(run.json.isComplete=false).
+// 녹음(output-audio.webm)은 사람 평가 입력이고, 해설이 왔는데 재생 알림이 없으면 AD 타임라인의 들린 자리가 모두 빠진다.
 const INCOMPLETE_CODE_LIST = [
   FINALIZE_ERROR_MAP.sessionUnknown, FINALIZE_ERROR_MAP.recordReadFailed, FINALIZE_ERROR_MAP.noPlayerTime,
+  FINALIZE_ERROR_MAP.noOutputAudio, FINALIZE_ERROR_MAP.noPlaybackReport,
   FINALIZE_ERROR_MAP.writeFailed, 'capture_failed', 'session_end_timeout', 'roi_missing',
 ];
 
