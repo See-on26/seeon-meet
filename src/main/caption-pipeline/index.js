@@ -36,6 +36,7 @@ const { createContextStore, toSlideMajor, LABEL_STATUS_MAP } = require('./contex
 const { createSlideLabeler } = require('./context/slide-labeler');
 const { createContextFileWriter } = require('./context/context-file');
 const { buildTranscriptScript, buildScriptFileName } = require('./context/transcript-script');
+const { pickMeetingTitle } = require('../archive/meeting-archive');
 const { classifyQuestion, QUESTION_ROUTE_MAP } = require('./context/question-classifier');
 const { createQuestionRouter, selectFollowUpQa } = require('./context/question-router');
 const { createQuestionAnswerer, NOT_FOUND_TEXT } = require('./context/question-answerer');
@@ -68,7 +69,7 @@ function truncateForLog(text, maxLength = 60) {
   return text.length > maxLength ? `${text.slice(0, maxLength)}…` : text;
 }
 
-function registerPipeline({ getViewerView }) {
+function registerPipeline({ getViewerView, meetingArchive = null }) {
   const config = readPipelineConfig();
   const recordStore = createRecordStore({ outDir: OUT_DIR });
   const sessionStore = createSessionStore();
@@ -338,6 +339,17 @@ function registerPipeline({ getViewerView }) {
       fileName: buildScriptFileName({ sessionId }), text: buildTranscriptScript({ snapshot: lastContextSnapshot }),
     });
     console.log(`[context] 대화 스크립트 ${scriptFilePath || '(실패)'}`);
+    // 사용자 문서 폴더의 회의 기록. 실패해도 회의 종료는 계속한다.
+    const archiveDir = await meetingArchive?.saveScript({
+      sessionId, startedAt: lastSession.startedAt, endedAt: lastSession.endedAt,
+      title: pickMeetingTitle({ snapshot: lastContextSnapshot }),
+      slideCount: lastContextSnapshot.slideList.length, utteranceCount: lastContextSnapshot.utteranceList.length,
+      scriptText: buildTranscriptScript({ snapshot: lastContextSnapshot }),
+    }).catch((error) => {
+      console.warn(`[archive] 회의 기록 저장 실패(무시): ${error.message}`);
+      return null;
+    });
+    if (archiveDir) console.log(`[archive] 회의 기록 ${archiveDir}`);
     console.log(`[pipeline] ■ 캡처 세션 종료 (${sessionId}) — 발화 ${lastSession.asrEntryList.length}건 · 슬라이드 마크 ${lastSession.slideMarkList.length}건`);
     return {
       isOk: true,
