@@ -113,6 +113,8 @@ export const DEBUG_STAGE_MAP = {
   context: 'context',
   question: 'question',
   silence: 'silence',
+  queue: 'queue',
+  toggle: 'toggle',
 };
 
 export const DEBUG_VERDICT_MAP = { pass: 'pass', skip: 'skip', fail: 'fail', info: 'info' };

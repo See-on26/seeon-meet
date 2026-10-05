@@ -42,3 +42,29 @@ test('무발화 해설은 틈을 다시 고르지 않고 침묵 시점에 끼운
   assert.equal(isAnchoredCaption({ narrationClass: 'deixis' }), false);
   assert.equal(isAnchoredCaption(null), false);
 });
+
+test('보류는 건 횟수만큼 풀어야 풀린다 — 겹친 질문의 앞 질문이 뒤 질문의 보류를 풀지 않는다', () => {
+  const deliveredList = [];
+  const gate = new NarrationHoldGate({ deliver: (item) => deliveredList.push(item) });
+  gate.hold();
+  gate.hold();
+  gate.submit('a');
+  assert.equal(gate.release(), 0);
+  assert.equal(gate.isHeld, true);
+  assert.deepEqual(deliveredList, []);
+  assert.equal(gate.release(), 1);
+  assert.equal(gate.isHeld, false);
+  assert.deepEqual(deliveredList, ['a']);
+  assert.equal(gate.release(), 0);
+  assert.equal(gate.isHeld, false);
+});
+
+test('deliverList 가 있으면 모은 해설을 한꺼번에 넘긴다', () => {
+  const batchList = [];
+  const gate = new NarrationHoldGate({ deliver: () => assert.fail('하나씩 넘기면 안 된다'), deliverList: (list) => batchList.push(list) });
+  gate.hold();
+  gate.submit('a');
+  gate.submit('b');
+  gate.release();
+  assert.deepEqual(batchList, [['a', 'b']]);
+});

@@ -11,12 +11,17 @@ import {
   computeAnswerWordBudget,
 } from '../core/mode/mode-policy.js';
 import { CONTEXT_TOKEN_BUDGET } from '../core/mode/context-budget.js';
+import {
+  createFeatureToggleStore, FEATURE_KEY_MAP, FEATURE_KEY_LIST, FEATURE_LABEL_MAP,
+  readFeatureKeyFromDigit, listDisabledNarrationClass, listDisabledFeatureLabel, isFeatureLockedDuringCapture,
+} from '../core/mode/feature-toggle-store.js';
 
 import { DelayBuffer, isCaptionDroppable, EXCESS_DROP_MS } from '../core/audio-renderer/delay-buffer.js';
 import { StreamDelaySource } from '../core/audio-renderer/stream-delay-source.js';
 import { NarrationScheduler } from '../core/audio-renderer/narration-scheduler.js';
 import { GapCandidateStore, resolveGapSearchFromMs } from '../core/audio-renderer/gap-candidate-store.js';
 import { isImmediateCaption, isAnchoredCaption, NarrationHoldGate } from '../core/audio-renderer/narration-entry.js';
+import { QUEUE_DROP_LABEL_MAP } from '../core/audio-renderer/narration-queue.js';
 import { QuestionRecorder } from '../core/command/question-recorder.js';
 import { MeetMicGuard } from '../core/command/meet-mic-guard.js';
 import { MicQuestionController, MIC_PHASE_MAP } from '../core/command/mic-question-controller.js';
@@ -78,9 +83,23 @@ function handleNarrationStatus(text) {
   $('stDelay').textContent = text || '–';
 }
 
+// 저장소에 접근할 수 없으면 이번 실행 동안만 메모리 상태로 쓴다.
+function readLocalStorage() {
+  try {
+    return window.localStorage;
+  } catch {
+    return null;
+  }
+}
+
+const featureToggleStore = createFeatureToggleStore({ storage: readLocalStorage() });
+const isNarrationEntryEnabled = (entry) => featureToggleStore.isClassOn(entry.narrationClass);
+
 const narrator = new CaptionNarrator({
   getLiveVideo: getPlaybackVideo,
   onStatus: handleNarrationStatus,
+  onDrop: handleNarrationDrop,
+  isEntryEnabled: isNarrationEntryEnabled,
   getRateRange: () => getCatchupRateRange({ mode: getCurrentMode() }),
   isCatchupDelegated: () => Boolean(delayBuffer),
 });
@@ -88,7 +107,10 @@ const narrator = new CaptionNarrator({
 let narrationMixer = null;
 
 const getNarrationPlayer = () => narrationMixer || narrator;
-const narrationGate = new NarrationHoldGate({ deliver: (wav) => getNarrationPlayer()?.queueCaption(wav) });
+const narrationGate = new NarrationHoldGate({
+  deliver: (entry) => getNarrationPlayer()?.queueCaption(entry),
+  deliverList: (entryList) => getNarrationPlayer()?.queueCaptionList(entryList),
+});
 const audioMeter = new AudioMeter();
 
 function markDebug({ stage, verdict, reason, detail = '', narrationType = null }) {
@@ -214,7 +236,9 @@ function buildWordBudgetMap() {
 function startNarrationPlayer({ stream }) {
   const policy = getModePolicy({ mode: getCurrentMode() });
   if (policy?.isMixed) {
-    narrationMixer = new NarrationMixer({ onStatus: handleNarrationStatus });
+    narrationMixer = new NarrationMixer({
+      onStatus: handleNarrationStatus, onDrop: handleNarrationDrop, isEntryEnabled: isNarrationEntryEnabled,
+    });
     narrationMixer.start(stream);
 
     captureSource.detachDirectAudio();
@@ -272,9 +296,9 @@ function startDelayBufferIfNeeded({ fromTimeMs = null } = {}) {
 
   narrationScheduler = new NarrationScheduler({
     getPlaybackTimeMs: () => (delayBuffer ? delayBuffer.getDelayedTimeMs() : Infinity),
-    onDue: ({ wavArrayBuffer, captionCaptureMs }) => {
+    onDue: ({ entry, captionCaptureMs }) => {
       console.log(`[delay] 삽입 시점 도달 (영상 ${Math.round(captionCaptureMs)}ms 지점)`);
-      narrationGate.submit(wavArrayBuffer);
+      narrationGate.submit({ ...entry, dueAt: performance.now() });
     },
   });
   narrationScheduler.start();
@@ -482,7 +506,6 @@ let experimentSeq = 0;
 
 let currentSessionId = null;
 
-let isSummaryEnabled = true;
 let deixisFrameSeq = 0;
 
 const pointingLocator = new PointingLocator({ rowCount: 18, colCount: 32, cellChangeThreshold: 4 });
@@ -735,6 +758,8 @@ function resolveDomSpeakerForPoll() {
 
 async function pollSpeakerIdentity() {
   if (!isPipelineEnabled() || isExperimentPaused || !captureSource.isActive) return;
+  // 화자 안내를 끄면 안내만 막는 것이 아니라 화자 판별(DOM·VLM) 자체를 하지 않는다.
+  if (!featureToggleStore.isOn(FEATURE_KEY_MAP.speakerIdentity)) return;
   if (isSpeakerRequestInFlight) return;
   if (performance.now() - lastAudioActiveAt > SPEAKER_VOICE_IDLE_MS) return;
   const wordBudget = buildWordBudget({ narrationType: NARRATION_TYPE_MAP.speakerIdentity });
@@ -793,6 +818,7 @@ async function pollSpeakerIdentity() {
 }
 
 function getSpeakerHint() {
+  if (!featureToggleStore.isOn(FEATURE_KEY_MAP.speakerIdentity)) return null;
   const domName = roiStore.getCurrentSpeakerName();
   if (domName) return domName;
   const isFresh = performance.now() - lastResolvedSpeakerAt <= SPEAKER_HINT_TTL_MS;
@@ -1118,16 +1144,90 @@ function handleUserCommand({ command }) {
 }
 window.seeon.onUserCommand(handleUserCommand);
 
-function toggleSummaryEnabled() {
-  isSummaryEnabled = !isSummaryEnabled;
-  const stateText = isSummaryEnabled ? '켜짐' : '꺼짐';
-  showNotice(`회의 요약 ${stateText}`);
-  markDebug({
-    stage: DEBUG_STAGE_MAP.session, verdict: DEBUG_VERDICT_MAP.info,
-    reason: '회의 요약 토글', detail: `회의 요약 ${stateText}`,
+// 기능별 켜기·끄기(C15). 페이지 전환·화자 안내를 꺼도 데이터는 계속 모으고 main 이 캡션만 내보내지 않는다.
+
+// 설정 스위치는 스크린리더가 바뀐 상태(aria-checked)를 읽으므로 화면 알림만 띄운다. 단축키는 따로 읽어 준다.
+let isSwitchToggle = false;
+
+function isFeatureLockedNow(key) {
+  return isFeatureLockedDuringCapture(key) && captureSource.isActive;
+}
+
+function toggleFeature({ key, isFromSwitch = false }) {
+  if (isFeatureLockedNow(key)) {
+    announce(`${FEATURE_LABEL_MAP[key]}는 회의 캡처를 시작하기 전에만 바꿀 수 있어요`);
+    return;
+  }
+  isSwitchToggle = isFromSwitch;
+  try {
+    featureToggleStore.toggle(key);
+  } finally {
+    isSwitchToggle = false;
+  }
+}
+
+function syncFeatureTogglesToMain() {
+  const disabledClassList = listDisabledNarrationClass({ store: featureToggleStore });
+  window.seeon.setFeatureToggles({ disabledClassList }).catch((error) => {
+    console.warn('[toggle] main 에 기능 토글을 알리지 못함:', error.message);
   });
 }
-window.seeon.onSummaryToggle(toggleSummaryEnabled);
+
+function buildFeatureToggleList() {
+  const container = $('featureToggleList');
+  if (!container) return;
+  container.replaceChildren(...FEATURE_KEY_LIST.map((key, index) => {
+    const shortcutText = `Ctrl+Shift+${index + 1}`;
+    const row = document.createElement('div');
+    row.className = 'set-row';
+    const label = document.createElement('span');
+    label.className = 'label';
+    label.textContent = `${FEATURE_LABEL_MAP[key]} (${shortcutText})`;
+    label.setAttribute('aria-hidden', 'true');
+    const button = document.createElement('button');
+    button.type = 'button';
+    button.className = 'set-toggle';
+    button.dataset.feature = key;
+    button.setAttribute('role', 'switch');
+    button.setAttribute('aria-label', `${FEATURE_LABEL_MAP[key]}, 단축키 Control Shift ${index + 1}`);
+    button.addEventListener('click', () => toggleFeature({ key, isFromSwitch: true }));
+    row.append(label, button);
+    return row;
+  }));
+  syncFeatureToggleUi();
+}
+
+// 버튼을 다시 만들지 않고 상태만 바꾼다. 스크린리더 포커스가 누른 스위치에 남는다.
+function syncFeatureToggleUi() {
+  for (const button of document.querySelectorAll('#featureToggleList [data-feature]')) {
+    const isOn = featureToggleStore.isOn(button.dataset.feature);
+    button.classList.toggle('on', isOn);
+    button.setAttribute('aria-checked', String(isOn));
+    // 잠긴 스위치도 초점을 받아 눌렀을 때 왜 못 바꾸는지 들을 수 있게 disabled 대신 aria-disabled 를 쓴다.
+    button.setAttribute('aria-disabled', String(isFeatureLockedNow(button.dataset.feature)));
+    button.textContent = isOn ? '켜짐' : '꺼짐';
+  }
+}
+
+featureToggleStore.subscribe(({ key, isOn }) => {
+  const stateText = isOn ? '켜짐' : '꺼짐';
+  if (isSwitchToggle) showNotice(`${FEATURE_LABEL_MAP[key]} ${stateText}`);
+  else announce(`${FEATURE_LABEL_MAP[key]} ${stateText}`);
+  markDebug({
+    stage: DEBUG_STAGE_MAP.toggle, verdict: DEBUG_VERDICT_MAP.info,
+    reason: '기능 토글', detail: `${FEATURE_LABEL_MAP[key]} ${stateText}`,
+  });
+  syncFeatureTogglesToMain();
+  syncFeatureToggleUi();
+});
+
+window.seeon.onSummaryToggle(() => toggleFeature({ key: FEATURE_KEY_MAP.meetingSummary }));
+window.seeon.onFeatureToggle(({ digit }) => {
+  const key = readFeatureKeyFromDigit(digit);
+  if (key) toggleFeature({ key });
+});
+buildFeatureToggleList();
+syncFeatureTogglesToMain();
 
 // 화면 공유가 검게 보일 때 Meet 화면만 다시 불러온다. 회의 중이었다면 다시 참여해야 한다.
 $('meetReloadBtn').addEventListener('click', () => {
@@ -1144,12 +1244,24 @@ window.seeon.onMeetReloaded(({ reason }) => {
   });
 });
 
+// 실제 키 입력은 main 이 먼저 받아 막는다(before-input-event). 여기는 main 을 거치지 않은 입력용이다.
+const FEATURE_TOGGLE_CODE_PATTERN = /^Digit([1-3])$/;
+
 document.addEventListener('keydown', (event) => {
-  if (!(event.ctrlKey || event.metaKey) || event.shiftKey || event.altKey) return;
+  if (!(event.ctrlKey || event.metaKey) || event.altKey) return;
+  if (event.shiftKey) {
+    if (event.repeat) return;
+    const matched = FEATURE_TOGGLE_CODE_PATTERN.exec(event.code);
+    const key = matched ? readFeatureKeyFromDigit(matched[1]) : null;
+    if (!key) return;
+    event.preventDefault();
+    toggleFeature({ key });
+    return;
+  }
 
   if (event.key === SUMMARY_TOGGLE_KEY) {
     event.preventDefault();
-    toggleSummaryEnabled();
+    toggleFeature({ key: FEATURE_KEY_MAP.meetingSummary });
     return;
   }
   const command = USER_COMMAND_KEY_MAP[event.key];
@@ -1230,11 +1342,15 @@ async function emitCaption(payload, { leaderHandle = null } = {}) {
     leaderHandle?.settle({ status: LEADER_STATUS_MAP.unscheduled });
     return;
   }
-  const wavArrayBuffer = payload.wavData.buffer.slice(
-    payload.wavData.byteOffset, payload.wavData.byteOffset + payload.wavData.byteLength);
+  const entry = {
+    wavArrayBuffer: payload.wavData.buffer.slice(
+      payload.wavData.byteOffset, payload.wavData.byteOffset + payload.wavData.byteLength),
+    narrationClass: payload.narrationClass, slideLabel: payload.slideLabel ?? null,
+    source: payload.source, text: payload.text, ts: payload.ts, eventTimeMs: captionCaptureMs,
+  };
   if (isImmediateCaption(payload)) {
     leaderHandle?.settle({ status: LEADER_STATUS_MAP.unscheduled });
-    getNarrationPlayer()?.queueCaption(wavArrayBuffer);
+    getNarrationPlayer()?.queueCaption({ ...entry, dueAt: performance.now() });
     return;
   }
   const insertVideoTimeMs = isFollower
@@ -1242,7 +1358,7 @@ async function emitCaption(payload, { leaderHandle = null } = {}) {
     : isAnchoredCaption(payload) ? captionCaptureMs : await resolveInsertionTimeMs({ payload, captionCaptureMs });
   leaderHandle?.settle({ status: LEADER_STATUS_MAP.scheduled, insertVideoTimeMs });
   if (insertVideoTimeMs === null) return;
-  scheduleNarration({ wavArrayBuffer, captionCaptureMs: insertVideoTimeMs });
+  scheduleNarration({ entry, captionCaptureMs: insertVideoTimeMs });
 }
 
 function emitCaptionSafely(payload, { leaderHandle = null } = {}) {
@@ -1290,7 +1406,7 @@ window.seeon.onSummaryProgress(({ message }) => {
   });
 });
 
-function scheduleNarration({ wavArrayBuffer, captionCaptureMs }) {
+function scheduleNarration({ entry, captionCaptureMs }) {
   if (delayBuffer) {
     const excessMs = delayBuffer.getExcessMs();
     if (isCaptionDroppable({ excessMs, dropThresholdMs: EXCESS_DROP_MS })) {
@@ -1305,14 +1421,32 @@ function scheduleNarration({ wavArrayBuffer, captionCaptureMs }) {
     }
   }
   if (!narrationScheduler || !Number.isFinite(captionCaptureMs)) {
-    narrationGate.submit(wavArrayBuffer);
+    narrationGate.submit({ ...entry, dueAt: performance.now() });
     return;
   }
   const waitMs = Math.max(0, captionCaptureMs - delayBuffer.getDelayedTimeMs());
   if (waitMs > 0) {
     console.log(`[delay] 캡션 삽입 대기 ~${Math.round(waitMs)}ms (영상 ${Math.round(captionCaptureMs)}ms 지점)`);
   }
-  narrationScheduler.schedule({ wavArrayBuffer, captionCaptureMs });
+  narrationScheduler.schedule({ entry, captionCaptureMs });
+}
+
+// 재생 대기 줄에서 버려지거나 질문 답에 끊긴 해설. main 이 중복 억제·재설명 금지 기록을 되돌리게 알린다.
+function handleNarrationDrop({ entry, reason, waitedMs = null }) {
+  window.seeon.reportNarrationDropped({
+    ts: entry.ts, text: entry.text, slideLabel: entry.slideLabel, source: entry.source,
+    narrationClass: entry.narrationClass, reason,
+  });
+  const label = QUEUE_DROP_LABEL_MAP[reason] || reason;
+  const waitedText = Number.isFinite(waitedMs) ? ` · 대기 ${(waitedMs / 1000).toFixed(1)}초` : '';
+  console.log(`[queue] ${label} [${entry.narrationClass}] "${entry.text}"${waitedText}`);
+  markDebug({
+    stage: DEBUG_STAGE_MAP.queue, verdict: DEBUG_VERDICT_MAP.skip,
+    narrationType: entry.source || null,
+    reason: label,
+    detail: `"${entry.text}" · 분류=${entry.narrationClass}`
+      + `${entry.slideLabel !== null ? ` · 슬라이드 ${entry.slideLabel}` : ''}${waitedText}`,
+  });
 }
 
 function isNarrationEchoWindow() {
@@ -1424,6 +1558,11 @@ async function attemptStartExperiment() {
   $('toggleBtn').disabled = true;
   try {
     showNotice('회의 캡처를 시작했습니다 — 화면 해설이 곧 표시됩니다.');
+    // 꺼 둔 기능은 다음 실행에도 남는다. 꺼진 줄 모르고 회의를 듣지 않게 시작할 때 알린다.
+    const disabledLabelList = listDisabledFeatureLabel({ store: featureToggleStore });
+    if (disabledLabelList.length) {
+      announce(`꺼져 있는 기능: ${disabledLabelList.join(', ')}. 설정이나 Control Shift 숫자로 켤 수 있어요`);
+    }
 
     const sessionResult = await window.seeon.startPipelineSession({ mode: getCurrentMode() }).catch(() => null);
     currentSessionId = sessionResult?.sessionId || null;
@@ -1490,6 +1629,7 @@ async function attemptStartExperiment() {
     setPauseUi(false);
     $('pauseBtn').disabled = false;
     setToggleUi(true);
+    syncFeatureToggleUi();
     renderModeButtons();
 
     if (!audioTrack) {
@@ -1562,6 +1702,7 @@ function stopExperiment() {
   $('stRes').textContent = $('stDelay').textContent = '–';
   $('stBuffer').textContent = '–';
   setToggleUi(false);
+  syncFeatureToggleUi();
   renderModeButtons();
   markDebug({
     stage: DEBUG_STAGE_MAP.session, verdict: DEBUG_VERDICT_MAP.info,
@@ -1589,7 +1730,8 @@ function finalizeSession({ asrFinalFlushPromise }) {
 }
 
 async function requestMeetingSummary() {
-  if (!isSummaryEnabled) {
+  if (!featureToggleStore.isOn(FEATURE_KEY_MAP.meetingSummary)) {
+    announce('회의 요약이 꺼져 있어 요약을 만들지 않았어요');
     markDebug({
       stage: DEBUG_STAGE_MAP.session, verdict: DEBUG_VERDICT_MAP.skip,
       reason: '회의 요약 꺼짐', detail: '사용자가 요약 기능을 껐습니다',
@@ -1697,9 +1839,17 @@ async function beginMicQuestionSession() {
   await meetMicGuard.muteForRecording();
 }
 
-async function endMicQuestionSession() {
+// 녹음을 마친 경우는 답이 나온 뒤(releaseMicAnswerHold) 보류를 푼다. 취소면 바로 푼다.
+async function endMicQuestionSession({ isAwaitingAnswer = false } = {}) {
   await meetMicGuard.restoreAfterRecording();
-  narrationGate.release();
+  if (!isAwaitingAnswer) narrationGate.release();
+}
+
+// 음성 인식·답 생성이 멈춰도 자동 해설이 계속 막히지 않게 답을 기다리는 시간에 상한을 둔다.
+const MIC_ANSWER_HOLD_MAX_MS = 20000;
+
+function askQuestionFromAudioWithinHold(event) {
+  return Promise.race([askQuestionFromAudio(event), waitFor({ ms: MIC_ANSWER_HOLD_MAX_MS })]);
 }
 
 async function askQuestionFromAudio({ buffer, startTs }) {
@@ -1728,7 +1878,8 @@ micQuestionController = new MicQuestionController({
   endSession: endMicQuestionSession,
   announce,
   setUi: setMicUi,
-  onQuestionAudio: askQuestionFromAudio,
+  onQuestionAudio: askQuestionFromAudioWithinHold,
+  onAnswerSettled: () => narrationGate.release(),
 });
 
 $('cmdMic').addEventListener('click', () => { micQuestionController.toggle(); });
@@ -1737,20 +1888,9 @@ for (const chip of $('cmdChips').querySelectorAll('.chip')) {
   chip.addEventListener('click', () => handleUserCommand({ command: chip.dataset.command }));
 }
 
-function syncSettingsUi() {
-  const summary = $('setSummary');
-  summary.classList.toggle('on', isSummaryEnabled);
-  summary.textContent = isSummaryEnabled ? '켜짐' : '꺼짐';
-}
-
 $('settingsBtn').addEventListener('click', () => {
   const panel = $('settingsPanel');
   panel.hidden = !panel.hidden;
   $('settingsBtn').classList.toggle('on', !panel.hidden);
-  if (!panel.hidden) syncSettingsUi();
+  if (!panel.hidden) syncFeatureToggleUi();
 });
-$('setSummary').addEventListener('click', () => {
-  toggleSummaryEnabled();
-  syncSettingsUi();
-});
-syncSettingsUi();

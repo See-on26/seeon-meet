@@ -10,37 +10,46 @@ export function isAnchoredCaption(payload) {
   return payload?.narrationClass === NARRATION_CLASS_MAP.silenceBased;
 }
 
-// 마이크 질문을 녹음하는 동안 자동 해설이 사용자 말과 겹치지 않게 잠시 모아 둔다.
+// 마이크 질문을 녹음하고 답이 나올 때까지 자동 해설이 사용자 말·답과 겹치지 않게 잠시 모아 둔다.
+// 질문이 겹칠 수 있어 보류 횟수를 센다. 앞 질문이 끝나도 뒤 질문의 보류는 유지된다.
 export class NarrationHoldGate {
-  constructor({ deliver }) {
+  constructor({ deliver, deliverList = null }) {
     this.deliver = deliver;
-    this.isHeld = false;
+    this.deliverList = deliverList;
+    this.holdCount = 0;
     this.heldList = [];
   }
 
-  submit(wavArrayBuffer) {
+  get isHeld() {
+    return this.holdCount > 0;
+  }
+
+  submit(item) {
     if (this.isHeld) {
-      this.heldList.push(wavArrayBuffer);
+      this.heldList.push(item);
       return false;
     }
-    this.deliver(wavArrayBuffer);
+    this.deliver(item);
     return true;
   }
 
   hold() {
-    this.isHeld = true;
+    this.holdCount += 1;
   }
 
   release() {
-    this.isHeld = false;
+    this.holdCount = Math.max(0, this.holdCount - 1);
+    if (this.isHeld) return 0;
     const heldList = this.heldList;
     this.heldList = [];
-    for (const wavArrayBuffer of heldList) this.deliver(wavArrayBuffer);
+    if (!heldList.length) return 0;
+    if (this.deliverList) this.deliverList(heldList);
+    else for (const item of heldList) this.deliver(item);
     return heldList.length;
   }
 
   clear() {
-    this.isHeld = false;
+    this.holdCount = 0;
     this.heldList = [];
   }
 }
