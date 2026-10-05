@@ -51,6 +51,7 @@ import { SlideDwellGate, DWELL_STATE_MAP } from '../core/trigger/slide-dwell-gat
 import { computeGridEmbedding } from '../core/trigger/frame-embedding.js';
 import { showModal } from './modal.js';
 import { formatMeetingLabel } from '../core/archive/meeting-label.js';
+import { computeAnchoredPanelPosition } from '../core/ui/anchored-panel-position.js';
 
 import { RoiStore, SPEAKER_VERDICT_MAP } from '../core/roi/roi-store.js';
 import { MeetCaptureSession } from '../core/capture/meet-capture-session.js';
@@ -1942,9 +1943,40 @@ for (const chip of $('cmdChips').querySelectorAll('.chip')) {
   chip.addEventListener('click', () => handleUserCommand({ command: chip.dataset.command }));
 }
 
-$('settingsBtn').addEventListener('click', () => {
+// 설정 패널은 버튼 바로 아래에 띄운다. 화면이 좁아 머리줄이 접히면 버튼이 내려가는데,
+// 고정 위치로 띄우면 패널이 버튼을 덮어 다시 눌러 닫을 수 없다. Esc·바깥 클릭으로도 닫는다.
+function placeSettingsPanel() {
   const panel = $('settingsPanel');
-  panel.hidden = !panel.hidden;
-  $('settingsBtn').classList.toggle('on', !panel.hidden);
-  if (!panel.hidden) syncFeatureToggleUi();
+  const { top, right, maxHeight } = computeAnchoredPanelPosition({
+    anchorRect: $('settingsBtn').getBoundingClientRect(),
+    viewportWidth: window.innerWidth, viewportHeight: window.innerHeight, panelWidth: panel.offsetWidth,
+  });
+  panel.style.top = `${top}px`;
+  panel.style.right = `${right}px`;
+  panel.style.maxHeight = `${maxHeight}px`;
+}
+
+function setSettingsPanelOpen(isOpen) {
+  const panel = $('settingsPanel');
+  panel.hidden = !isOpen;
+  $('settingsBtn').classList.toggle('on', isOpen);
+  $('settingsBtn').setAttribute('aria-expanded', String(isOpen));
+  if (!isOpen) return;
+  placeSettingsPanel();
+  syncFeatureToggleUi();
+}
+
+$('settingsBtn').addEventListener('click', () => setSettingsPanelOpen($('settingsPanel').hidden));
+window.addEventListener('resize', () => {
+  if (!$('settingsPanel').hidden) placeSettingsPanel();
+});
+document.addEventListener('keydown', (event) => {
+  if (event.key !== 'Escape' || $('settingsPanel').hidden) return;
+  setSettingsPanelOpen(false);
+  $('settingsBtn').focus();
+});
+document.addEventListener('pointerdown', (event) => {
+  if ($('settingsPanel').hidden) return;
+  if ($('settingsPanel').contains(event.target) || $('settingsBtn').contains(event.target)) return;
+  setSettingsPanelOpen(false);
 });
