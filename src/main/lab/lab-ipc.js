@@ -1,5 +1,5 @@
 const path = require('path');
-const { dialog, shell } = require('electron');
+const { BrowserWindow, dialog, shell } = require('electron');
 const { OUT_DIR } = require('../paths');
 const { createRunRecorder } = require('./run-recorder');
 const { createRunController } = require('./run-controller');
@@ -10,6 +10,8 @@ const { buildFeatureTogglePreset } = require('./feature-toggle-preset');
 const { readGitInfo } = require('./git-info');
 const { finalizeRun } = require('./export/finalize-run');
 const { pickModelConfig } = require('./export/run-info');
+const { createDemoWindowManager } = require('./demo-window');
+const { buildDemoCard } = require('./demo-card');
 
 const LAB_OUT_DIR = path.join(OUT_DIR, 'lab');
 const VIDEO_EXTENSION_LIST = ['mp4', 'mov', 'webm', 'mkv', 'm4v'];
@@ -17,6 +19,7 @@ const VIDEO_EXTENSION_LIST = ['mp4', 'mov', 'webm', 'mkv', 'm4v'];
 function registerLabIpc({ ipcMain, labWindow, pipelineConfig, onRunFinished = () => {} }) {
   // 처음 뜰 때부터 평가 설정으로 둔다. 실행마다 조작 바 값으로 바꾸고 viewer 를 새로 불러 적용한다.
   const presetState = { isEvalPreset: true };
+  const demoWindowManager = createDemoWindowManager({ BrowserWindow });
   const sendStatus = (status) => {
     const controlView = labWindow.getControlView();
     if (controlView && !controlView.webContents.isDestroyed()) controlView.webContents.send('lab-status', status);
@@ -33,6 +36,8 @@ function registerLabIpc({ ipcMain, labWindow, pipelineConfig, onRunFinished = ()
     modelConfig: pickModelConfig(pipelineConfig),
     getLayout: labWindow.getLayout,
     notify: sendStatus,
+    // 해설이 들리기 시작할 때 시연 창에 카드를 보낸다(시연 창이 닫혀 있으면 버린다).
+    onPlayback: ({ playback, caption }) => demoWindowManager.sendCard(buildDemoCard({ playback, caption })),
     onRunFinished,
   });
   labWindow.setCaptureRequestListener(controller.handleCaptureRequested);
@@ -59,6 +64,10 @@ function registerLabIpc({ ipcMain, labWindow, pipelineConfig, onRunFinished = ()
   ipcMain.handle('lab-stop', () => controller.stop());
   ipcMain.handle('lab-roi-edit', (_event, { isEditing }) => controller.setRoiEditing({ isEditing: Boolean(isEditing) }));
   ipcMain.handle('lab-status', () => controller.getStatus());
+  ipcMain.handle('lab-open-demo', () => {
+    demoWindowManager.open();
+    return { isOk: true };
+  });
   ipcMain.handle('lab-open-result', async () => {
     const { lastRunDir, runDir } = controller.getStatus();
     const targetDir = lastRunDir || runDir;

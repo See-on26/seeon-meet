@@ -9,6 +9,7 @@ contextBridge.exposeInMainWorld('labControl', {
   stop: () => ipcRenderer.invoke('lab-stop'),
   setRoiEditing: ({ isEditing }) => ipcRenderer.invoke('lab-roi-edit', { isEditing }),
   openResult: () => ipcRenderer.invoke('lab-open-result'),
+  openDemo: () => ipcRenderer.invoke('lab-open-demo'),
   getStatus: () => ipcRenderer.invoke('lab-status'),
   onStatus: (callback) => { ipcRenderer.on('lab-status', (_event, status) => callback(status)); },
 });

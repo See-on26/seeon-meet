@@ -60,6 +60,7 @@ $('pauseBtn').addEventListener('click', () => {
 
 $('stopBtn').addEventListener('click', () => window.labControl.stop());
 $('resultBtn').addEventListener('click', () => window.labControl.openResult());
+$('demoBtn').addEventListener('click', () => window.labControl.openDemo());
 
 window.labControl.onStatus(render);
 window.labControl.getStatus().then(render);
