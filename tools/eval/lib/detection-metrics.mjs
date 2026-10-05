@@ -1,4 +1,5 @@
 import { TARGET_TYPE_LIST, LANGUAGE_LIST } from './eval-types.mjs';
+import { SYSTEM_MISS_REASON_MAP } from './score-rows.mjs';
 
 export const METRIC_KIND_MAP = { judge: 'judge', system: 'system' };
 
@@ -34,10 +35,26 @@ export function computeConfusion({ rowList, predictKey }) {
   };
 }
 
-// 경로 오류 행은 지표에서 빼고 개수만 따로 센다.
+// 경로 오류 행(판정기 호출이 실패해 판정 결과를 모름)을 지표마다 어떻게 셀지 정한다.
+// 판정기 성능에서는 모두 뺀다. 시스템 성능에서는 production 트리거가 잡지 않은 위치만 넣는다 —
+// production 은 그 위치에서 판정기를 부르지 않으므로 판정과 상관없이 "놓침(trigger_miss)"으로 정해진다.
+// 트리거가 잡은 위치는 시스템 결과도 판정에 달려 있어 뺀다. 지표에 안 넣는 행이면 null.
+function resolveMetricRow({ row, metricKind }) {
+  if (!row.pathError) return row;
+  if (metricKind === METRIC_KIND_MAP.system && row.isProductionTriggered === false) {
+    return { ...row, isSystemPass: false, systemMissReason: SYSTEM_MISS_REASON_MAP.triggerMiss };
+  }
+  return null;
+}
+
+function listMetricRow({ rowList, metricKind }) {
+  return rowList.map((row) => resolveMetricRow({ row, metricKind })).filter(Boolean);
+}
+
+// 경로 오류 행은 resolveMetricRow 규칙대로 넣거나 빼고, 개수는 countPathError 가 따로 센다.
 export function buildMetricTable({ rowList, metricKind }) {
   const predictKey = PREDICT_KEY_MAP[metricKind];
-  const validList = rowList.filter((row) => !row.pathError);
+  const validList = listMetricRow({ rowList, metricKind });
   const table = { [ALL_TYPE_KEY]: computeConfusion({ rowList: validList, predictKey }) };
   for (const type of TARGET_TYPE_LIST) {
     table[type] = computeConfusion({ rowList: validList.filter((row) => row.type === type), predictKey });
@@ -63,13 +80,13 @@ export function countPathError({ rowList }) {
 export function summarizeMissReason({ rowList }) {
   const judgeReasonMap = {};
   const systemReasonMap = {};
-  for (const row of rowList) {
-    if (row.pathError || !row.truthIsGap) continue;
-    if (!row.isJudgePass) increase(judgeReasonMap, row.judgeReason || '사유 없음');
-    if (!row.isSystemPass) {
-      increase(systemReasonMap, row.systemMissReason === 'judge_block'
-        ? `judge_block:${row.judgeReason || '사유 없음'}` : row.systemMissReason);
-    }
+  for (const row of listMetricRow({ rowList, metricKind: METRIC_KIND_MAP.judge })) {
+    if (row.truthIsGap && !row.isJudgePass) increase(judgeReasonMap, row.judgeReason || '사유 없음');
+  }
+  for (const row of listMetricRow({ rowList, metricKind: METRIC_KIND_MAP.system })) {
+    if (!row.truthIsGap || row.isSystemPass) continue;
+    increase(systemReasonMap, row.systemMissReason === SYSTEM_MISS_REASON_MAP.judgeBlock
+      ? `${SYSTEM_MISS_REASON_MAP.judgeBlock}:${row.judgeReason || '사유 없음'}` : row.systemMissReason);
   }
   return { judgeReasonMap, systemReasonMap };
 }
@@ -142,17 +159,21 @@ export function buildModeMetrics({ mode, rowListByRepeat }) {
 }
 
 // 틀린 사례: 판정기 근거와 정답 근거를 나란히 둔다(회의록 3.1.6 (3) 오류 분석).
+// 경로 오류 행은 지표와 같은 규칙으로 넣고, 어느 호출이 실패했는지 pathError 로 남긴다.
 export function listErrorCase({ rowList }) {
   const errorList = [];
   for (const row of rowList) {
-    if (row.pathError) continue;
     for (const metricKind of Object.values(METRIC_KIND_MAP)) {
-      const predicted = row[PREDICT_KEY_MAP[metricKind]] === true;
-      if (predicted === row.truthIsGap) continue;
+      const metricRow = resolveMetricRow({ row, metricKind });
+      if (!metricRow) continue;
+      const predicted = metricRow[PREDICT_KEY_MAP[metricKind]] === true;
+      if (predicted === metricRow.truthIsGap) continue;
       errorList.push({
-        metric: metricKind, itemId: row.itemId, language: row.language, posId: row.posId, type: row.type, mode: row.mode, repeatIndex: row.repeatIndex,
-        trigger: row.trigger, truthIsGap: row.truthIsGap, predicted, judgeReason: row.judgeReason,
-        systemMissReason: row.systemMissReason, truthRationale: row.truthRationale, context: row.context,
+        metric: metricKind, itemId: metricRow.itemId, language: metricRow.language, posId: metricRow.posId, type: metricRow.type,
+        mode: metricRow.mode, repeatIndex: metricRow.repeatIndex,
+        trigger: metricRow.trigger, truthIsGap: metricRow.truthIsGap, predicted, judgeReason: metricRow.judgeReason,
+        systemMissReason: metricRow.systemMissReason, truthRationale: metricRow.truthRationale, context: metricRow.context,
+        pathError: metricRow.pathError ?? null,
       });
     }
   }

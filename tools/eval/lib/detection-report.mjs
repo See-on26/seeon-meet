@@ -16,15 +16,22 @@ export const KNOWN_PRODUCTION_GAP_LIST = [
   '3-3 추상적 척도는 production 트리거가 없고, 판정기가 넘겨도 기본 설정(SEEON_ROUTER_SCALE_ENABLED 없음)에서는 생성하지 않는다(scale_disabled).',
 ];
 
+// 경로 오류 행을 지표에 넣는 규칙(detection-metrics.mjs resolveMetricRow)을 보고서에 그대로 적는다.
+const PATH_ERROR_RULE_TEXT = '판정기 호출이 실패한 위치다. 판정기 성능에서는 모두 뺀다.'
+  + ' 시스템 성능에서는 production 트리거가 잡지 않은 위치만 trigger_miss(놓침)로 넣는다 — production 은 그 위치에서 판정기를 부르지 않으므로 결과가 정해진다.'
+  + ' 트리거가 잡은 위치는 시스템 결과도 판정에 달려 있어 시스템 성능에서도 뺀다. 그래서 두 표의 후보 수가 다를 수 있다.';
+
 const formatWindowMs = (ms) => (ms === null || ms === undefined ? '항목 전체' : `${ms / 1000}초`);
 const formatContextWindow = (contextWindow) => `앞 ${formatWindowMs(contextWindow.beforeMs)}·뒤 ${formatWindowMs(contextWindow.afterMs)}`;
 
 const formatPercent = (value) => (value === null || value === undefined ? '–' : `${(value * 100).toFixed(1)}%`);
 
+// 경로 오류로 반복마다 분모가 달라 값이 없는(분모 0) 반복이 생긴다. 평균에 든 반복이 요청보다 적으면 (n=k) 로 알린다.
 function formatRate({ summaryCell, repeatCount }) {
   if (summaryCell.mean === null) return '–';
-  if (repeatCount <= 1 || summaryCell.std === null) return formatPercent(summaryCell.mean);
-  return `${formatPercent(summaryCell.mean)} ± ${(summaryCell.std * 100).toFixed(1)}`;
+  const spread = repeatCount > 1 && summaryCell.std !== null ? ` ± ${(summaryCell.std * 100).toFixed(1)}` : '';
+  const sampleNote = summaryCell.n < repeatCount ? ` (n=${summaryCell.n})` : '';
+  return `${formatPercent(summaryCell.mean)}${spread}${sampleNote}`;
 }
 
 function formatTypeLabel(typeKey) {
@@ -44,7 +51,10 @@ function buildMetricTable({ title, firstTable, summary, repeatCount }) {
     lineList.push(`| ${formatTypeLabel(typeKey)} | ${counts.count} | ${formatPercent(counts.gapRatio)} | ${counts.tp} | ${counts.fp} | ${counts.fn} | ${counts.tn}`
       + ` | ${rate('precision')} | ${rate('recall')} | ${rate('f1')} | ${rate('accuracy')} |`);
   }
-  if (repeatCount > 1) lineList.push('', `개수는 반복 1 기준, 비율은 반복 ${repeatCount}회 평균 ± 표본 표준편차(%p).`);
+  if (repeatCount > 1) {
+    lineList.push('', `후보·공백 비율·TP·FP·FN·TN 은 반복 1 기준이고, 정밀도·재현율·F1·정확도는 반복 ${repeatCount}회 평균 ± 표본 표준편차(%p)다.`
+      + ` 경로 오류로 반복마다 분모가 달라질 수 있어, 분모가 0 인 반복을 빼고 평균한 칸은 (n=평균에 든 반복 수) 를 붙인다.`);
+  }
   return lineList.join('\n');
 }
 
@@ -100,7 +110,9 @@ function buildModeSection(modeMetrics) {
     '### 언어별',
     '',
     ...buildLanguageSectionList(modeMetrics).flatMap((section) => [section, '']),
-    '### 경로 오류 (지표에서 뺌)',
+    '### 경로 오류',
+    '',
+    PATH_ERROR_RULE_TEXT,
     '',
     ...pathErrorList.map((line) => `- ${line}`),
   ].join('\n');

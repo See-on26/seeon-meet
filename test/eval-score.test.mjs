@@ -139,7 +139,7 @@ test('보고서에 두 지표 표·언어별 표·FN 나누기·우회 단계·�
   assert.match(report, /약 5초 분량/);
 });
 
-test('경로 오류 행은 비율·FN·틀린 사례에서 빠지고 종류·종료 사유별로 따로 센다', () => {
+test('production 트리거가 잡은 위치의 경로 오류는 두 지표의 비율·FN·틀린 사례에서 빠지고 종류·종료 사유별로 따로 센다', () => {
   const pathErrorRow = {
     itemId: 'e', language: 'en', posId: 'q', type: 'value', mode: 'delayed', repeatIndex: 0,
     truthIsGap: true, pathError: 'parse', stopReason: 'max_tokens', isProductionTriggered: true,
@@ -159,6 +159,51 @@ test('경로 오류 행은 비율·FN·틀린 사례에서 빠지고 종류·종
   const report = buildDetectionReport({ runInfo: buildRunInfo({}), modeMetricsList: [modeMetrics] });
   assert.match(report, /#### 영어/, '경로 오류만 있는 언어도 표를 낸다');
   assert.match(report, /- 반복 1: 2건 \(parse 1, http 1 · 종료 사유 max_tokens 1, 없음 1\)/);
+});
+
+test('production 트리거가 안 잡은 위치의 경로 오류는 시스템 성능에서 trigger_miss 로 세고 판정기 성능에서는 뺀다', () => {
+  const untriggeredRow = {
+    itemId: 'u', language: 'en', posId: 'u1', type: 'demonstrative', mode: 'delayed', repeatIndex: 0,
+    truthIsGap: true, pathError: 'empty_text', stopReason: 'max_tokens', isProductionTriggered: false,
+  };
+  const rowList = [
+    untriggeredRow,
+    { ...untriggeredRow, posId: 'u2', truthIsGap: false },
+    { ...untriggeredRow, posId: 't1', isProductionTriggered: true },
+  ];
+  const pickCount = (confusion) => ({ tp: confusion.tp, fp: confusion.fp, fn: confusion.fn, tn: confusion.tn, count: confusion.count });
+  assert.equal(buildMetricTable({ rowList, metricKind: METRIC_KIND_MAP.judge }).all.count, 0, '판정기 결과는 알 수 없으므로 모두 뺀다');
+  assert.deepEqual(
+    pickCount(buildMetricTable({ rowList, metricKind: METRIC_KIND_MAP.system }).demonstrative),
+    { tp: 0, fp: 0, fn: 1, tn: 1, count: 2 },
+    '트리거가 잡은 위치(t1)는 시스템 결과도 알 수 없어 뺀다',
+  );
+  assert.deepEqual(summarizeMissReason({ rowList }), { judgeReasonMap: {}, systemReasonMap: { trigger_miss: 1 } });
+  assert.deepEqual(
+    listErrorCase({ rowList }).map((error) => [error.metric, error.posId, error.systemMissReason, error.pathError]),
+    [['system', 'u1', 'trigger_miss', 'empty_text']],
+  );
+  const modeMetrics = buildModeMetrics({ mode: 'delayed', rowListByRepeat: [rowList] });
+  assert.equal(modeMetrics.repeatList[0].byLanguage.en.system.all.fn, 1);
+  assert.equal(modeMetrics.repeatList[0].byLanguage.en.judge.all.count, 0);
+  assert.deepEqual(modeMetrics.missReason.byLanguage.en.systemReasonMap, { trigger_miss: 1 });
+  assert.equal(modeMetrics.repeatList[0].pathError.total, 3, '경로 오류 개수는 그대로 센다');
+});
+
+test('반복마다 분모가 달라 값이 있는 반복이 적은 칸은 (n=k) 를 붙이고 각주와 경로 오류 규칙을 적는다', () => {
+  const modeMetrics = buildModeMetrics({
+    mode: 'delayed',
+    rowListByRepeat: [
+      [row({ type: 'scale' }), row({})],
+      [row({ type: 'scale', pathError: 'parse', isProductionTriggered: true }), row({})],
+    ],
+  });
+  const report = buildDetectionReport({ runInfo: buildRunInfo({ repeatCount: 2 }), modeMetricsList: [modeMetrics] });
+  assert.match(report, /\| 3-3 추상적 척도 \| 1 \| 100\.0% \| 1 \| 0 \| 0 \| 0 \| 100\.0% \(n=1\) \| 100\.0% \(n=1\) \| 100\.0% \(n=1\) \| 100\.0% \(n=1\) \|/);
+  assert.match(report, /\| 2-1 지시대명사 \| 1 \| 100\.0% \| 1 \| 0 \| 0 \| 0 \| 100\.0% ± 0\.0 \| 100\.0% ± 0\.0 \|/);
+  assert.match(report, /후보·공백 비율·TP·FP·FN·TN 은 반복 1 기준/);
+  assert.match(report, /경로 오류로 반복마다 분모가 달라질 수 있어/);
+  assert.match(report, /시스템 성능에서는 production 트리거가 잡지 않은 위치만 trigger_miss/);
 });
 
 test('결과 폴더 시각 표기는 로컬 YYYYMMDD-HHmmss 다', () => {
