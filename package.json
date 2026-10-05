@@ -16,6 +16,7 @@
   },
   "devDependencies": {
     "electron": "^43.0.0",
+    "kiwi-nlp": "0.24.0",
     "puppeteer-core": "^24.23.0"
   }
 }
