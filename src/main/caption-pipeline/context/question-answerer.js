@@ -63,7 +63,8 @@ function createQuestionAnswerer({ requestText, requestImage, readImage, contextS
     });
     // 텍스트로 답을 못 찾았으면 저장해 둔 화면 그림에서 다시 찾는다.
     const trimmed = String(content ?? '').trim().replace(TOKEN_WRAPPER_PATTERN, '');
-    const isImageRequested = trimmed.startsWith(NEED_IMAGE_TOKEN);
+    // 모델이 "기록에 없습니다. NEED_IMAGE"처럼 설명 뒤에 토큰을 붙이기도 한다. 어디에 있든 이미지 재조회로 본다.
+    const isImageRequested = trimmed.includes(NEED_IMAGE_TOKEN);
     const isNotFound = new RegExp(`^${GROUNDING_NONE_TOKEN}\\b`, 'i').test(trimmed)
       || (NOT_FOUND_PHRASE_PATTERN.test(trimmed) && !/\d/.test(trimmed));
     if (!isImageRequested && !isNotFound) return toAnswer({ content, wordBudget });

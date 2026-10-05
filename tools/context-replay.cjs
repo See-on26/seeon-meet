@@ -86,7 +86,7 @@ const requestText = ({ prompt, label, maxTokens }) => requestVlmContent({ config
     const result = await answerer.answer({
       route: isCurrentScreen ? 'past_slide' : routed.route,
       slideMajorList: isCurrentScreen ? [store.getCurrentSlideMajor()] : routed.slideMajorList,
-      questionText, wordBudget: { minWordCount: 3, maxWordCount: 15 },
+      questionText, wordBudget: { minWordCount: 3, maxWordCount: 30 },
     });
     store.addQa({ ts: store.getLastQa()?.ts ?? 0, question: questionText, answer: result.text, route: routed.route, slideMajorList: routed.slideMajorList, isFollowUp: Boolean(followUpQa) });
     console.log(`\nQ: ${questionText}\n  갈래=${routed.route} 대상=[${routed.slideMajorList.join(', ')}]`
