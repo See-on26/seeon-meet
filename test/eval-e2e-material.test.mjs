@@ -66,8 +66,9 @@ test('평가 프롬프트에만 "제공된 자료만 근거로 답하라"가 있
   assert.match(request.messageList[0].content[1].text, /5\. 알 수 없음/);
 });
 
-test('답 번호는 JSON 을 먼저 읽고 아니면 느슨하게 찾으며 못 읽으면 응답 오류다', () => {
-  assert.deepEqual(parseAnswerText('```json\n{"answer": 1, "reason": "전사에 있음"}\n```'), { choiceNumber: 1, reason: '전사에 있음' });
+test('답 번호는 JSON 을 먼저 읽고 아니면 답 전체가 정해진 꼴일 때만 읽으며 못 읽으면 응답 오류다', () => {
+  assert.deepEqual(parseAnswerText('```json\n{"answer": 1, "reason": "전사에 있음"}\n```'),
+    { choiceNumber: 1, reason: '전사에 있음', source: 'json' });
   assert.equal(parseAnswerText('정답: 3번입니다').choiceNumber, 3);
   assert.equal(parseAnswerText('5').choiceNumber, 5);
   assert.equal(parseAnswerText('{"answer": 7}').choiceNumber, null);
@@ -78,138 +79,144 @@ test('답 번호는 JSON 을 먼저 읽고 아니면 느슨하게 찾으며 못 
 });
 
 const choiceTextList = buildChoiceList({ question });
-
-test('읽을 수 없는 답에서 보기를 지어내지 않는다', () => {
-  const rowList = [
-    ['{"answer": 12}', null],
-    ['{"answer": true}', null],
-    ['{"answer": "2번 같아요"}', null],
-    ['1번은 오답이고 정답은 3번입니다', 3],
-    ['3개의 막대 중 두 번째가 맞으므로 2번', 2],
-    ['정답은 2번입니다. 아니, 보기 3번이 맞습니다', null],
-    ['3번이 아니라 2번입니다', 2],
-    ['정답: 7', null],
-    ['보기 13번이 맞습니다', null],
-    ['2. 재구매율', null],
-  ];
-  for (const [text, expected] of rowList) {
-    assert.equal(parseAnswerText(text, { choiceTextList }).choiceNumber, expected, text);
-  }
-  assert.deepEqual(parseAnswerText('{"answer": "2번", "reason": "보기 1번은 오답 1개를 포함"}', { choiceTextList }),
-    { choiceNumber: 2, reason: '보기 1번은 오답 1개를 포함' });
-});
-
-test('흔한 답 꼴과 보기 글 그대로의 답을 읽는다', () => {
-  const rowList = [
-    ['정답은 2번', 2],
-    ['정답은 2번입니다.', 2],
-    ['보기 3번이 맞습니다', 3],
-    ['{"answer": "3번"}', 3],
-    ['{"answer": "3"}', 3],
-    ['답: "3"', 3],
-    ['The answer is 3', 3],
-    ['알 수 없음', 5],
-    ['정답: 알 수 없음', 5],
-    ['{"answer": "알 수 없음"}', 5],
-    ['{"answer": "5. 알 수 없음"}', 5],
-    ['전환율', 3],
-    ['{"answer": "이탈률"}', 2],
-    ['1. 재구매율', 1],
-  ];
-  for (const [text, expected] of rowList) {
-    assert.equal(parseAnswerText(text, { choiceTextList }).choiceNumber, expected, text);
-  }
-  // 보기 목록을 안 줘도 "알 수 없음"은 늘 5번이다.
-  assert.equal(parseAnswerText('알 수 없음').choiceNumber, 5);
-  assert.equal(parseAnswerText('{"answer": "5. 알 수 없음"}').choiceNumber, 5);
-  assert.equal(parseAnswerText('전환율').choiceNumber, null);
-});
-
 const choiceTextListOf = (choiceList) => buildChoiceList({ question: { ...question, choiceList } });
 const percentChoiceTextList = choiceTextListOf(['1%', '2%', '4%', '5%']);
 const timesChoiceTextList = choiceTextListOf(['1.2배', '1.5배', '2배', '3배']);
-
-test('답 뒤에 값·단위가 붙으면 보기 번호로 읽지 않는다 (보기 글과 같을 때만 그 보기)', () => {
-  const rowList = [
-    ['정답은 3%입니다', percentChoiceTextList, null],
-    ['정답은 1.5 배입니다', timesChoiceTextList, null],
-    ['정답은 3배 증가', timesChoiceTextList, null],
-    ['정답은 3개 막대 중 두 번째', choiceTextList, null],
-    ['The answer is 2.5', timesChoiceTextList, null],
-    ['답: 2.5배', timesChoiceTextList, null],
-    ['정답은 30%', choiceTextList, null],
-    ['정답은 3번째 막대', choiceTextList, null],
-    ['정답은 3%입니다', choiceTextListOf(['1%', '3%', '4%', '5%']), 2],
-    ['정답은 3배', timesChoiceTextList, 4],
-    ['The answer is 2.5', choiceTextListOf(['1.5', '2.5', '3.5', '4.5']), 2],
-    ['정답은 3입니다', choiceTextList, 3],
-    ['정답: 3\n근거: 전사에 있음', choiceTextList, 3],
-    ['정답은 3, 전환율', choiceTextList, 3],
-    ['Answer: 5 (알 수 없음)', choiceTextList, 5],
-  ];
-  for (const [text, rowChoiceTextList, expected] of rowList) {
-    assert.equal(parseAnswerText(text, { choiceTextList: rowChoiceTextList }).choiceNumber, expected, text);
-  }
-});
-
-test('"N번이"는 맞다·정답이라고 할 때만 답으로 센다', () => {
-  const rowList = [
-    ['1번 이탈률', null],
-    ['2번 이탈률', 2],
-    ['정답은 2번입니다. 1번이 틀린 이유는 자료에 없기 때문입니다', 2],
-    ['정답은 2번입니다. 3번이 아닌 이유는 자료에 없기 때문입니다', 2],
-    ['3번이 맞지 않고 정답은 2번', 2],
-    ['보기 4번이 정답입니다', 4],
-  ];
-  for (const [text, expected] of rowList) {
-    assert.equal(parseAnswerText(text, { choiceTextList }).choiceNumber, expected, text);
-  }
-});
-
 const salaryChoiceTextList = choiceTextListOf(['1,000만 원', '1,250만 원', '1,500만 원', '1,750만 원']);
-const plainNumberChoiceTextList = choiceTextListOf(['2', '3', '4', '5']);
 
-test('천 단위 쉼표 값은 번호로 읽지 않고, 보기 글과 같으면 그 보기다', () => {
-  const rowList = [
-    ['정답은 1,200명', choiceTextList, null],
-    ['The answer is 1,250', choiceTextList, null],
-    ['정답은 1,500만원입니다', salaryChoiceTextList, null],
-    ['정답은 1,500만 원입니다', salaryChoiceTextList, 3],
-    ['1,500만 원', salaryChoiceTextList, 3],
-    ['정답은 3, 전환율', choiceTextList, 3],
-    // 보기 글 안의 "2번입니다"는 따로 세지 않는다.
-    ['정답은 상반기 1번, 하반기 2번입니다', choiceTextListOf(['연 1번', '연 2번', '상반기 1번, 하반기 2번', '분기마다']), 3],
-    // 보기 글이 맨숫자면 "3"이 보기 번호인지 값인지 알 수 없다.
-    ['정답은 3', plainNumberChoiceTextList, null],
-    ['3', plainNumberChoiceTextList, null],
-    ['정답은 3번', plainNumberChoiceTextList, 3],
-  ];
-  for (const [text, rowChoiceTextList, expected] of rowList) {
+// 행: [답, 기대 번호, 보기(생략하면 기본 보기)]
+function assertChoiceNumberList(rowList) {
+  for (const [text, expected, rowChoiceTextList = choiceTextList] of rowList) {
     assert.equal(parseAnswerText(text, { choiceTextList: rowChoiceTextList }).choiceNumber, expected, text);
   }
+}
+
+test('answer 칸이 있는 JSON 은 그 값만으로 정하고 나머지 글은 뒤지지 않는다', () => {
+  assertChoiceNumberList([
+    ['{"answer": 12}', null],
+    ['{"answer": true}', null],
+    ['{"answer": "2번 같아요"}', null],
+    ['{"answer": 7, "reason": "정답은 3번"}', null],
+    ['{"answer": "3번"}', 3],
+    ['{"answer": "3"}', 3],
+    ['{"answer": "알 수 없음"}', 5],
+    ['{"answer": "5. 알 수 없음"}', 5],
+    ['{"answer": "이탈률"}', 2],
+  ]);
+  assert.deepEqual(parseAnswerText('{"answer": "2번", "reason": "보기 1번은 오답 1개를 포함"}', { choiceTextList }),
+    { choiceNumber: 2, reason: '보기 1번은 오답 1개를 포함', source: 'json' });
+  assert.equal(parseAnswerText('{"answer": "5. 알 수 없음"}').choiceNumber, 5);
+  assert.equal(parseAnswerText('{"answer": 7}').source, null);
 });
 
-test('아니라고 한 번호는 답이 아니다', () => {
-  const rowList = [
+test('JSON 이 아니면 답 전체가 번호 꼴이거나 보기 글 그대로일 때만 읽는다', () => {
+  assertChoiceNumberList([
+    ['3', 3],
+    ['3.', 3],
+    ['3번', 3],
+    ['보기 3번', 3],
+    ['보기 3번.', 3],
+    ['정답은 2번입니다', 2],
+    ['정답은 2번', 2],
+    ['정답은 2번입니다.', 2],
+    ['정답: 4', 4],
+    ['정답：4', 4],
+    ['답: 4번', 4],
+    ['정답은 보기 4번입니다', 4],
+    ['정답은 3입니다', 3],
+    ['```\n2\n```', 2],
+    ['The answer is 3', 3],
+    ['the answer is 3.', 3],
+    ['THE ANSWER IS 3', 3],
+    ['알 수 없음', 5],
+    ['정답: 알 수 없음', 5],
+    ['전환율', 3],
+    ['전환율.', 3],
+    ['1. 재구매율', 1],
+    ['1) 재구매율', 1],
+    ['정답은 1,500만 원입니다', 3, salaryChoiceTextList],
+    ['1,500만 원', 3, salaryChoiceTextList],
+    ['정답은 3%입니다', 2, choiceTextListOf(['1%', '3%', '4%', '5%'])],
+    ['정답은 3배', 4, timesChoiceTextList],
+    ['The answer is 2.5', 2, choiceTextListOf(['1.5', '2.5', '3.5', '4.5'])],
+    // 보기 글 안의 "2번"은 번호로 읽지 않는다.
+    ['정답은 상반기 1번, 하반기 2번입니다', 3, choiceTextListOf(['연 1번', '연 2번', '상반기 1번, 하반기 2번', '분기마다'])],
+  ]);
+  // 보기 목록을 안 줘도 "알 수 없음"은 늘 5번이다.
+  assert.equal(parseAnswerText('알 수 없음').choiceNumber, 5);
+  assert.equal(parseAnswerText('5. 알 수 없음').choiceNumber, 5);
+  assert.equal(parseAnswerText('전환율').choiceNumber, null);
+  assert.deepEqual(parseAnswerText('정답은 2번입니다', { choiceTextList }), { choiceNumber: 2, reason: null, source: 'text' });
+});
+
+test('답 전체가 정해진 꼴이 아니면 글 안의 번호를 찾지 않고 응답 오류로 둔다', () => {
+  assertChoiceNumberList([
+    ['1번은 오답이고 정답은 3번입니다', null],
+    ['3개의 막대 중 두 번째가 맞으므로 2번', null],
+    ['정답은 3%입니다', null, percentChoiceTextList],
+    ['정답은 1.5 배입니다', null, timesChoiceTextList],
+    ['The answer is 2.5', null, timesChoiceTextList],
+    ['정답은 1,200명', null],
     ['3번이 맞지는 않습니다', null],
-    ['3번이 정답은 아닙니다', null],
-    ['3번이 정답이 아님', null],
-    ['정답은 3번이 아닙니다', null],
-    ['정답: 3번 아님', null],
-    ['3번이 맞지않습니다', null],
-    ['3번이 아니라 2번입니다', 2],
-    ['정답은 3번이 아니고 2번', 2],
-    ['정답은 2번이고 3번이 아닙니다', 2],
-    ['3번이 맞습니다', 3],
-  ];
-  for (const [text, expected] of rowList) {
-    assert.equal(parseAnswerText(text, { choiceTextList }).choiceNumber, expected, text);
-  }
+    ['3번이 맞습니다', null],
+    ['3번이 맞고 틀린 것은 2번입니다', null],
+    ['정답은 3번이 맞고 오답은 2번입니다', null],
+    ['3번이 정답이고 아닌 것은 2번입니다', null],
+    ['3번이 맞습니다. 틀린 보기는 2번입니다', null],
+    ['3번이 아니라 2번입니다', null],
+    ['정답은 2번입니다. 아니, 보기 3번이 맞습니다', null],
+    ['보기 3번이 맞습니다', null],
+    ['1번 이탈률', null],
+    ['2번 이탈률', null],
+    ['2. 재구매율', null],
+    ['정답: 3\n근거: 전사에 있음', null],
+    ['정답은 3, 전환율', null],
+    ['Answer: 5 (알 수 없음)', null],
+    ['답: "3"', null],
+    ['정답은 3배 증가', null, timesChoiceTextList],
+    ['답: 2.5배', null, timesChoiceTextList],
+    ['정답은 30%', null],
+    ['정답은 3번째 막대', null],
+    ['The answer is 1,250', null],
+    ['정답은 1,500만원입니다', null, salaryChoiceTextList],
+    ['정답: 7', null],
+    ['보기 13번이 맞습니다', null],
+    ['{"reason": "자료에 있음"} 정답은 4번', null],
+    ['{"answer": 3, "reason": "보기 1번이 틀려서', null],
+    ['잘 모르겠습니다', null],
+  ]);
+  assert.deepEqual(parseAnswerText('잘 모르겠습니다', { choiceTextList }), { choiceNumber: null, reason: null, source: null });
 });
 
-test('1~5 정수가 아닌 답 번호는 모두 응답 오류다', () => {
+test('보기 글이 숫자·횟수 꼴이라 답이 보기 번호인지 보기 글인지 가를 수 없으면 응답 오류다', () => {
+  const plainNumberChoiceTextList = choiceTextListOf(['2', '3', '4', '5']);
+  const countChoiceTextList = choiceTextListOf(['2번', '3번', '4번', '5번']);
+  const timesCountChoiceTextList = choiceTextListOf(['2회', '3회', '4회', '5회']);
+  assertChoiceNumberList([
+    ['3', null, plainNumberChoiceTextList],
+    ['정답은 3', null, plainNumberChoiceTextList],
+    ['정답은 3번', null, plainNumberChoiceTextList],
+    ['3번', null, countChoiceTextList],
+    ['정답은 3번입니다', null, countChoiceTextList],
+    ['3', null, timesCountChoiceTextList],
+    ['3', null, timesChoiceTextList],
+    // 보기 글로만 읽히거나 두 읽기가 같은 보기를 가리키면 그 보기다.
+    ['3회', 2, timesCountChoiceTextList],
+    ['정답은 3회입니다', 2, timesCountChoiceTextList],
+    ['3', 3, choiceTextListOf(['1', '2', '3', '4'])],
+    ['3번', 3, choiceTextListOf(['1번', '2번', '3번', '4번'])],
+    ['20', 2, choiceTextListOf(['10', '20', '30', '40'])],
+    // JSON 의 answer 는 보기 번호로 받는다.
+    ['{"answer": 3}', 3, plainNumberChoiceTextList],
+  ]);
+});
+
+test('1~5 정수가 아닌 답 번호는 모두 응답 오류이고, 답을 읽은 곳(source)은 채점 기록에 싣는다', () => {
   const responseError = { chosenIndex: null, isUnknown: false, isCorrect: false, isResponseError: true };
   for (const choiceNumber of [undefined, Number.NaN, 7, 0, 2.5, '1']) {
     assert.deepEqual(scoreAnswer({ question, choiceNumber }), responseError, String(choiceNumber));
   }
+  assert.deepEqual(scoreAnswer({ question, choiceNumber: 2, source: 'text' }),
+    { chosenIndex: 1, isUnknown: false, isCorrect: false, isResponseError: false, source: 'text' });
+  assert.deepEqual(scoreAnswer({ question, choiceNumber: null, source: null }), { ...responseError, source: null });
 });
