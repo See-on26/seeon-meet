@@ -1,7 +1,9 @@
 #!/usr/bin/env bash
-# 실험 창 확인용 영상을 만든다. 실회의 슬라이드 이미지 5장 + macOS say(유나) 음성, 약 1분 반.
+# 실험 창 확인용 영상을 만든다. 실회의 슬라이드 이미지 5장 + macOS say(유나) 음성, 약 1분.
 # 같은 이름의 .script.json 에 구간별 원본 시각(말 시작·끝, 무발화 끝)을 남겨 전사 시각을 맞춰 볼 수 있게 한다.
-#   tools/lab/make-sample-video.sh [슬라이드 세션 폴더] [출력 mp4]
+#   tools/lab/make-sample-video.sh <슬라이드 세션 폴더> [출력 mp4]
+# 슬라이드 세션 폴더 = slide-1 … slide-5 아래 base.jpg 가 있는 폴더(앱이 out/slides/session-<id>/ 에 같은 구조로 남긴다).
+# 폴더를 주지 않으면 이 영상을 처음 만든 맥의 폴더를 쓰므로, 다른 맥에서는 첫 인자로 꼭 준다.
 set -euo pipefail
 
 ROOT_DIR="$(cd "$(dirname "$0")/../.." && pwd)"
@@ -23,6 +25,24 @@ SEGMENT_LIST=(
   "slide-5|네, 다들 즐거워 보이죠?|2"
   "slide-4|마지막으로 평가 구조입니다. 저희는 절대 평가를 합니다. 이상으로 발표를 마치겠습니다. 감사합니다.|6"
 )
+
+# 슬라이드 이미지가 하나라도 없으면 ffmpeg 오류 대신 무엇을 넘겨야 하는지 알리고 멈춘다.
+missing_count=0
+previous_slide=""
+for segment in "${SEGMENT_LIST[@]}"; do
+  slide="${segment%%|*}"
+  [ "$slide" = "$previous_slide" ] && continue
+  previous_slide="$slide"
+  if [ ! -f "$SLIDE_ROOT/$slide/base.jpg" ]; then
+    echo "[sample] 슬라이드 이미지가 없다: $SLIDE_ROOT/$slide/base.jpg" >&2
+    missing_count=$((missing_count + 1))
+  fi
+done
+if [ "$missing_count" -gt 0 ]; then
+  echo "사용법: tools/lab/make-sample-video.sh <슬라이드 세션 폴더> [출력 mp4]" >&2
+  echo "  슬라이드 세션 폴더 = slide-1 … slide-5 아래 base.jpg 가 있는 폴더(앱이 out/slides/session-<id>/ 에 같은 구조로 남긴다)" >&2
+  exit 2
+fi
 
 probe_ms() {
   "$FFPROBE" -v error -show_entries format=duration -of csv=p=0 "$1" | awk '{ printf "%d", $1 * 1000 }'
