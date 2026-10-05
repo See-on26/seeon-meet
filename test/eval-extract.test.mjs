@@ -232,3 +232,77 @@ test('extract --force 는 기존 라벨을 같은 posId 위치로 옮겨 쓰고 
     assert.match(logText, /d-1 demonstrative@20-22/);
   }
 });
+
+const targetItem = {
+  ...twiceItem, id: 'd-2', targetTrigger: '이 부분을', isTargetGap: true, targetRationale: '무엇인지 없음',
+};
+
+function prepareTargetDraft() {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'eval-extract-prefill-'));
+  const inFile = path.join(dir, 'items.jsonl');
+  const outFile = path.join(dir, 'labeling.jsonl');
+  const writeItem = (patch = {}) => fs.writeFileSync(inFile, `${JSON.stringify({ ...targetItem, ...patch })}\n`);
+  const run = async (argList) => {
+    const logList = [];
+    const code = await runExtractCommand({ argList, log: (line) => logList.push(line), createMatcher: async () => regexMatcher });
+    return { code, logText: logList.join('\n') };
+  };
+  const readPositionList = () => JSON.parse(fs.readFileSync(outFile, 'utf8')).positionList
+    .map((position) => [position.posId, position.isGap, position.rationale]);
+  const editPosition = (posId, patch) => {
+    const draft = JSON.parse(fs.readFileSync(outFile, 'utf8'));
+    draft.positionList = draft.positionList.map((position) => (position.posId === posId ? { ...position, ...patch } : position));
+    fs.writeFileSync(outFile, `${JSON.stringify(draft)}\n`);
+  };
+  writeItem();
+  return { inFile, outFile, writeItem, run, readPositionList, editPosition };
+}
+
+test('extract 가 미리 채운 목표 정답만 있는 초안은 손으로 채운 라벨이 아니라서 --force 없이 다시 뽑힌다', async () => {
+  const { inFile, outFile, run, readPositionList } = prepareTargetDraft();
+  assert.equal((await run(['--in', inFile, '--out', outFile])).code, 0);
+  const rerun = await run(['--in', inFile, '--out', outFile]);
+  assert.equal(rerun.code, 0, rerun.logText);
+  assert.equal((await run(['--in', outFile, '--out', outFile])).code, 0, '--in 과 --out 이 같은 초안이어도');
+  assert.deepEqual(readPositionList(), [['demonstrative@0-4', true, '무엇인지 없음'], ['demonstrative@14-18', null, '']]);
+});
+
+test('항목의 목표 정답을 고친 뒤 다시 뽑으면 옛 초안의 미리 채운 값이 아니라 새 정답이 들어간다(--force 여도)', async () => {
+  const { inFile, outFile, writeItem, run, readPositionList } = prepareTargetDraft();
+  assert.equal((await run(['--in', inFile, '--out', outFile])).code, 0);
+  writeItem({ isTargetGap: false, targetRationale: '앞 문장의 표를 가리킴' });
+  const forced = await run(['--in', inFile, '--out', outFile, '--force']);
+  assert.equal(forced.code, 0, forced.logText);
+  assert.deepEqual(readPositionList(), [['demonstrative@0-4', false, '앞 문장의 표를 가리킴'], ['demonstrative@14-18', null, '']]);
+  writeItem({ isTargetGap: true, targetRationale: '다시 바꿈' });
+  assert.equal((await run(['--in', inFile, '--out', outFile])).code, 0, '미리 채운 값만 있으므로 --force 없이도 된다');
+  assert.deepEqual(readPositionList(), [['demonstrative@0-4', true, '다시 바꿈'], ['demonstrative@14-18', null, '']]);
+});
+
+test('목표가 아닌 위치에 손으로 채운 라벨은 --force 없이 멈추고 --force 면 옮긴다', async () => {
+  const { inFile, outFile, run, readPositionList, editPosition } = prepareTargetDraft();
+  assert.equal((await run(['--in', inFile, '--out', outFile])).code, 0);
+  editPosition('demonstrative@14-18', { isGap: false, rationale: '앞 문장의 부분' });
+  const refused = await run(['--in', inFile, '--out', outFile]);
+  assert.equal(refused.code, 2);
+  assert.match(refused.logText, /손으로 채운 라벨 1개/, '미리 채운 목표 정답은 세지 않는다');
+  const forced = await run(['--in', inFile, '--out', outFile, '--force']);
+  assert.equal(forced.code, 0, forced.logText);
+  assert.deepEqual(readPositionList(), [['demonstrative@0-4', true, '무엇인지 없음'], ['demonstrative@14-18', false, '앞 문장의 부분']]);
+  assert.match(forced.logText, /기존 라벨 1개를 같은 posId 위치로 옮겼다/);
+});
+
+test('손으로 고친 목표 위치 라벨이 새 목표 정답과 다르면 새 정답을 쓰고 그 위치를 알린다', async () => {
+  const { inFile, outFile, run, readPositionList, editPosition } = prepareTargetDraft();
+  assert.equal((await run(['--in', inFile, '--out', outFile])).code, 0);
+  editPosition('demonstrative@0-4', { isGap: false, rationale: '손으로 고침' });
+  const refused = await run(['--in', inFile, '--out', outFile]);
+  assert.equal(refused.code, 2);
+  assert.match(refused.logText, /손으로 채운 라벨 1개/);
+  const forced = await run(['--in', inFile, '--out', outFile, '--force']);
+  assert.equal(forced.code, 0, forced.logText);
+  assert.deepEqual(readPositionList()[0], ['demonstrative@0-4', true, '무엇인지 없음']);
+  assert.match(forced.logText, /새 목표 정답과 달라 새 정답을 쓴 위치 1개/);
+  assert.match(forced.logText, /d-2 demonstrative@0-4 isGap=false "손으로 고침" → isGap=true "무엇인지 없음"/);
+  assert.match(forced.logText, /옮기지 못한 라벨 0개/);
+});

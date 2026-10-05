@@ -90,13 +90,21 @@ export function findTargetPosition({ item, positionList }) {
   return resolveTargetPosition({ item, positionList }).position;
 }
 
+// extract 가 목표 위치에 미리 채우는 값. 항목에 isTargetGap 이 없거나 목표 위치를 못 고르면 null.
+// 초안 한 줄(항목 칸 + positionList)을 넣으면 그 초안을 쓸 때 미리 채운 값을 다시 구한다.
+export function resolveTargetPrefill({ item, positionList }) {
+  if (typeof item.isTargetGap !== 'boolean') return null;
+  const position = findTargetPosition({ item, positionList });
+  return position ? { position, isGap: item.isTargetGap, rationale: item.targetRationale || '' } : null;
+}
+
 // 라벨 칸을 비운 초안. 목표 위치에만 isTargetGap·targetRationale 을 미리 채운다.
 export function buildLabelDraft({ item, positionList }) {
-  const target = findTargetPosition({ item, positionList });
+  const prefill = resolveTargetPrefill({ item, positionList });
   return {
     ...item,
     positionList: positionList.map((position) => {
-      const isPrefilled = position === target && typeof item.isTargetGap === 'boolean';
+      const isPrefilled = position === prefill?.position;
       return {
         posId: buildPosId(position),
         type: position.type,
@@ -106,8 +114,8 @@ export function buildLabelDraft({ item, positionList }) {
         sourceList: position.sourceList,
         isProductionFired: position.isProductionFired,
         isApproximate: position.isApproximate,
-        isGap: isPrefilled ? item.isTargetGap : null,
-        rationale: isPrefilled ? (item.targetRationale || '') : '',
+        isGap: isPrefilled ? prefill.isGap : null,
+        rationale: isPrefilled ? prefill.rationale : '',
       };
     }),
   };
