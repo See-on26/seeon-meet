@@ -1,0 +1,38 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+  <meta charset="UTF-8" />
+  <title>실험 조작 바</title>
+  <style>
+    :root { color-scheme: dark; font-family: -apple-system, "Apple SD Gothic Neo", sans-serif; }
+    html, body { margin: 0; height: 100%; background: #1d1d1f; color: #f5f5f7; font-size: 13px; }
+    .bar { display: flex; align-items: center; gap: 8px; height: 64px; padding: 0 12px; box-sizing: border-box; flex-wrap: nowrap; }
+    button, select { font: inherit; padding: 5px 10px; border-radius: 6px; border: 1px solid #555; background: #2c2c2e; color: inherit; }
+    button:disabled, select:disabled { opacity: 0.4; }
+    button.on { background: #0066cc; border-color: #0066cc; }
+    .video-name { max-width: 180px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: #c7c7cc; }
+    .status { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: #a1a1a6; }
+    label { display: flex; align-items: center; gap: 4px; white-space: nowrap; }
+  </style>
+</head>
+<body>
+  <div class="bar">
+    <button id="pickBtn" type="button">영상 선택</button>
+    <span class="video-name" id="videoName">영상 없음</span>
+    <select id="modeSelect" aria-label="모드">
+      <option value="delayed">균형</option>
+      <option value="listening">품질</option>
+      <option value="realtime_sic">성능</option>
+      <option value="realtime_mix">동시</option>
+    </select>
+    <label><input type="checkbox" id="evalPresetChk" checked /> 평가 설정</label>
+    <button id="roiBtn" type="button">ROI 편집</button>
+    <button id="startBtn" type="button" disabled>시작</button>
+    <button id="pauseBtn" type="button" disabled>일시정지</button>
+    <button id="stopBtn" type="button" disabled>정지</button>
+    <button id="resultBtn" type="button" disabled>결과 폴더</button>
+    <span class="status" id="statusText" role="status">대기 중</span>
+  </div>
+  <script type="module" src="./control.js"></script>
+</body>
+</html>

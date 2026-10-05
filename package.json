@@ -9,7 +9,9 @@
     "smoke": "SEEON_SMOKE=1 electron .",
     "mock": "node tools/mock-gpu-server.js",
     "test": "node --test test/*.test.mjs",
-    "check:renderer": "node tools/check-esm.mjs src/renderer/app/main.js"
+    "check:renderer": "node tools/check-esm.mjs src/renderer/app/main.js",
+    "lab": "electron src/main/lab/index.js",
+    "lab:debug": "electron src/main/lab/index.js --remote-debugging-port=9223"
   },
   "dependencies": {
     "@anthropic-ai/bedrock-sdk": "^0.32.0"
