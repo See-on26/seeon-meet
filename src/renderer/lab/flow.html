@@ -42,6 +42,7 @@
     .card.outcome-dropped { border-left-color: var(--amber); }
     .card.outcome-blocked { border-left-color: var(--red); }
     .card.outcome-pending { border-left-color: var(--blue); }
+    .card.outcome-unknown { border-left-color: #636366; }
     .card-head { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
     .clock { font-variant-numeric: tabular-nums; color: #a1a1a6; }
     .badge { font-size: 11px; padding: 1px 8px; border-radius: 999px; background: #3a3a3c; }
@@ -49,6 +50,11 @@
     .badge.outcome-dropped { background: #5c4113; color: #ffd28a; }
     .badge.outcome-blocked { background: #5c1d19; color: #ffaaa4; }
     .badge.outcome-pending { background: #10365e; color: #9ccaff; }
+    .badge.outcome-unknown { background: #3a3a3c; color: #c7c7cc; }
+    .decision-clock { font-size: 11px; color: #636366; font-variant-numeric: tabular-nums; }
+    .caption-outcome-list { margin-top: 4px; display: flex; flex-direction: column; gap: 2px; }
+    .caption-outcome { display: flex; align-items: center; gap: 6px; font-size: 12px; min-width: 0; }
+    .caption-outcome-text { color: #d1d1d6; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
     .outcome-text { color: #d1d1d6; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; flex: 1; }
     .step-list { margin-top: 6px; display: flex; flex-direction: column; gap: 2px; }
     .step { display: grid; grid-template-columns: 56px 190px 16px minmax(0, 1fr); gap: 6px; align-items: baseline; font-size: 12px; }
@@ -77,7 +83,7 @@
       <label class="toggle"><input type="checkbox" id="asrToggle" /> ASR 입력 보기</label>
     </div>
   </header>
-  <main id="flowList" aria-live="polite"></main>
+  <main id="flowList"></main>
   <script type="module" src="./flow.js"></script>
 </body>
 </html>

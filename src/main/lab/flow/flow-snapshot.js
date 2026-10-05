@@ -1,4 +1,5 @@
-const { buildTimeMap, wallToMediaMs } = require('../time-map');
+const { buildTimeMap, wallToMediaMs, resolveCaptureStartWallMs } = require('../time-map');
+const { buildTranscriptUtteranceList } = require('../export/transcript');
 const { buildFlowView, summarizeTrackList } = require('./flow-builder');
 
 // 흐름 창에 보내는 갱신값. 실행 기록기가 모은 debug(받은 시각 포함)·해설·재생 알림·버린 해설·시각 보고로 만든다.
@@ -13,13 +14,16 @@ function buildLiveFlowSnapshot({ run, nowWallMs }) {
   const debugList = run.debugEventList || [];
   const playbackList = run.playbackList || [];
   const isRecording = run.endedAtMs === null || run.endedAtMs === undefined;
+  const toMediaMs = (wallMs) => wallToMediaMs({ timeMap, wallMs });
   const view = buildFlowView({
     debugList,
     captionEventList: run.captionEventList || [],
     playbackList,
     droppedList: run.rendererDropList || [],
-    toMediaMs: (wallMs) => wallToMediaMs({ timeMap, wallMs }),
+    toMediaMs,
     isFinal: !isRecording,
+    captureStartWallMs: resolveCaptureStartWallMs({ captureRequestedWallMs: run.captureRequestedWallMs ?? null, playbackList }),
+    utteranceList: buildTranscriptUtteranceList({ asrEventList: run.asrEventList || [], toMediaMs }),
   });
   return {
     runId: run.runId ?? null,
@@ -39,7 +43,7 @@ function toNarrationDropList(recordList) {
 }
 
 // 결과 폴더 flow.json. debug 는 세션 기록(main·렌더러 모두 있음)을 쓰고, 해설·재생 알림·렌더러가 버린 해설은 실행 기록기 것을 쓴다.
-function buildFlowFile({ recordList, run, toMediaMs }) {
+function buildFlowFile({ recordList, run, toMediaMs, captureStartWallMs = null, utteranceList = [] }) {
   const view = buildFlowView({
     debugList: recordList.filter((record) => record.kind === 'debug'),
     captionEventList: run.captionEventList || [],
@@ -47,6 +51,8 @@ function buildFlowFile({ recordList, run, toMediaMs }) {
     droppedList: [...(run.rendererDropList || []), ...toNarrationDropList(recordList)],
     toMediaMs,
     isFinal: true,
+    captureStartWallMs,
+    utteranceList,
   });
   return { flowList: view.flowList, sessionInfoList: view.sessionInfoList, asrList: view.asrList };
 }

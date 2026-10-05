@@ -77,9 +77,9 @@ async function copySlideList({ slideList, runDir, fsApi, errorList }) {
 }
 
 // flow.json 은 흐름을 눈으로 보는 보조 파일이라 만들거나 쓰지 못해도 결과물 완전성에 넣지 않는다(INCOMPLETE_CODE_LIST 밖).
-async function writeFlowFileSafely({ fsApi, runDir, recordList, run, toMediaMs, errorList }) {
+async function writeFlowFileSafely({ fsApi, runDir, flowInput, errorList }) {
   try {
-    const flowFile = buildFlowFile({ recordList, run, toMediaMs });
+    const flowFile = buildFlowFile(flowInput);
     await fsApi.writeFile(path.join(runDir, RESULT_FILE_MAP.flow), `${JSON.stringify(flowFile, null, 2)}\n`, 'utf8');
     return flowFile.flowList.length;
   } catch (error) {
@@ -150,7 +150,9 @@ async function finalizeRun({ run, modelConfig, fsApi = fs.promises, readRecords 
     [RESULT_FILE_MAP.pipelineRecords, recordList.map((record) => JSON.stringify(record)).join('\n') + (recordList.length ? '\n' : '')],
   ];
   for (const [name, content] of fileList) await writeResultFile({ fsApi, runDir, name, content, errorList });
-  const flowCount = await writeFlowFileSafely({ fsApi, runDir, recordList, run, toMediaMs, errorList });
+  const flowCount = await writeFlowFileSafely({
+    fsApi, runDir, flowInput: { recordList, run, toMediaMs, captureStartWallMs, utteranceList }, errorList,
+  });
 
   const hasOutputAudio = await fsApi.stat(path.join(runDir, RESULT_FILE_MAP.outputAudio))
     .then((stat) => stat.size > 0).catch(() => false);

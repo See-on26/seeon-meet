@@ -6,6 +6,7 @@ import path from 'node:path';
 import { createRequire } from 'node:module';
 import {
   formatClock, truncateText, filterFlowList, buildTimelineItemList, isNearBottom, MAX_RENDERED_ITEM_COUNT,
+  createNodeCache, isSameNodeList, planNodeListUpdate, OUTCOME_LABEL_MAP,
 } from '../src/renderer/lab/flow/flow-view.js';
 
 const require = createRequire(import.meta.url);
@@ -82,6 +83,8 @@ function buildInput(patch = {}) {
 }
 
 const findFlow = (flowList, offsetMs) => flowList.find((flow) => flow.ts === at(offsetMs));
+// 대표 결과 네 칸(해설별 결과 captionList 는 따로 본다).
+const pickOutcome = ({ kind, reason, text, playedMediaMs }) => ({ kind, reason, text, playedMediaMs });
 const stageListOf = (flow) => flow.stepList.map((step) => step.stage);
 
 test('결정 하나의 단계를 묶어 시각순 흐름 카드로 만들고 세션 기록·전사·같은 슬라이드 판정은 카드로 만들지 않는다', () => {
@@ -119,7 +122,7 @@ test('지시 흐름은 입력 → 트리거 → 통합 라우터 판정 → 지�
   assert.equal(agentStep.text, DEIXIS_TEXT);
   assert.equal(agentStep.elapsedMs, 9376);
   assert.equal(flow.stepList.at(-1).label, '재생됨');
-  assert.deepEqual(flow.outcome, { kind: OUTCOME_KIND_MAP.played, reason: null, text: DEIXIS_TEXT, playedMediaMs: 33000 });
+  assert.deepEqual(pickOutcome(flow.outcome), { kind: OUTCOME_KIND_MAP.played, reason: null, text: DEIXIS_TEXT, playedMediaMs: 33000 });
 });
 
 test('페이지 전환은 슬라이드 감지·체류 확정을 앞에 붙이고 기능 꺼짐(옛 표기 page-transition 포함)은 feature_off 로 버려진다', () => {
@@ -133,7 +136,7 @@ test('페이지 전환은 슬라이드 감지·체류 확정을 앞에 붙이고
   ]);
   assert.equal(flow.stepList[4].label, '페이지 전환 설명 에이전트');
   assert.equal(flow.stepList[4].text, TRANSITION_TEXT);
-  assert.deepEqual(flow.outcome, { kind: OUTCOME_KIND_MAP.dropped, reason: 'feature_off', text: TRANSITION_TEXT, playedMediaMs: null });
+  assert.deepEqual(pickOutcome(flow.outcome), { kind: OUTCOME_KIND_MAP.dropped, reason: 'feature_off', text: TRANSITION_TEXT, playedMediaMs: null });
   // 결과 폴더는 세션 기록의 버린 사유를 그대로 쓴다.
   const finalFlow = findFlow(buildFlowList(buildInput({
     droppedList: [{ ts: at(6040), text: TRANSITION_TEXT, reason: 'feature_off' }], isFinal: true,
@@ -146,7 +149,7 @@ test('라우터가 후보=[없음] 으로 건너뛰면 해설 없이 막힌 흐�
   assert.deepEqual(stageListOf(flow), ['input', 'screen_dependency', 'budget', 'router']);
   assert.equal(flow.stepList[0].detail, '이 부분이 오늘의 핵심입니다.');
   assert.equal(flow.stepList[3].verdict, 'skip');
-  assert.deepEqual(flow.outcome, { kind: OUTCOME_KIND_MAP.blocked, reason: '후보 없음 (abstract)', text: null, playedMediaMs: null });
+  assert.deepEqual(pickOutcome(flow.outcome), { kind: OUTCOME_KIND_MAP.blocked, reason: '후보 없음 (abstract)', text: null, playedMediaMs: null });
 });
 
 test('무발화는 무발화 판단과 무발화 에이전트를 거쳐 들리고, 상한에 걸리면 막힌다', () => {
@@ -159,17 +162,17 @@ test('무발화는 무발화 판단과 무발화 에이전트를 거쳐 들리�
   assert.equal(played.stepList[2].text, SILENCE_TEXT);
   assert.equal(played.outcome.playedMediaMs, 41000);
   const blocked = findFlow(flowList, 50000);
-  assert.deepEqual(blocked.outcome, { kind: OUTCOME_KIND_MAP.blocked, reason: '분당 1회 상한', text: null, playedMediaMs: null });
+  assert.deepEqual(pickOutcome(blocked.outcome), { kind: OUTCOME_KIND_MAP.blocked, reason: '분당 1회 상한', text: null, playedMediaMs: null });
 });
 
 test('간격 억제로 버려진 해설은 rate-limited 이고, 끝난 실행에서 들리지 않은 해설은 not_played 로 버려진다', () => {
   const live = buildFlowList(buildInput());
-  assert.deepEqual(findFlow(live, 45000).outcome, {
+  assert.deepEqual(pickOutcome(findFlow(live, 45000).outcome), {
     kind: OUTCOME_KIND_MAP.dropped, reason: 'rate-limited', text: RATE_LIMITED_TEXT, playedMediaMs: null,
   });
   const input = buildInput({ playbackList: [] });
   assert.equal(findFlow(buildFlowList(input), 20000).outcome.kind, OUTCOME_KIND_MAP.pending, '실행 중에는 아직 기다린다');
-  assert.deepEqual(findFlow(buildFlowList({ ...input, isFinal: true }), 20000).outcome, {
+  assert.deepEqual(pickOutcome(findFlow(buildFlowList({ ...input, isFinal: true }), 20000).outcome), {
     kind: OUTCOME_KIND_MAP.dropped, reason: 'not_played', text: DEIXIS_TEXT, playedMediaMs: null,
   });
 });
@@ -353,4 +356,132 @@ test('흐름 창 표시: 시각 표기·거르기·전사 줄 끼워 넣기·아
   assert.equal(itemList.at(-1).item.id, String(MAX_RENDERED_ITEM_COUNT + 9));
   assert.equal(isNearBottom({ scrollTop: 980, clientHeight: 500, scrollHeight: 1500 }), true);
   assert.equal(isNearBottom({ scrollTop: 200, clientHeight: 500, scrollHeight: 1500 }), false);
+});
+
+// 실제 production 기록 꼴로 만든 고정 입력.
+
+function buildUnlabeledTransitionDebugList() {
+  return [
+    debug(0, 'slide', 'info', '새 슬라이드 확정', '슬라이드 3 거리=0.150 임베딩=gpu → 체류 3000ms 후판정(확정 후 생성)', 'page_transition'),
+    debug(3000, 'slide', 'pass', '체류 확정 (3000ms)', '슬라이드 3 · 지금 고지 생성', 'page_transition'),
+    // 같은 주제 재검출: 화면 판정 기록에 슬라이드 번호가 없다.
+    debug(3030, 'screen', 'pass', 'first_appearance', '화면유형=doc 주제="평가 구조" 사진단독=false', 'page_transition'),
+    debug(3030, 'screen', 'skip', '직전과 같은 화면 — 고지하지 않음', '주제="평가 구조" 주제유사도=0.912 묘사유사도=0.800 최근접="평가 구조"', 'page_transition'),
+    debug(10000, 'slide', 'info', '새 슬라이드 확정', '슬라이드 4 거리=0.300 임베딩=gpu → 체류 3000ms 후판정(확정 후 생성)', 'page_transition'),
+    debug(13000, 'slide', 'pass', '체류 확정 (3000ms)', '슬라이드 4 · 지금 고지 생성', 'page_transition'),
+    // VLM 실패: 실패 기록에도 슬라이드 번호가 없다.
+    debug(13020, 'vlm', 'fail', '전환 내레이션 실패', 'vlm: The operation was aborted due to timeout', 'page_transition'),
+  ];
+}
+
+test('슬라이드 번호가 없는 main 기록(같은 주제 재검출·VLM 실패)도 앞선 감지·체류 확정과 한 흐름으로 묶인다', () => {
+  const flowList = buildFlowList({ debugList: buildUnlabeledTransitionDebugList(), toMediaMs: (wallMs) => wallMs - BASE_MS, isFinal: true });
+  assert.deepEqual(flowList.map((flow) => [flow.ts - BASE_MS, flow.typeKey, flow.slideLabel, flow.outcome.kind]), [
+    [0, 'page_transition', '3', 'blocked'],
+    [10000, 'page_transition', '4', 'blocked'],
+  ]);
+  assert.deepEqual(stageListOf(flowList[0]), ['slide', 'slide', 'screen', 'screen']);
+  assert.equal(flowList[0].outcome.reason, '직전과 같은 화면 — 고지하지 않음');
+  assert.deepEqual(stageListOf(flowList[1]), ['slide', 'slide', 'vlm']);
+  assert.equal(flowList[1].outcome.reason, '전환 내레이션 실패');
+});
+
+test('끝난 실행에서 결과 기록이 없는 흐름은 진행 중으로 남지 않고 결과 없음(unknown)이다', () => {
+  const debugList = [
+    debug(0, 'slide', 'info', '새 슬라이드 확정', '슬라이드 2 거리=0.200 임베딩=gpu', 'page_transition'),
+    debug(3000, 'slide', 'pass', '체류 확정 (3000ms)', '슬라이드 2 · 지금 고지 생성', 'page_transition'),
+  ];
+  assert.equal(buildFlowList({ debugList, toMediaMs: () => null }).at(0).outcome.kind, OUTCOME_KIND_MAP.pending);
+  assert.deepEqual(pickOutcome(buildFlowList({ debugList, toMediaMs: () => null, isFinal: true }).at(0).outcome), {
+    kind: OUTCOME_KIND_MAP.unknown, reason: '결과 기록 없음', text: null, playedMediaMs: null,
+  });
+  assert.equal(OUTCOME_LABEL_MAP.unknown, '결과 없음');
+});
+
+test('카드 시각은 사건 시각(eventMediaMs)이다: 해설은 ad-timeline 과 같은 캡처 시각 변환, 해설이 없으면 입력 발화의 전사 시각', () => {
+  const input = buildInput({
+    captureStartWallMs: BASE_MS,
+    captionEventList: buildInput().captionEventList.map((caption) => (caption.ts === at(20000) ? { ...caption, eventVideoTimeMs: 15000 } : caption)),
+    utteranceList: [
+      { startMs: 7500, endMs: 9000, text: '이 부분이 오늘의 핵심입니다.' },
+      { startMs: 43000, endMs: 44000, text: '이 그래프를 보시면' },
+      { startMs: 9000, endMs: 9500, text: '네' },
+    ],
+  });
+  const flowList = buildFlowList(input);
+  assert.deepEqual(flowList.map((flow) => [flow.mediaMs, flow.eventMediaMs]), [
+    [3000, 3000],
+    [10000, 7500],
+    [20000, 15000],
+    [40000, 40000],
+    [45000, 43000],
+    [50000, 50000],
+  ]);
+});
+
+test('사진 단독 제시의 2-4A 묘사는 전환 흐름 안에서 자기 에이전트 이름을 쓰고 해설마다 결과가 따로 보인다', () => {
+  const leaderText = '슬라이드 4: 여행 사진';
+  const followerText = '해변에서 웃는 사람들 사진';
+  const debugList = [
+    debug(0, 'slide', 'info', '새 슬라이드 확정', '슬라이드 4 거리=0.294 임베딩=gpu', 'page_transition'),
+    debug(3000, 'slide', 'pass', '체류 확정 (3000ms)', '슬라이드 4 · 지금 고지 생성', 'page_transition'),
+    debug(3020, 'screen', 'pass', 'first_appearance', '화면유형=photo 주제="여행" 사진단독=true', 'page_transition'),
+    debug(3020, 'slide', 'info', '주제 판정 fresh', '주제="여행" 번호=4(안내순서) 임베딩라벨=4', 'page_transition'),
+    debug(3020, 'vlm', 'pass', '전환 내레이션 생성', `"${leaderText}" (3000ms, 묘사="여행 사진")`, 'page_transition'),
+    debug(3020, 'tts', 'pass', '합성 완료', `100KB · "${leaderText}"`, 'page-transition'),
+    debug(3020, 'vlm', 'pass', '2-4A 반응 묘사 생성 (사진 단독 제시)', `"${followerText}"`, 'visual_description'),
+    debug(3020, 'tts', 'pass', '합성 완료', `120KB · "${followerText}"`, 'visual_description'),
+  ];
+  const captionEventList = [
+    { ts: at(3020), text: leaderText, source: 'page-transition', narrationClass: 'page_transition', slideLabel: '4', hasAudio: true },
+    { ts: at(3020), text: followerText, source: 'visual_description', narrationClass: 'page_transition', slideLabel: '4', hasAudio: true },
+  ];
+  const playbackList = [
+    { ts: at(3020), text: leaderText, wallMs: at(5000), durationMs: 2000 },
+    { ts: at(3020), text: followerText, wallMs: at(7500), durationMs: 3000 },
+  ];
+  const [flow] = buildFlowList({ debugList, captionEventList, playbackList, toMediaMs: (wallMs) => wallMs - BASE_MS, isFinal: true });
+  assert.equal(flow.typeKey, 'page_transition');
+  assert.deepEqual(flow.stepList.filter((step) => step.stage === 'vlm').map((step) => step.label), ['페이지 전환 설명 에이전트', '발화 기반 설명 에이전트']);
+  assert.deepEqual(pickOutcome(flow.outcome), { kind: OUTCOME_KIND_MAP.played, reason: null, text: leaderText, playedMediaMs: 5000 });
+  assert.deepEqual(flow.outcome.captionList, [
+    { text: leaderText, kind: OUTCOME_KIND_MAP.played, reason: null, playedMediaMs: 5000 },
+    { text: followerText, kind: OUTCOME_KIND_MAP.played, reason: null, playedMediaMs: 7500 },
+  ]);
+  assert.deepEqual(flow.stepList.filter((step) => step.stepKind === STEP_KIND_MAP.output && step.stage !== 'tts').map((step) => step.label), ['재생됨', '재생됨']);
+  // 묘사만 재생 대기 줄에서 버려지면 그 줄만 버려짐이다.
+  const [partial] = buildFlowList({
+    debugList, captionEventList, playbackList: playbackList.slice(0, 1),
+    droppedList: [{ ts: at(3020), text: followerText, reason: 'stale' }], toMediaMs: (wallMs) => wallMs - BASE_MS, isFinal: true,
+  });
+  assert.equal(partial.outcome.kind, OUTCOME_KIND_MAP.played);
+  assert.deepEqual(partial.outcome.captionList.map((caption) => [caption.kind, caption.reason]), [['played', null], ['dropped', 'stale']]);
+});
+
+test('흐름 창은 바뀌지 않은 갱신값이면 같은 노드 목록이라 목록을 다시 넣지 않는다', () => {
+  let createCount = 0;
+  const cache = createNodeCache({ createNode: (timelineItem) => { createCount += 1; return { key: timelineItem.key }; } });
+  const toNodeList = () => buildTimelineItemList({ flowList: buildFlowList(buildInput()) }).map(cache.resolve);
+  const firstList = toNodeList();
+  const secondList = toNodeList();
+  assert.equal(createCount, 6);
+  assert.equal(isSameNodeList(firstList, secondList), true);
+  const changedInput = buildInput({ playbackList: [] });
+  const changedList = buildTimelineItemList({ flowList: buildFlowList(changedInput) }).map(cache.resolve);
+  assert.equal(isSameNodeList(secondList, changedList), false);
+  assert.equal(createCount, 8, '재생 알림이 빠진 두 흐름만 새로 만든다');
+  cache.prune(new Set());
+  assert.equal(cache.size(), 0);
+  assert.equal(isSameNodeList([], []), true);
+  assert.equal(isSameNodeList([{}], []), false);
+});
+
+test('목록 갱신은 새 카드만 덧붙이거나 바뀐 카드만 갈아 끼우고, 순서가 바뀌면 통째로 다시 넣는다', () => {
+  const [a, b, c, d, b2] = ['a', 'b', 'c', 'd', 'b2'].map((name) => ({ name }));
+  assert.deepEqual(planNodeListUpdate([a, b], [a, b]), { kind: 'none' });
+  assert.deepEqual(planNodeListUpdate([a, b], [a, b, c, d]), { kind: 'append', appendList: [c, d] });
+  assert.deepEqual(planNodeListUpdate([a, b, c], [a, b2, c]), { kind: 'replace', replaceList: [{ index: 1, node: b2 }] });
+  assert.deepEqual(planNodeListUpdate([a, b, c], [b, c, d]), { kind: 'reset' }, '앞이 빠지고 밀리면 통째로');
+  assert.deepEqual(planNodeListUpdate([a, b, c], [a, c]), { kind: 'reset' });
+  assert.deepEqual(planNodeListUpdate([], [a]), { kind: 'append', appendList: [a] });
 });
