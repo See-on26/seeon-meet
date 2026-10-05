@@ -10,6 +10,7 @@ import { mapWithConcurrency } from '../tools/eval/lib/concurrency.mjs';
 import {
   createJudgeRunner, resolveLexicalVerdict, classifyRouterPathError, classifySilencePathError,
   isRouterTextWellFormed, PATH_ERROR_MAP,
+  hashProductionSource, PRODUCTION_SOURCE_FILE_LIST_MAP, PRODUCTION_SOURCE_HASH_MAP,
 } from '../tools/eval/lib/judge-runner.mjs';
 import { buildScorePlan, evaluateScorePlan, SYSTEM_MISS_REASON_MAP } from '../tools/eval/lib/score-rows.mjs';
 import { REGEX_MATCHER } from '../tools/eval/lib/methodology-matcher.mjs';
@@ -292,4 +293,56 @@ test('동시에 돌린 호출의 원문은 서로 섞이지 않는다', async ()
     run: (delayMs, index) => recorder.capture(() => recorder.fetch('https://bedrock.example/router', { text: `answer-${index}`, delayMs })),
   });
   assert.deepEqual(outputList.map(({ captureList }) => summarizeConverseCapture(captureList).rawText), delayList.map((_delayMs, index) => `answer-${index}`));
+});
+
+test('판정 결과를 만드는 production 코드가 바뀌면 캐시 키가 달라져 다시 묻는다', async () => {
+  const repoRoot = fs.mkdtempSync(path.join(os.tmpdir(), 'eval-source-'));
+  fs.mkdirSync(path.join(repoRoot, 'src'));
+  fs.writeFileSync(path.join(repoRoot, 'src/router.js'), 'const MAX_ROUTER_TOKENS = 300;');
+  const beforeHash = hashProductionSource({ repoRoot, fileList: ['src/router.js'] });
+  fs.writeFileSync(path.join(repoRoot, 'src/router.js'), 'const MAX_ROUTER_TOKENS = 400;');
+  assert.notEqual(hashProductionSource({ repoRoot, fileList: ['src/router.js'] }), beforeHash);
+
+  const fileList = Object.values(PRODUCTION_SOURCE_FILE_LIST_MAP).flat();
+  for (const filePath of [
+    'src/main/caption-pipeline/router/unified-router.js', 'src/main/caption-pipeline/router/silence-judge.js',
+    'src/main/caption-pipeline/agents/shared/bedrock-converse.js', 'src/main/caption-pipeline/prompts/unified-router.js',
+    'src/main/caption-pipeline/prompts/silence-judge.js',
+  ]) {
+    assert.ok(fileList.includes(filePath), `${filePath} 가 캐시 키에 든다`);
+  }
+  assert.match(PRODUCTION_SOURCE_HASH_MAP.router, /^[0-9a-f]{64}$/);
+  assert.match(PRODUCTION_SOURCE_HASH_MAP.silence, /^[0-9a-f]{64}$/);
+
+  const cacheDir = fs.mkdtempSync(path.join(os.tmpdir(), 'eval-cache-'));
+  const callLog = { route: 0, judge: 0 };
+  const createRunner = (sourceHashMap) => createJudgeRunner({
+    route: async () => {
+      callLog.route += 1;
+      return { candidateList: [{ type: 'deixis', subKind: 'simple', anchor: '이 부분' }], blockedReason: null, source: 'bedrock' };
+    },
+    judgeSilence: async () => {
+      callLog.judge += 1;
+      return { hasCue: false, reason: 'end', source: 'bedrock' };
+    },
+    capture: async (run) => {
+      const result = await run();
+      const text = result.candidateList
+        ? '{"candidateList":[{"type":"deixis","subKind":"simple","anchor":"이 부분"}]}' : '{"cue":false,"reason":"end"}';
+      return { result, captureList: [{ status: 200, bodyText: converseBody(text), elapsedMs: 1, errorMessage: null }] };
+    },
+    cache: createCacheStore({ cacheDir }),
+    routerModelId: 'model-x',
+    sourceHashMap,
+  });
+  const routerInput = { utterance: '이 부분이요', before: '', after: '' };
+  const silenceInput = { transcript: '이 사진을 보시죠.', silenceMs: 5000, precondition: { isReady: true, reason: null } };
+  const mergedRunner = createRunner(PRODUCTION_SOURCE_HASH_MAP);
+  assert.equal((await mergedRunner.runRouter({ input: routerInput, repeatIndex: 0 })).isCacheHit, false);
+  assert.equal((await mergedRunner.runSilence({ input: silenceInput, repeatIndex: 0 })).isCacheHit, false);
+  assert.equal((await createRunner(PRODUCTION_SOURCE_HASH_MAP).runRouter({ input: routerInput, repeatIndex: 0 })).isCacheHit, true);
+  const changedRunner = createRunner({ router: hashInput('router changed'), silence: hashInput('silence changed') });
+  assert.equal((await changedRunner.runRouter({ input: routerInput, repeatIndex: 0 })).isCacheHit, false, '라우터 코드가 바뀌면 다시 묻는다');
+  assert.equal((await changedRunner.runSilence({ input: silenceInput, repeatIndex: 0 })).isCacheHit, false, '무발화 판정기 코드가 바뀌면 다시 묻는다');
+  assert.deepEqual(callLog, { route: 2, judge: 2 });
 });

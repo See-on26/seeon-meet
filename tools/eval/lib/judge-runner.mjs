@@ -1,4 +1,7 @@
+import fs from 'node:fs';
+import path from 'node:path';
 import { createRequire } from 'node:module';
+import { fileURLToPath } from 'node:url';
 import { ROUTER_EXPECTATION_MAP } from './eval-types.mjs';
 import { summarizeConverseCapture, NO_REQUEST_ERROR } from './fetch-recorder.mjs';
 import { hashInput } from './cache-store.mjs';
@@ -23,6 +26,38 @@ export const PATH_ERROR_MAP = {
 export const PROMPT_HASH_MAP = {
   router: hashInput({ system: ROUTER_SYSTEM_PROMPT, fewShot: FEW_SHOT_LIST }),
   silence: hashInput({ system: SILENCE_JUDGE_SYSTEM_PROMPT, fewShot: SILENCE_FEW_SHOT_LIST }),
+};
+
+// 이 모듈 위치(tools/eval/lib)에서 저장소 루트를 찾는다. 실행 위치(cwd)와 상관없다.
+const REPO_ROOT = fileURLToPath(new URL('../../../', import.meta.url));
+
+// 캐시에 담기는 판정 결과(routed·judged)를 만드는 production 코드. 입력 꼴(buildRouterInput)·후보 정규화
+// (normalizeCandidate·허용 subKind)·토큰 상한·온도 규칙이 프롬프트 밖에 있어서, git merge production 으로
+// 이 파일들이 바뀌면 캐시가 저절로 무효가 되도록 원문 해시를 캐시 키에 넣는다.
+export const PRODUCTION_SOURCE_FILE_LIST_MAP = {
+  router: [
+    'src/main/caption-pipeline/router/unified-router.js',
+    'src/main/caption-pipeline/prompts/unified-router.js',
+    'src/main/caption-pipeline/agents/shared/bedrock-converse.js',
+    'src/main/caption-pipeline/contracts/narration-types.js',
+  ],
+  silence: [
+    'src/main/caption-pipeline/router/silence-judge.js',
+    'src/main/caption-pipeline/prompts/silence-judge.js',
+    'src/main/caption-pipeline/agents/shared/bedrock-converse.js',
+  ],
+};
+
+// 파일이 없으면 바로 멈춘다. 이름이 바뀐 파일을 건너뛰면 바뀐 production 으로 옛 캐시를 쓰게 된다.
+export function hashProductionSource({ repoRoot = REPO_ROOT, fileList }) {
+  return hashInput(fileList.map((filePath) => ({
+    filePath, text: fs.readFileSync(path.join(repoRoot, filePath), 'utf8'),
+  })));
+}
+
+export const PRODUCTION_SOURCE_HASH_MAP = {
+  router: hashProductionSource({ fileList: PRODUCTION_SOURCE_FILE_LIST_MAP.router }),
+  silence: hashProductionSource({ fileList: PRODUCTION_SOURCE_FILE_LIST_MAP.silence }),
 };
 
 // production parseRouterText 가 "통과(deixis 기본값)" 로 떨어지지 않는 제대로 된 응답인지.
@@ -96,9 +131,13 @@ export function resolveLexicalVerdict({ type, routed, isScaleEnabled }) {
   };
 }
 
-export function createJudgeRunner({ route, judgeSilence, capture, cache, routerModelId }) {
+export function createJudgeRunner({
+  route, judgeSilence, capture, cache, routerModelId, sourceHashMap = PRODUCTION_SOURCE_HASH_MAP,
+}) {
   async function runRouter({ input, repeatIndex }) {
-    const key = hashInput({ kind: 'router', modelId: routerModelId, promptHash: PROMPT_HASH_MAP.router, input, repeatIndex });
+    const key = hashInput({
+      kind: 'router', modelId: routerModelId, promptHash: PROMPT_HASH_MAP.router, sourceHash: sourceHashMap.router, input, repeatIndex,
+    });
     const cached = cache.read(key);
     if (cached) return { ...cached, isCacheHit: true };
     const { result: routed, captureList } = await capture(() => route(input));
@@ -114,7 +153,9 @@ export function createJudgeRunner({ route, judgeSilence, capture, cache, routerM
       return { judged: null, capture: null, pathError: null, isCacheHit: false, skipReason: input.precondition.reason };
     }
     const judgeInput = { transcript: input.transcript, silenceMs: input.silenceMs };
-    const key = hashInput({ kind: 'silence', modelId: routerModelId, promptHash: PROMPT_HASH_MAP.silence, input: judgeInput, repeatIndex });
+    const key = hashInput({
+      kind: 'silence', modelId: routerModelId, promptHash: PROMPT_HASH_MAP.silence, sourceHash: sourceHashMap.silence, input: judgeInput, repeatIndex,
+    });
     const cached = cache.read(key);
     if (cached) return { ...cached, isCacheHit: true };
     const { result: judged, captureList } = await capture(() => judgeSilence(judgeInput));
