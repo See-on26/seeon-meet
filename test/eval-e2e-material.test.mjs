@@ -87,7 +87,7 @@ test('읽을 수 없는 답에서 보기를 지어내지 않는다', () => {
     ['1번은 오답이고 정답은 3번입니다', 3],
     ['3개의 막대 중 두 번째가 맞으므로 2번', 2],
     ['정답은 2번입니다. 아니, 보기 3번이 맞습니다', null],
-    ['3번이 아니라 2번입니다', null],
+    ['3번이 아니라 2번입니다', 2],
     ['정답: 7', null],
     ['보기 13번이 맞습니다', null],
     ['2. 재구매율', null],
@@ -123,6 +123,47 @@ test('흔한 답 꼴과 보기 글 그대로의 답을 읽는다', () => {
   assert.equal(parseAnswerText('알 수 없음').choiceNumber, 5);
   assert.equal(parseAnswerText('{"answer": "5. 알 수 없음"}').choiceNumber, 5);
   assert.equal(parseAnswerText('전환율').choiceNumber, null);
+});
+
+const choiceTextListOf = (choiceList) => buildChoiceList({ question: { ...question, choiceList } });
+const percentChoiceTextList = choiceTextListOf(['1%', '2%', '4%', '5%']);
+const timesChoiceTextList = choiceTextListOf(['1.2배', '1.5배', '2배', '3배']);
+
+test('답 뒤에 값·단위가 붙으면 보기 번호로 읽지 않는다 (보기 글과 같을 때만 그 보기)', () => {
+  const rowList = [
+    ['정답은 3%입니다', percentChoiceTextList, null],
+    ['정답은 1.5 배입니다', timesChoiceTextList, null],
+    ['정답은 3배 증가', timesChoiceTextList, null],
+    ['정답은 3개 막대 중 두 번째', choiceTextList, null],
+    ['The answer is 2.5', timesChoiceTextList, null],
+    ['답: 2.5배', timesChoiceTextList, null],
+    ['정답은 30%', choiceTextList, null],
+    ['정답은 3번째 막대', choiceTextList, null],
+    ['정답은 3%입니다', choiceTextListOf(['1%', '3%', '4%', '5%']), 2],
+    ['정답은 3배', timesChoiceTextList, 4],
+    ['The answer is 2.5', choiceTextListOf(['1.5', '2.5', '3.5', '4.5']), 2],
+    ['정답은 3입니다', choiceTextList, 3],
+    ['정답: 3\n근거: 전사에 있음', choiceTextList, 3],
+    ['정답은 3, 전환율', choiceTextList, 3],
+    ['Answer: 5 (알 수 없음)', choiceTextList, 5],
+  ];
+  for (const [text, rowChoiceTextList, expected] of rowList) {
+    assert.equal(parseAnswerText(text, { choiceTextList: rowChoiceTextList }).choiceNumber, expected, text);
+  }
+});
+
+test('"N번이"는 맞다·정답이라고 할 때만 답으로 센다', () => {
+  const rowList = [
+    ['1번 이탈률', null],
+    ['2번 이탈률', 2],
+    ['정답은 2번입니다. 1번이 틀린 이유는 자료에 없기 때문입니다', 2],
+    ['정답은 2번입니다. 3번이 아닌 이유는 자료에 없기 때문입니다', 2],
+    ['3번이 맞지 않고 정답은 2번', 2],
+    ['보기 4번이 정답입니다', 4],
+  ];
+  for (const [text, expected] of rowList) {
+    assert.equal(parseAnswerText(text, { choiceTextList }).choiceNumber, expected, text);
+  }
 });
 
 test('1~5 정수가 아닌 답 번호는 모두 응답 오류다', () => {
