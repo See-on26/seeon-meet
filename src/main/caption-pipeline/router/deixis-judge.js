@@ -1,13 +1,12 @@
-const {
-  ensureUsPrefix, buildInferenceConfig, readConverseText,
-} = require('../agents/shared/bedrock-converse');
+const { ensureUsPrefix, buildInferenceConfig } = require('../agents/shared/bedrock-converse');
+const { createJudgeLlm, isJudgeAvailable } = require('../agents/shared/judge-llm');
 const {
   JUDGE_REASON_MAP, JUDGE_SYSTEM_PROMPT, FEW_SHOT_LIST,
 } = require('../prompts/deixis-judge');
 
 const REQUEST_TIMEOUT_MS = 15000;
 const MAX_JUDGE_TOKENS = 40;
-const JUDGE_SOURCE_MAP = { bedrock: 'bedrock', fallback: 'fallback', error: 'error' };
+const JUDGE_SOURCE_MAP = { gpu: 'gpu', bedrock: 'bedrock', fallback: 'fallback', error: 'error' };
 
 function buildJudgeInput({ before = '', utterance, after = '' }) {
   return [
@@ -39,36 +38,19 @@ function parseJudgeText(text) {
   }
 }
 
-function createDeixisJudgeClient({ config }) {
-  const apiKey = config.bedrockApiKey;
-  const converseUrl = `https://bedrock-runtime.${config.bedrockRegion}.amazonaws.com`
-    + `/model/${ensureUsPrefix(config.judgeModelId)}/converse`;
-
+function createDeixisJudgeClient({ config, judgeLlm = createJudgeLlm({ config }) }) {
   async function judge({ utterance, before = '', after = '' }) {
-    if (!apiKey) return { shouldCaption: true, reason: null, source: JUDGE_SOURCE_MAP.fallback };
+    if (!isJudgeAvailable({ config })) return { shouldCaption: true, reason: null, source: JUDGE_SOURCE_MAP.fallback };
     try {
-      const response = await fetch(converseUrl, {
-        method: 'POST',
-        headers: { Authorization: `Bearer ${apiKey}`, 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          system: [{ text: JUDGE_SYSTEM_PROMPT }],
-          messages: [
-            ...buildFewShotMessageList(),
-            { role: 'user', content: [{ text: buildJudgeInput({ before, utterance, after }) }] },
-          ],
-          inferenceConfig: buildInferenceConfig({
-            modelId: config.judgeModelId, maxTokens: MAX_JUDGE_TOKENS,
-          }),
-        }),
-        signal: AbortSignal.timeout(REQUEST_TIMEOUT_MS),
+      const { text, source } = await judgeLlm.requestText({
+        systemPrompt: JUDGE_SYSTEM_PROMPT,
+        messageList: [
+          ...buildFewShotMessageList(),
+          { role: 'user', content: [{ text: buildJudgeInput({ before, utterance, after }) }] },
+        ],
+        maxTokens: MAX_JUDGE_TOKENS, timeoutMs: REQUEST_TIMEOUT_MS, label: '지시 판정',
       });
-      if (!response.ok) {
-        const body = (await response.text()).slice(0, 160);
-        throw new Error(`Bedrock Converse HTTP ${response.status} ${body}`);
-      }
-      const json = await response.json();
-      const text = readConverseText({ json });
-      return { ...parseJudgeText(text), source: JUDGE_SOURCE_MAP.bedrock };
+      return { ...parseJudgeText(text), source };
     } catch (error) {
       console.error('[pipeline] 지시 판정기 실패, 통과 처리:', error.message);
       return { shouldCaption: true, reason: null, source: JUDGE_SOURCE_MAP.error };
