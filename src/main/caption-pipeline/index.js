@@ -96,6 +96,8 @@ function registerPipeline({ getViewerView, meetingArchive = null }) {
   const featureGate = createFeatureGate();
   const silenceNarrator = createSilenceNarrator({ gate: silenceGate, judge: createSilenceJudge({ config }) });
   console.log(`[pipeline] 발화 축 판정 경로: ${config.routerMode}`);
+  console.log(`[pipeline] 탐지 판정 LLM: ${config.judgeBackend === 'gpu'
+    ? `GPU ${config.judgeGpuModel} → 실패하면 Bedrock ${config.judgeModelId}` : `Bedrock ${config.judgeModelId}`}`);
   console.log(`[pipeline] ASR 언어: 회의 ${config.asrLanguage} · 질문 ${config.questionAsrLanguage}`);
 
   const contextFile = createContextFileWriter({ outDir: CONTEXT_DIR });
