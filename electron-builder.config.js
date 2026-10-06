@@ -1,0 +1,75 @@
+const fs = require('fs');
+const path = require('path');
+const { PACKAGED_ENV_FILE_NAME } = require('./src/main/env');
+const { PACKAGED_KEY_FILE_NAME } = require('./src/main/gpu-tunnel/tunnel-config');
+
+const PRODUCT_NAME = 'SEEON';
+
+const BUILD_ENV_FILE_KEY = 'SEEON_BUILD_ENV_FILE';
+const BUILD_TUNNEL_KEY_KEY = 'SEEON_BUILD_TUNNEL_KEY';
+
+// 빌드 때 env 로 받아 설치본 resources 에 넣는 비밀 파일. 이름은 앱이 찾는 이름과 같아야 한다.
+const SECRET_RESOURCE_LIST = [
+  { envKey: BUILD_ENV_FILE_KEY, to: PACKAGED_ENV_FILE_NAME, missingNote: 'Bedrock 없이 규칙 기반으로 동작합니다' },
+  { envKey: BUILD_TUNNEL_KEY_KEY, to: PACKAGED_KEY_FILE_NAME, missingNote: 'GPU 서버 터널을 직접 열지 못합니다' },
+];
+
+// 맥에서 빌드된 네이티브 바이너리는 Windows 에서 못 쓴다. ssh2 는 이것들 없이 순수 JS 로 동작한다.
+const NATIVE_BINARY_EXCLUDE_LIST = [
+  '!node_modules/cpu-features/build/**',
+  '!node_modules/ssh2/lib/protocol/crypto/build/**',
+];
+
+// 비밀 파일 내용과 경로는 로그에 남기지 않는다. env 를 적었는데 파일이 없으면 비밀 빠진 설치 파일을 만들지 않고 멈춘다.
+function buildSecretResourceList({ env, fileExists, warn }) {
+  const resourceList = [];
+  for (const { envKey, to, missingNote } of SECRET_RESOURCE_LIST) {
+    if (!env[envKey]) {
+      warn(`[dist] ${envKey} 가 비어 있어 ${to} 없이 만듭니다 — 설치본은 ${missingNote}`);
+      continue;
+    }
+    const sourcePath = path.resolve(env[envKey]);
+    if (!fileExists(sourcePath)) throw new Error(`[dist] ${envKey} 에 적은 파일을 찾지 못했습니다`);
+    resourceList.push({ from: sourcePath, to });
+  }
+  return resourceList;
+}
+
+function createBuilderConfig({ env = process.env, fileExists = fs.existsSync, warn = console.warn } = {}) {
+  return {
+    appId: 'kr.seeon.meet',
+    productName: PRODUCT_NAME,
+    // 앱 이름(app.getName)·사용자 데이터 폴더 이름은 asar 안 package.json 의 productName 을 따른다.
+    // author 가 없으면 exe 회사 이름·설치 정보 게시자가 Electron 기본값(GitHub, Inc.)으로 남는다.
+    extraMetadata: { productName: PRODUCT_NAME, author: { name: PRODUCT_NAME } },
+    directories: { output: 'dist', buildResources: 'build' },
+    files: ['src/**/*', 'package.json', ...NATIVE_BINARY_EXCLUDE_LIST],
+    npmRebuild: false,
+    extraResources: buildSecretResourceList({ env, fileExists, warn }),
+    win: {
+      target: [{ target: 'nsis', arch: ['x64'] }],
+      icon: 'build/icon.png',
+    },
+    nsis: {
+      oneClick: true,
+      perMachine: false,
+      createDesktopShortcut: 'always',
+      createStartMenuShortcut: true,
+      shortcutName: PRODUCT_NAME,
+      runAfterFinish: true,
+      artifactName: 'SEEON-Setup-${version}.${ext}',
+    },
+    mac: {
+      target: [{ target: 'dir' }],
+      icon: 'build/icon.png',
+      // 맥 패키지는 동작 확인용이라 서명하지 않는다.
+      identity: null,
+    },
+  };
+}
+
+// electron-builder 는 함수를 내보내면 불러서 설정을 받는다.
+module.exports = () => createBuilderConfig();
+module.exports.createBuilderConfig = createBuilderConfig;
+module.exports.BUILD_ENV_FILE_KEY = BUILD_ENV_FILE_KEY;
+module.exports.BUILD_TUNNEL_KEY_KEY = BUILD_TUNNEL_KEY_KEY;

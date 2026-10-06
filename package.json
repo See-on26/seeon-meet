@@ -10,14 +10,18 @@
     "mock": "node tools/mock-gpu-server.js",
     "test": "node --test test/*.test.mjs",
     "check:renderer": "node tools/check-esm.mjs src/renderer/app/main.js",
+    "dist:win": "electron-builder --config electron-builder.config.js --win nsis --x64 --publish never",
+    "dist:mac:dir": "electron-builder --config electron-builder.config.js --mac --dir --publish never",
     "lab": "electron src/main/lab/index.js",
     "lab:debug": "electron src/main/lab/index.js --remote-debugging-port=9223"
   },
   "dependencies": {
-    "@anthropic-ai/bedrock-sdk": "^0.32.0"
+    "@anthropic-ai/bedrock-sdk": "^0.32.0",
+    "ssh2": "^1.17.0"
   },
   "devDependencies": {
     "electron": "^43.0.0",
+    "electron-builder": "^26.15.3",
     "kiwi-nlp": "0.24.0",
     "puppeteer-core": "^24.23.0"
   }

@@ -10,6 +10,13 @@ out/
 .env.*
 !.env.example
 
+# SSH 개인 키 — GPU 터널 앱 전용 키 등 키 파일은 커밋 금지
+gpu-tunnel-key
+gpu-tunnel-key.*
+seeon-app-tunnel
+seeon-app-tunnel.*
+*.pem
+
 # 대용량 미디어·부가 자료 (저장소에 올리지 않는다)
 *.mp4
 *.mov
