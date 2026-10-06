@@ -80,6 +80,8 @@ contextBridge.exposeInMainWorld('seeon', {
     return ipcRenderer.invoke('pipeline-feature-toggles', { disabledClassList });
   },
   reloadMeet() { return ipcRenderer.invoke('meet-reload'); },
+  getGpuTunnelStatus() { return ipcRenderer.invoke('gpu-tunnel-status'); },
+  onGpuTunnelStatus(callback) { ipcRenderer.on('gpu-tunnel-status-changed', (_e, payload) => callback(payload)); },
   onMeetReloaded(callback) { ipcRenderer.on('meet-reloaded', (_e, payload) => callback(payload)); },
   onPipelineEvent(callback) { ipcRenderer.on('pipeline-event', (_e, payload) => callback(payload)); },
   onRoiUpdate(callback) { ipcRenderer.on('roi-update', (_e, payload) => callback(payload)); },
