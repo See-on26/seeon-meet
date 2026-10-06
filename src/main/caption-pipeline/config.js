@@ -35,12 +35,26 @@ function readAsrLanguage({ env, envName }) {
   return DEFAULT_ASR_LANGUAGE;
 }
 
+// 탐지 단계 경량 LLM 판정(통합 라우터·무발화·지시 판정)의 백엔드. gpu 는 GPU 서버 LLM 을 먼저 쓰고 실패하면 Bedrock 으로 넘긴다.
+const JUDGE_BACKEND_LIST = ['gpu', 'bedrock'];
+const DEFAULT_JUDGE_BACKEND = 'gpu';
+
+function readJudgeBackend({ env }) {
+  const backend = env.SEEON_JUDGE_BACKEND;
+  if (backend === undefined || backend === '') return DEFAULT_JUDGE_BACKEND;
+  if (JUDGE_BACKEND_LIST.includes(backend)) return backend;
+  console.warn(`[pipeline] SEEON_JUDGE_BACKEND="${backend}" 은 지원하지 않는 판정 백엔드입니다 — ${DEFAULT_JUDGE_BACKEND} 로 판정합니다 (허용: ${JUDGE_BACKEND_LIST.join('·')})`);
+  return DEFAULT_JUDGE_BACKEND;
+}
+
 function readPipelineConfig(env = process.env) {
   const bedrockModelId = env.SEEON_BEDROCK_MODEL_ID || DEFAULT_BEDROCK_MODEL_ID;
   const judgeModelId = env.SEEON_BEDROCK_JUDGE_MODEL_ID || bedrockModelId;
+  const vlmUrl = env.SEEON_VLM_URL || DEFAULT_VLM_URL;
+  const vlmModel = env.SEEON_VLM_MODEL || DEFAULT_VLM_MODEL;
   return {
-    vlmUrl: env.SEEON_VLM_URL || DEFAULT_VLM_URL,
-    vlmModel: env.SEEON_VLM_MODEL || DEFAULT_VLM_MODEL,
+    vlmUrl,
+    vlmModel,
     asrUrl: env.SEEON_ASR_URL || DEFAULT_ASR_URL,
     // 회의 음성과 마이크 질문(한국어 사용자)은 말하는 사람이 달라 언어를 따로 둔다.
     asrLanguage: readAsrLanguage({ env, envName: 'SEEON_ASR_LANGUAGE' }),
@@ -52,6 +66,10 @@ function readPipelineConfig(env = process.env) {
     bedrockModelId,
     bedrockApiKey: env.AWS_BEARER_TOKEN_BEDROCK || '',
     judgeModelId,
+    // 판정 GPU LLM 은 따로 띄우지 않고 VLM 서버(같은 모델)에 글만 보낸다. Bedrock judgeModelId 는 GPU 실패 때 폴백이다.
+    judgeBackend: readJudgeBackend({ env }),
+    judgeGpuUrl: env.SEEON_JUDGE_GPU_URL || vlmUrl,
+    judgeGpuModel: env.SEEON_JUDGE_GPU_MODEL || vlmModel,
     summaryModelId: env.SEEON_BEDROCK_SUMMARY_MODEL_ID || DEFAULT_SUMMARY_MODEL_ID,
     // 회의 요약 마무리 재구성(듣는 글) — Sonnet. Opus 요약 초안을 낭독용으로 다듬는다.
     summaryRewriteModelId: env.SEEON_BEDROCK_SUMMARY_REWRITE_MODEL_ID || bedrockModelId,
@@ -73,4 +91,6 @@ function readPipelineConfig(env = process.env) {
   };
 }
 
-module.exports = { readPipelineConfig, ASR_LANGUAGE_LIST, DEFAULT_ASR_LANGUAGE, isAsrLanguage };
+module.exports = {
+  readPipelineConfig, ASR_LANGUAGE_LIST, DEFAULT_ASR_LANGUAGE, isAsrLanguage, JUDGE_BACKEND_LIST, DEFAULT_JUDGE_BACKEND,
+};

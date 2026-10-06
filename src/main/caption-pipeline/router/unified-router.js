@@ -1,5 +1,4 @@
-const { ensureUsPrefix, buildInferenceConfig } = require('./deixis-judge');
-const { readConverseText } = require('../agents/shared/bedrock-converse');
+const { createJudgeLlm, isJudgeAvailable } = require('../agents/shared/judge-llm');
 const {
   NARRATION_TYPE_MAP, DEIXIS_FORM_MAP, DEIXIS_REFERENCE_MAP,
   INTERPRETATION_KIND_MAP, VISUAL_DESCRIPTION_KIND_MAP,
@@ -11,7 +10,7 @@ const {
 const REQUEST_TIMEOUT_MS = 15000;
 const MAX_ROUTER_TOKENS = 300;
 
-const ROUTER_SOURCE_MAP = { bedrock: 'bedrock', fallback: 'fallback', error: 'error' };
+const ROUTER_SOURCE_MAP = { gpu: 'gpu', bedrock: 'bedrock', fallback: 'fallback', error: 'error' };
 
 const ROUTER_MODE_MAP = {
   judge: 'judge',
@@ -65,11 +64,7 @@ function parseRouterText(text) {
   return { candidateList, blockedReason };
 }
 
-function createUnifiedRouter({ config }) {
-  const apiKey = config.bedrockApiKey;
-  const converseUrl = `https://bedrock-runtime.${config.bedrockRegion}.amazonaws.com`
-    + `/model/${ensureUsPrefix(config.judgeModelId)}/converse`;
-
+function createUnifiedRouter({ config, judgeLlm = createJudgeLlm({ config }) }) {
   async function route({ utterance, before = '', after = '' }) {
     const passThrough = {
       candidateList: [{
@@ -77,30 +72,17 @@ function createUnifiedRouter({ config }) {
       }],
       blockedReason: null,
     };
-    if (!apiKey) return { ...passThrough, source: ROUTER_SOURCE_MAP.fallback };
+    if (!isJudgeAvailable({ config })) return { ...passThrough, source: ROUTER_SOURCE_MAP.fallback };
     try {
-      const response = await fetch(converseUrl, {
-        method: 'POST',
-        headers: { Authorization: `Bearer ${apiKey}`, 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          system: [{ text: ROUTER_SYSTEM_PROMPT }],
-          messages: [
-            ...buildFewShotMessageList(),
-            { role: 'user', content: [{ text: buildRouterInput({ before, utterance, after }) }] },
-          ],
-          inferenceConfig: buildInferenceConfig({
-            modelId: config.judgeModelId, maxTokens: MAX_ROUTER_TOKENS,
-          }),
-        }),
-        signal: AbortSignal.timeout(REQUEST_TIMEOUT_MS),
+      const { text, source } = await judgeLlm.requestText({
+        systemPrompt: ROUTER_SYSTEM_PROMPT,
+        messageList: [
+          ...buildFewShotMessageList(),
+          { role: 'user', content: [{ text: buildRouterInput({ before, utterance, after }) }] },
+        ],
+        maxTokens: MAX_ROUTER_TOKENS, timeoutMs: REQUEST_TIMEOUT_MS, label: '통합 라우터',
       });
-      if (!response.ok) {
-        const body = (await response.text()).slice(0, 160);
-        throw new Error(`Bedrock Converse HTTP ${response.status} ${body}`);
-      }
-      const json = await response.json();
-      const text = readConverseText({ json });
-      return { ...parseRouterText(text), source: ROUTER_SOURCE_MAP.bedrock };
+      return { ...parseRouterText(text), source };
     } catch (error) {
       console.error('[pipeline] 라우터 실패, 통과 처리:', error.message);
       return { ...passThrough, source: ROUTER_SOURCE_MAP.error };

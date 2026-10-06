@@ -1,4 +1,5 @@
 const { requestConverseText } = require('../agents/shared/bedrock-converse');
+const { createJudgeLlm } = require('../agents/shared/judge-llm');
 const {
   SILENCE_JUDGE_SYSTEM_PROMPT, SILENCE_FEW_SHOT_LIST, buildSilenceJudgeInput,
 } = require('../prompts/silence-judge');
@@ -6,7 +7,7 @@ const {
 const REQUEST_TIMEOUT_MS = 8000;
 // Sonnet 5 는 JSON 앞에 숨은 추론으로 100~200토큰을 쓴다. 상한이 작으면 빈 답(max_tokens)이 와서 단서가 있어도 차단된다.
 const MAX_JUDGE_TOKENS = 400;
-const SILENCE_JUDGE_SOURCE_MAP = { bedrock: 'bedrock', empty: 'empty', error: 'error' };
+const SILENCE_JUDGE_SOURCE_MAP = { gpu: 'gpu', bedrock: 'bedrock', empty: 'empty', error: 'error' };
 
 // 무발화 해설은 애매하면 내지 않는다. cue 가 정확히 true 인 JSON 이 아니면 모두 차단으로 읽는다.
 function parseSilenceJudgeText(text) {
@@ -28,21 +29,23 @@ function buildFewShotMessageList() {
   ]);
 }
 
-function createSilenceJudge({ config, requestConverse = requestConverseText }) {
+function createSilenceJudge({
+  config, requestConverse = requestConverseText, judgeLlm = createJudgeLlm({ config, requestConverse }),
+}) {
   async function judge({ transcript, silenceMs }) {
     if (typeof transcript !== 'string' || !transcript.trim()) {
       return { hasCue: false, reason: null, source: SILENCE_JUDGE_SOURCE_MAP.empty };
     }
     try {
-      const { text } = await requestConverse({
-        config, modelId: config.judgeModelId, systemPrompt: SILENCE_JUDGE_SYSTEM_PROMPT,
+      const { text, source } = await judgeLlm.requestText({
+        systemPrompt: SILENCE_JUDGE_SYSTEM_PROMPT,
         messageList: [
           ...buildFewShotMessageList(),
           { role: 'user', content: [{ text: buildSilenceJudgeInput({ transcript, silenceMs }) }] },
         ],
         maxTokens: MAX_JUDGE_TOKENS, timeoutMs: REQUEST_TIMEOUT_MS, label: '무발화 판정',
       });
-      return { ...parseSilenceJudgeText(text), source: SILENCE_JUDGE_SOURCE_MAP.bedrock };
+      return { ...parseSilenceJudgeText(text), source };
     } catch (error) {
       return { hasCue: false, reason: error.message, source: SILENCE_JUDGE_SOURCE_MAP.error };
     }
