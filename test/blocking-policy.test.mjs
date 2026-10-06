@@ -6,7 +6,7 @@ const require = createRequire(import.meta.url);
 const {
   NARRATION_PRIORITY_MAP, BLOCKING_RULE_MAP, BLOCKING_RELATION_MAP, NARRATION_CLASS_LABEL_MAP,
   BLOCKING_RELATION_LABEL_MAP, POINTED_MIN_INTERVAL_MS, SPEECH_ONLY_MIN_INTERVAL_MS,
-  SILENCE_AFTER_NOTICE_MIN_INTERVAL_MS, readNarrationPriority, normalizeNarrationClass,
+  SILENCE_AFTER_TRANSITION_MIN_INTERVAL_MS, readNarrationPriority, normalizeNarrationClass,
   findBlockingRule, resolveMinIntervalMs, readBlockingRelation,
 } = require('../src/main/caption-pipeline/orchestrator/blocking-policy.js');
 const { NARRATION_CLASS_MAP } = require('../src/main/caption-pipeline/contracts/narration-types.js');
@@ -61,29 +61,31 @@ test('질문 답·페이지 전환·화자 안내는 간격 검사를 받지 않
   }
 });
 
-test('무발화 해설은 페이지 전환·화자 안내 뒤 12초만 막힌다(무발화끼리는 무발화 게이트가 막는다)', () => {
+test('안내(질문 답·화자 안내)는 어떤 해설도 막지 않고, 페이지 전환 고지는 무발화 해설만 막는다', () => {
+  for (const [narrationClass, rule] of Object.entries(BLOCKING_RULE_MAP)) {
+    if (!rule) continue;
+    assert.equal(rule.blockedByClassList.includes(userCommand), false, narrationClass);
+    assert.equal(rule.blockedByClassList.includes(speakerIdentity), false, narrationClass);
+    assert.equal(rule.blockedByClassList.includes(pageTransition), narrationClass === silenceBased, narrationClass);
+  }
+});
+
+test('무발화 해설은 페이지 전환 고지 뒤 12초만 막힌다(무발화끼리는 무발화 게이트가 막는다)', () => {
   const rule = findBlockingRule({ narrationClass: silenceBased });
-  assert.deepEqual([...rule.blockedByClassList].sort(), [pageTransition, speakerIdentity].sort());
-  assert.equal(SILENCE_AFTER_NOTICE_MIN_INTERVAL_MS, 12000);
+  assert.deepEqual(rule.blockedByClassList, [pageTransition]);
+  assert.equal(SILENCE_AFTER_TRANSITION_MIN_INTERVAL_MS, 12000);
   assert.equal(resolveMinIntervalMs({ rule, hasPointingRegion: false }), 12000);
   assert.equal(resolveMinIntervalMs({ rule, hasPointingRegion: true }), 12000);
 });
 
-test('발화 기반 해설은 지시 해설에 막히지 않고, 질문 답을 뺀 같거나 높은 순위 해설에 막힌다', () => {
+test('발화 기반 해설은 무발화·발화 기반 해설에만 막히고 지시 해설에는 막히지 않는다', () => {
   const rule = findBlockingRule({ narrationClass: speechBased });
-  assert.deepEqual(
-    [...rule.blockedByClassList].sort(),
-    [pageTransition, speakerIdentity, silenceBased, speechBased].sort(),
-  );
-  assert.equal(rule.blockedByClassList.includes(deixis), false);
+  assert.deepEqual([...rule.blockedByClassList].sort(), [silenceBased, speechBased].sort());
 });
 
-test('지시 해설은 질문 답을 뺀 모든 자동 해설에 막힌다', () => {
+test('지시 해설은 무발화·발화 기반·지시 해설에 막힌다', () => {
   const rule = findBlockingRule({ narrationClass: deixis });
-  assert.deepEqual(
-    [...rule.blockedByClassList].sort(),
-    [pageTransition, speakerIdentity, silenceBased, speechBased, deixis].sort(),
-  );
+  assert.deepEqual([...rule.blockedByClassList].sort(), [silenceBased, speechBased, deixis].sort());
 });
 
 test('발화 기반·지시 해설 간격은 가리킨 곳이 있으면 12초, 발화만 있으면 18초다', () => {

@@ -42,16 +42,28 @@ test('지시 해설끼리는 지금처럼 가리킨 곳이 있으면 12초, 발�
   assert.equal(history.findRateLimited({ narrationClass: deixis, ts: 18000 }).isRateLimited, false);
 });
 
-test('페이지 전환·화자 안내 직후의 발화 기반·지시 해설은 그 해설의 간격 동안 막힌다', () => {
+test('페이지 전환·화자 안내 직후의 발화 기반·지시 해설은 막히지 않는다', () => {
   for (const blockerClass of [pageTransition, speakerIdentity]) {
     const history = createHistoryWith([{ text: '슬라이드 2: 분기별 매출', narrationClass: blockerClass, ts: 0 }]);
     for (const narrationClass of [speechBased, deixis]) {
-      const rate = history.findRateLimited({ narrationClass, ts: 10000, hasPointingRegion: true });
-      assert.equal(rate.isRateLimited, true, `${blockerClass} → ${narrationClass}`);
-      assert.equal(rate.blockedByClass, blockerClass);
-      assert.equal(history.findRateLimited({ narrationClass, ts: 12000, hasPointingRegion: true }).isRateLimited, false);
+      for (const hasPointingRegion of [true, false]) {
+        const rate = history.findRateLimited({ narrationClass, ts: 3000, hasPointingRegion });
+        assert.equal(rate.isRateLimited, false, `${blockerClass} → ${narrationClass}`);
+        assert.equal(rate.blockedByClass, null);
+      }
     }
   }
+});
+
+test('사진 단독 전환의 반응 묘사는 페이지 전환 분류라 발화 기반·지시 해설은 막지 않고 무발화 해설만 막는다', () => {
+  const history = createHistoryWith([{
+    text: '소나무보다 4배 큰 불상', narrationClass: pageTransition, ts: 0, source: 'visual_description',
+  }]);
+  assert.equal(history.findRateLimited({ narrationClass: speechBased, ts: 3000 }).isRateLimited, false);
+  assert.equal(history.findRateLimited({ narrationClass: deixis, ts: 3000 }).isRateLimited, false);
+  const rate = history.findRateLimited({ narrationClass: silenceBased, ts: 3000 });
+  assert.equal(rate.isRateLimited, true);
+  assert.equal(rate.blockedByClass, pageTransition);
 });
 
 test('무발화 해설 직후의 발화 기반·지시 해설은 막힌다', () => {
@@ -65,15 +77,18 @@ test('무발화 해설 직후의 발화 기반·지시 해설은 막힌다', () 
   }
 });
 
-test('무발화 해설은 페이지 전환·화자 안내 뒤 12초 동안만 막힌다', () => {
-  for (const blockerClass of [pageTransition, speakerIdentity]) {
-    const history = createHistoryWith([{ text: '김 님이 말합니다', narrationClass: blockerClass, ts: 0 }]);
-    const rate = history.findRateLimited({ narrationClass: silenceBased, ts: 11999 });
-    assert.equal(rate.isRateLimited, true, blockerClass);
-    assert.equal(rate.blockedByClass, blockerClass);
-    assert.equal(rate.minIntervalMs, 12000);
-    assert.equal(history.findRateLimited({ narrationClass: silenceBased, ts: 12000 }).isRateLimited, false);
-  }
+test('무발화 해설은 페이지 전환 고지 뒤 12초 동안만 막힌다', () => {
+  const history = createHistoryWith([{ text: '슬라이드 2: 분기별 매출', narrationClass: pageTransition, ts: 0 }]);
+  const rate = history.findRateLimited({ narrationClass: silenceBased, ts: 11999 });
+  assert.equal(rate.isRateLimited, true);
+  assert.equal(rate.blockedByClass, pageTransition);
+  assert.equal(rate.minIntervalMs, 12000);
+  assert.equal(history.findRateLimited({ narrationClass: silenceBased, ts: 12000 }).isRateLimited, false);
+});
+
+test('무발화 해설은 화자 안내에 막히지 않는다', () => {
+  const history = createHistoryWith([{ text: '김 님이 말합니다', narrationClass: speakerIdentity, ts: 0 }]);
+  assert.equal(history.findRateLimited({ narrationClass: silenceBased, ts: 1000 }).isRateLimited, false);
 });
 
 test('무발화 해설은 발화 기반·지시 해설에 막히지 않는다', () => {
@@ -136,8 +151,8 @@ test('막을 해설이 없으면 막지 않고 간격은 무한대다', () => {
 });
 
 test('렌더러가 버려 지운 해설은 다음 해설을 막지 않는다', () => {
-  const history = createHistoryWith([{ text: '슬라이드 2: 분기별 매출', narrationClass: pageTransition, ts: 0 }]);
+  const history = createHistoryWith([{ text: '73%는 작년 대비 성장률', narrationClass: speechBased, ts: 0, source: 'interpretation' }]);
   assert.equal(history.findRateLimited({ narrationClass: deixis, ts: 1000 }).isRateLimited, true);
-  history.forget({ ts: 0, text: '슬라이드 2: 분기별 매출' });
+  history.forget({ ts: 0, text: '73%는 작년 대비 성장률' });
   assert.equal(history.findRateLimited({ narrationClass: deixis, ts: 1000 }).isRateLimited, false);
 });

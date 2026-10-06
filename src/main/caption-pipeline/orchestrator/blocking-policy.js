@@ -18,12 +18,15 @@ const NARRATION_PRIORITY_MAP = {
 // 발화 기반·지시 해설 간격. 필기·포인터로 가리킨 곳이 있으면 대상이 분명해 더 짧게 둔다.
 const POINTED_MIN_INTERVAL_MS = 12000;
 const SPEECH_ONLY_MIN_INTERVAL_MS = 18000;
-// 페이지 전환·화자 안내 직후 무발화 해설을 막는 간격. 무발화끼리는 silence-gate(60초·슬라이드당 1회)가 막는다.
-const SILENCE_AFTER_NOTICE_MIN_INTERVAL_MS = 12000;
+// 페이지 전환 고지 직후 무발화 해설을 막는 간격. 무발화끼리는 silence-gate(60초·슬라이드당 1회)가 막는다.
+const SILENCE_AFTER_TRANSITION_MIN_INTERVAL_MS = 12000;
 
 // 차단 규칙 표. 행은 지금 들어온 해설의 분류, blockedByClassList 는 최근에 내보낸 해설 중 이 해설을 막는 분류다.
-// - 낮은 순위 해설은 높은 순위 해설을 막지 않는다: blockedByClassList 에는 순위 숫자가 행 이하인 분류만 넣는다.
-// - 질문 답(user_command)은 필요할 때만 나오는 답이라 내보냈어도 자동 해설을 막지 않는다: 어느 행에도 넣지 않는다.
+// - 안내(질문 답·페이지 전환·화자 안내)는 내용 해설을 막지 않는다. 안내가 막으면 슬라이드를 넘기거나
+//   발화자가 바뀐 직후 발표자가 처음 가리키거나 설명하는 내용 해설이 빠진다.
+//   예외로 페이지 전환 고지는 무발화 해설만 막는다: 고지가 막 그 화면을 묘사했기 때문이다.
+//   사진 단독 전환의 반응 묘사도 페이지 전환 분류라 같은 규칙을 따른다.
+// - 내용 해설(무발화·발화 기반·지시)은 순위가 같거나 낮은 내용 해설만 막는다(낮은 순위는 높은 순위를 막지 않는다).
 // - null 행은 간격 검사를 받지 않는다(중복 억제는 따로 받는다).
 // - 간격은 들어온 해설 행의 값이다. 가리킨 곳이 있으면 pointedMinIntervalMs, 없거나 값이 없으면 minIntervalMs.
 const BLOCKING_RULE_MAP = {
@@ -31,16 +34,16 @@ const BLOCKING_RULE_MAP = {
   [pageTransition]: null,
   [speakerIdentity]: null,
   [silenceBased]: {
-    blockedByClassList: [pageTransition, speakerIdentity],
-    minIntervalMs: SILENCE_AFTER_NOTICE_MIN_INTERVAL_MS,
+    blockedByClassList: [pageTransition],
+    minIntervalMs: SILENCE_AFTER_TRANSITION_MIN_INTERVAL_MS,
   },
   [speechBased]: {
-    blockedByClassList: [pageTransition, speakerIdentity, silenceBased, speechBased],
+    blockedByClassList: [silenceBased, speechBased],
     minIntervalMs: SPEECH_ONLY_MIN_INTERVAL_MS,
     pointedMinIntervalMs: POINTED_MIN_INTERVAL_MS,
   },
   [deixis]: {
-    blockedByClassList: [pageTransition, speakerIdentity, silenceBased, speechBased, deixis],
+    blockedByClassList: [silenceBased, speechBased, deixis],
     minIntervalMs: SPEECH_ONLY_MIN_INTERVAL_MS,
     pointedMinIntervalMs: POINTED_MIN_INTERVAL_MS,
   },
@@ -97,6 +100,6 @@ function readBlockingRelation({ narrationClass, blockedByClass }) {
 module.exports = {
   NARRATION_PRIORITY_MAP, BLOCKING_RULE_MAP, BLOCKING_RELATION_MAP, BLOCKING_RELATION_LABEL_MAP,
   NARRATION_CLASS_LABEL_MAP, POINTED_MIN_INTERVAL_MS, SPEECH_ONLY_MIN_INTERVAL_MS,
-  SILENCE_AFTER_NOTICE_MIN_INTERVAL_MS, normalizeNarrationClass, readNarrationPriority,
+  SILENCE_AFTER_TRANSITION_MIN_INTERVAL_MS, normalizeNarrationClass, readNarrationPriority,
   findBlockingRule, resolveMinIntervalMs, readBlockingRelation,
 };
