@@ -849,7 +849,7 @@ function registerPipeline({ getViewerView, meetingArchive = null }) {
             markDebug({
               stage: DEBUG_STAGE_MAP.router, verdict: DEBUG_VERDICT_MAP.skip, ts,
               narrationType: NARRATION_TYPE_MAP.visualDescription,
-              reason: '척도 보류 — 척도 후보 제외',
+              reason: '척도 꺼짐 — 척도 후보 제외',
               detail: `제외=[${excludedList.map((c) => `${c.type}/${c.subKind || '-'}`).join(', ')}] 발화="${utterance}"`,
             });
           }

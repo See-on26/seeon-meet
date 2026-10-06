@@ -80,8 +80,8 @@ function readPipelineConfig(env = process.env) {
       delayed: env.SEEON_BEDROCK_GAP_BALANCED_MODEL_ID || judgeModelId,
     },
     routerMode: env.SEEON_ROUTER_MODE || DEFAULT_ROUTER_MODE,
-    // 3-3 추상적 척도는 보류 중이다. 'true' 로 켜야만 척도 해설을 생성한다.
-    isScaleEnabled: env.SEEON_ROUTER_SCALE_ENABLED === 'true',
+    // 추상적 척도 해설(화면에 보이는 대상의 정도)은 기본으로 켠다. 'false' 로 두면 척도 후보를 생성하지 않는다.
+    isScaleEnabled: env.SEEON_ROUTER_SCALE_ENABLED !== 'false',
     isVlmFallbackEnabled: env.SEEON_VLM_FALLBACK_ENABLED !== 'false',
     vlmFallbackModelId: env.SEEON_BEDROCK_VLM_FALLBACK_MODEL_ID || DEFAULT_VLM_FALLBACK_MODEL_ID,
     hasBedrockCredentials:
