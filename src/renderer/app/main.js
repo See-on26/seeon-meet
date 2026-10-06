@@ -17,6 +17,7 @@ import {
 } from '../core/mode/feature-toggle-store.js';
 import {
   createMeetingLanguageStore, MEETING_LANGUAGE_LIST, MEETING_LANGUAGE_LABEL_MAP, isMeetingLanguageLocked,
+  describeNonDefaultMeetingLanguage,
 } from '../core/mode/meeting-language-store.js';
 
 import { DelayBuffer, isCaptionDroppable, EXCESS_DROP_MS } from '../core/audio-renderer/delay-buffer.js';
@@ -1677,11 +1678,16 @@ async function attemptStartExperiment() {
   $('toggleBtn').disabled = true;
   try {
     showNotice('회의 캡처를 시작했습니다 — 화면 해설이 곧 표시됩니다.');
-    // 꺼 둔 기능은 다음 실행에도 남는다. 꺼진 줄 모르고 회의를 듣지 않게 시작할 때 알린다.
+    // 꺼 둔 기능과 고른 회의 언어는 다음 실행에도 남는다. 모르고 회의를 듣지 않게 시작할 때 알린다.
+    // 연달아 announce 하면 앞 문구가 스크린리더에서 묻히므로 한 번에 읽는다.
+    const startNoticeList = [];
+    const languageNotice = describeNonDefaultMeetingLanguage({ language: meetingLanguageStore.get() });
+    if (languageNotice) startNoticeList.push(`${languageNotice}. 캡처를 멈춘 뒤 설정에서 바꿀 수 있어요.`);
     const disabledLabelList = listDisabledFeatureLabel({ store: featureToggleStore });
     if (disabledLabelList.length) {
-      announce(`꺼져 있는 기능: ${disabledLabelList.join(', ')}. 설정이나 Control Shift 숫자로 켤 수 있어요`);
+      startNoticeList.push(`꺼져 있는 기능: ${disabledLabelList.join(', ')}. 설정이나 Control Shift 숫자로 켤 수 있어요`);
     }
+    if (startNoticeList.length) announce(startNoticeList.join(' '));
 
     const sessionResult = await window.seeon.startPipelineSession({
       mode: getCurrentMode(), asrLanguage: meetingLanguageStore.get(),

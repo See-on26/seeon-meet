@@ -22,6 +22,12 @@ export function isMeetingLanguageLocked({ isCaptureActive }) {
   return Boolean(isCaptureActive);
 }
 
+// 고른 언어는 다음 실행에도 남는다. 영어 회의 뒤 한국어 회의를 영어로 전사하지 않게, 한국어가 아니면 캡처 시작 때 알린다.
+export function describeNonDefaultMeetingLanguage({ language }) {
+  if (!isMeetingLanguage(language) || language === DEFAULT_MEETING_LANGUAGE) return '';
+  return `회의 언어: ${MEETING_LANGUAGE_LABEL_MAP[language]}`;
+}
+
 function readStoredLanguage({ storage }) {
   try {
     const stored = storage?.getItem(MEETING_LANGUAGE_STORAGE_KEY);

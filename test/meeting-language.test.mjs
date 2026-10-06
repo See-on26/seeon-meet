@@ -3,7 +3,7 @@ import assert from 'node:assert/strict';
 import { createRequire } from 'node:module';
 import {
   createMeetingLanguageStore, MEETING_LANGUAGE_LIST, MEETING_LANGUAGE_LABEL_MAP, DEFAULT_MEETING_LANGUAGE,
-  MEETING_LANGUAGE_STORAGE_KEY, isMeetingLanguage, isMeetingLanguageLocked,
+  MEETING_LANGUAGE_STORAGE_KEY, isMeetingLanguage, isMeetingLanguageLocked, describeNonDefaultMeetingLanguage,
 } from '../src/renderer/core/mode/meeting-language-store.js';
 
 const require = createRequire(import.meta.url);
@@ -151,4 +151,11 @@ test('세션 기록에 이번 세션의 회의 언어가 모드와 함께 남는
 
   sessionStore.startSession({ mode: 'listening', startedAt: 3 });
   assert.equal(sessionStore.endSession({ endedAt: 4 }).asrLanguage, null);
+});
+
+test('캡처 시작 안내: 회의 언어가 한국어가 아니면 알릴 문구를, 한국어면 빈 문자열을 준다', () => {
+  assert.equal(describeNonDefaultMeetingLanguage({ language: 'ko' }), '');
+  assert.equal(describeNonDefaultMeetingLanguage({ language: 'en' }), '회의 언어: English');
+  assert.equal(describeNonDefaultMeetingLanguage({ language: 'auto' }), '회의 언어: 자동(한·영)');
+  assert.equal(describeNonDefaultMeetingLanguage({ language: 'xx' }), '');
 });
