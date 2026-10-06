@@ -16,14 +16,21 @@ function takeTextList(queue) {
   return textList;
 }
 
-test('겹친 자동 해설은 페이지 전환 > 지시 > 발화 > 무발화 > 화자 순으로 꺼낸다', () => {
+test('겹친 자동 해설은 페이지 전환·화자 > 무발화 > 발화 > 지시 순으로 꺼낸다', () => {
+  const queue = new NarrationQueue({ now: createClock().now });
+  queue.push({ text: '지시', narrationClass: 'deixis' });
+  queue.push({ text: '발화', narrationClass: 'speech_based' });
+  queue.push({ text: '무발화', narrationClass: 'silence_based' });
+  queue.push({ text: '전환', narrationClass: 'page_transition' });
+  queue.push({ text: '화자', narrationClass: 'speaker_identity' });
+  assert.deepEqual(takeTextList(queue), ['전환', '화자', '무발화', '발화', '지시']);
+});
+
+test('페이지 전환과 화자 식별은 같은 순위라 먼저 들어온 쪽부터 꺼낸다', () => {
   const queue = new NarrationQueue({ now: createClock().now });
   queue.push({ text: '화자', narrationClass: 'speaker_identity' });
-  queue.push({ text: '무발화', narrationClass: 'silence_based' });
-  queue.push({ text: '발화', narrationClass: 'speech_based' });
-  queue.push({ text: '지시', narrationClass: 'deixis' });
   queue.push({ text: '전환', narrationClass: 'page_transition' });
-  assert.deepEqual(takeTextList(queue), ['전환', '지시', '발화', '무발화', '화자']);
+  assert.deepEqual(takeTextList(queue), ['화자', '전환']);
 });
 
 test('질문 답은 어떤 자동 해설보다 먼저 꺼낸다', () => {
@@ -92,9 +99,9 @@ test('dueAt 이 있으면 대기 줄에 들어온 시각이 아니라 그 시각
 test('전환 고지를 꺼낼 때 그보다 먼저 들어온 다른 슬라이드 해설은 버린다', () => {
   const queue = new NarrationQueue({ now: createClock().now });
   queue.push({ text: '1번 지시', narrationClass: 'deixis', slideLabel: '1' });
-  queue.push({ text: '화자', narrationClass: 'speaker_identity', slideLabel: null });
   queue.push({ text: '2번 앞서 들어온 발화', narrationClass: 'speech_based', slideLabel: '2' });
   queue.push({ text: '2번 전환', narrationClass: 'page_transition', slideLabel: '2' });
+  queue.push({ text: '화자', narrationClass: 'speaker_identity', slideLabel: null });
   queue.push({ text: '3번 지시', narrationClass: 'deixis', slideLabel: '3' });
 
   const { entry, droppedList } = queue.takeNext();
@@ -102,7 +109,7 @@ test('전환 고지를 꺼낼 때 그보다 먼저 들어온 다른 슬라이드
   assert.deepEqual(droppedList.map((drop) => [drop.entry.text, drop.reason]), [
     ['1번 지시', QUEUE_DROP_REASON_MAP.slideChanged],
   ]);
-  assert.deepEqual(takeTextList(queue), ['3번 지시', '2번 앞서 들어온 발화', '화자']);
+  assert.deepEqual(takeTextList(queue), ['화자', '2번 앞서 들어온 발화', '3번 지시']);
 });
 
 test('슬라이드 번호가 숫자와 문자열로 섞여 와도 같은 슬라이드로 본다', () => {
