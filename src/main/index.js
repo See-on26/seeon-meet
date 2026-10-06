@@ -1,7 +1,7 @@
 const { app, ipcMain, Menu } = require('electron');
 const { loadEnvFile } = require('./env');
 
-loadEnvFile();
+loadEnvFile({ isPackaged: app.isPackaged, resourcesPath: process.resourcesPath });
 
 const fs = require('fs');
 const { FRAMES_DIR, DEIXIS_NARRATED_DIR, DEIXIS_SKIPPED_DIR, SLIDES_DIR, SUMMARIES_DIR } = require('./paths');
