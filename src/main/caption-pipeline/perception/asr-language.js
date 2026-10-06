@@ -1,0 +1,34 @@
+const { isAsrLanguage, ASR_LANGUAGE_LIST } = require('../config');
+
+// 회의 음성과 마이크 질문의 ASR 언어를 따로 들고 요청에 실어 보낸다.
+// 회의 언어는 영어 회의·평가 영상처럼 세션마다 달라 바꿀 수 있고, 질문은 한국어 사용자가 하므로 설정값에 고정한다.
+function createAsrLanguageSession({ asrClient, config }) {
+  let meetingLanguage = config.asrLanguage;
+
+  // 요청을 보낸 시점의 언어를 결과에 남긴다. 응답을 기다리는 동안 언어가 바뀌어도 기록이 어긋나지 않는다.
+  async function transcribeWithLanguage({ webmBuffer, startTs, language }) {
+    const result = await asrClient.transcribeSegment({ webmBuffer, startTs, language });
+    return { ...result, requestedLanguage: language };
+  }
+
+  return {
+    getMeetingLanguage: () => meetingLanguage,
+    getQuestionLanguage: () => config.questionAsrLanguage,
+    setMeetingLanguage(language) {
+      if (!isAsrLanguage(language)) {
+        console.warn(`[pipeline] ASR 언어 "${language}" 은 지원하지 않습니다 — ${meetingLanguage} 를 그대로 씁니다 (허용: ${ASR_LANGUAGE_LIST.join('·')})`);
+        return false;
+      }
+      meetingLanguage = language;
+      return true;
+    },
+    transcribeMeetingSegment: ({ webmBuffer, startTs }) => transcribeWithLanguage({
+      webmBuffer, startTs, language: meetingLanguage,
+    }),
+    transcribeQuestionSegment: ({ webmBuffer, startTs }) => transcribeWithLanguage({
+      webmBuffer, startTs, language: config.questionAsrLanguage,
+    }),
+  };
+}
+
+module.exports = { createAsrLanguageSession };
