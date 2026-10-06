@@ -227,7 +227,7 @@ test('교차 모드: stop 은 줄인 회의 소리를 되돌린다', async () =>
 test('동시 모드: 한꺼번에 넣은 해설은 첫 항목부터 틀지 않고 우선순위대로 재생한다', async () => {
   const { mixer, sourceList } = createMixer();
   mixer.queueCaptionList([
-    makeEntry({ id: '화자', narrationClass: 'speaker_identity' }),
+    makeEntry({ id: '발화', narrationClass: 'speech_based' }),
     makeEntry({ id: '전환', narrationClass: 'page_transition' }),
     makeEntry({ id: '지시' }),
   ]);
