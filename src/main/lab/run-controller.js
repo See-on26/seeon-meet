@@ -89,7 +89,7 @@ function createRunController({
   function getStatus() {
     const errorList = activeRun ? activeRun.errorList : startErrorList;
     return {
-      phase, message: phaseMessage, mode: runMode, runDir, lastRunDir,
+      phase, message: phaseMessage, mode: runMode, asrLanguage: runAsrLanguage, runDir, lastRunDir,
       errorList: errorList.map((error) => ({ ...error })),
     };
   }

@@ -164,6 +164,10 @@ test('고른 회의 언어로 viewer 를 새로 불러오고, 실행 기록에 �
   assert.deepEqual(harness.presetList, [{ isEvalPreset: true, asrLanguage: 'en' }]);
   assert.equal(harness.callList[0], 'viewer.reload', '언어를 정한 뒤 viewer 를 새로 불러야 저장값을 다시 읽는다');
   assert.match(harness.controller.getStatus().message, /균형 모드 · 회의 언어 English/);
+  // 조작 바는 상태 알림으로 실행 모드·회의 언어를 받아 select 에 보인다(자동 실행처럼 조작 바를 거치지 않은 시작 포함).
+  assert.equal(harness.controller.getStatus().asrLanguage, 'en');
+  assert.equal(harness.controller.getStatus().mode, 'delayed');
+  assert.ok(harness.statusList.filter((status) => status.phase === RUN_PHASE_MAP.preparing).every((status) => status.asrLanguage === 'en'));
   await harness.controller.stop();
   const { run } = harness.finalizedList[0];
   assert.equal(run.asrLanguage, 'en');

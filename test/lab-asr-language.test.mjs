@@ -4,6 +4,7 @@ import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import { createRequire } from 'node:module';
+import { pickRunSelection } from '../src/renderer/lab/control-sync.js';
 import {
   createMeetingLanguageStore, MEETING_LANGUAGE_LIST, MEETING_LANGUAGE_STORAGE_KEY, MEETING_LANGUAGE_LABEL_MAP, DEFAULT_MEETING_LANGUAGE,
 } from '../src/renderer/core/mode/meeting-language-store.js';
@@ -92,6 +93,19 @@ test('조작 바는 회의 언어를 한국어·English·자동(한·영) 중에
   const script = fs.readFileSync(new URL('../src/renderer/lab/control.js', import.meta.url), 'utf8');
   assert.match(script, /\$\('languageSelect'\)\.disabled = !isIdle;/);
   assert.match(script, /asrLanguage: \$\('languageSelect'\)\.value/);
+});
+
+test('실행 중에는 조작 바 select 가 상태 알림의 실행 모드·회의 언어를 보이고, 쉬는 중에는 사용자가 고른 값을 건드리지 않는다', () => {
+  for (const phase of ['preparing', 'running', 'paused', 'draining', 'finalizing']) {
+    assert.deepEqual(pickRunSelection({ status: { phase, mode: 'listening', asrLanguage: 'en' } }), { mode: 'listening', asrLanguage: 'en' }, phase);
+  }
+  for (const phase of ['idle', 'done', 'failed']) {
+    assert.deepEqual(pickRunSelection({ status: { phase, mode: 'listening', asrLanguage: 'en' } }), {}, phase);
+  }
+  // 값이 없으면(옛 상태·준비 전 실패) 그 select 는 그대로 둔다.
+  assert.deepEqual(pickRunSelection({ status: { phase: 'running', mode: null } }), {});
+  const script = fs.readFileSync(new URL('../src/renderer/lab/control.js', import.meta.url), 'utf8');
+  assert.match(script, /pickRunSelection\(\{ status \}\)/);
 });
 
 test('실험 main 은 viewer preload 에 이번 실행의 회의 언어를 주고, 세션 시작 요청의 회의 언어를 실행 기록에 넘긴다', () => {

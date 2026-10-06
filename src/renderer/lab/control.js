@@ -1,6 +1,7 @@
+import { IDLE_PHASE_LIST, pickRunSelection } from './control-sync.js';
+
 const $ = (id) => document.getElementById(id);
 
-const IDLE_PHASE_LIST = ['idle', 'done', 'failed'];
 // 팀 결정: 평가 설정을 켜면 균형 모드를 기본으로 고른다. 다른 모드도 직접 고를 수 있다.
 const EVAL_PRESET_MODE = 'delayed';
 
@@ -11,6 +12,9 @@ let lastStatus = { phase: 'idle', message: '', lastRunDir: null, runDir: null };
 function render(status) {
   lastStatus = status;
   const isIdle = IDLE_PHASE_LIST.includes(status.phase);
+  const selection = pickRunSelection({ status });
+  if (selection.mode) $('modeSelect').value = selection.mode;
+  if (selection.asrLanguage) $('languageSelect').value = selection.asrLanguage;
   $('pickBtn').disabled = !isIdle;
   $('modeSelect').disabled = !isIdle;
   $('languageSelect').disabled = !isIdle;
