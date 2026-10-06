@@ -74,8 +74,11 @@ function computeMockEmbedding(jpegBuffer) {
   return histogram.map((value) => value / norm);
 }
 
-async function startMockServerList({ vlmPort = 8801, asrPort = 8802, ttsPort = 8803, embedPort = 8804 } = {}) {
-  const vlmServer = http.createServer(async (request, response) => {
+async function startMockServerList({
+  vlmPort = 8801, asrPort = 8802, ttsPort = 8803, embedPort = 8804, judgePort = 8805,
+} = {}) {
+  // 판정 LLM(8805)은 VLM 과 같은 처리기로 흉내 낸다. 판정 답을 못 읽으면 앱은 판정 실패로 처리한다.
+  const handleChatCompletion = async (request, response) => {
     const body = await collectBody(request);
 
     let content;
@@ -87,7 +90,9 @@ async function startMockServerList({ vlmPort = 8801, asrPort = 8802, ttsPort = 8
     else content = JSON.stringify(MOCK_FACT_SHEET);
     response.writeHead(200, { 'content-type': 'application/json' });
     response.end(JSON.stringify({ choices: [{ message: { content } }] }));
-  });
+  };
+  const vlmServer = http.createServer(handleChatCompletion);
+  const judgeServer = http.createServer(handleChatCompletion);
   const asrServer = http.createServer(async (request, response) => {
     await collectBody(request);
     const text = MOCK_TRANSCRIPT_LIST[mockTranscriptIndex % MOCK_TRANSCRIPT_LIST.length];
@@ -119,6 +124,7 @@ async function startMockServerList({ vlmPort = 8801, asrPort = 8802, ttsPort = 8
 
   const serverList = [
     [vlmServer, vlmPort], [asrServer, asrPort], [ttsServer, ttsPort], [embedServer, embedPort],
+    [judgeServer, judgePort],
   ];
   await Promise.all(serverList.map(([server, port]) =>
     new Promise((resolve) => server.listen(port, '127.0.0.1', resolve))));
@@ -133,6 +139,6 @@ module.exports = { startMockServerList, createBeepWav };
 
 if (require.main === module) {
   startMockServerList({}).then(() => {
-    console.log('[mock] vlm:8801 asr:8802 tts:8803 embed:8804 대기 중');
+    console.log('[mock] vlm:8801 asr:8802 tts:8803 embed:8804 judge:8805 대기 중');
   });
 }

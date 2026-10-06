@@ -123,11 +123,12 @@ test('bedrock 백엔드거나 백엔드가 지정되지 않은 설정은 GPU 를
   }
 });
 
-test('파이프라인 설정: 판정 백엔드는 기본 gpu, GPU 주소·모델은 VLM 과 같고 env 로 바꾼다', () => {
+test('파이프라인 설정: 판정 백엔드는 기본 gpu, GPU 판정은 VLM 과 따로 띄운 Qwen3.5-9B(8805)이고 env 로 바꾼다', () => {
   const defaultConfig = readPipelineConfig({});
   assert.equal(defaultConfig.judgeBackend, 'gpu');
-  assert.equal(defaultConfig.judgeGpuUrl, defaultConfig.vlmUrl);
-  assert.equal(defaultConfig.judgeGpuModel, defaultConfig.vlmModel);
+  assert.equal(defaultConfig.judgeGpuUrl, 'http://127.0.0.1:8805/v1/chat/completions');
+  assert.equal(defaultConfig.judgeGpuModel, 'qwen3.5-9b');
+  assert.notEqual(defaultConfig.judgeGpuUrl, defaultConfig.vlmUrl);
   const customConfig = readPipelineConfig({
     SEEON_JUDGE_BACKEND: 'bedrock', SEEON_JUDGE_GPU_URL: 'http://x/v1/chat/completions', SEEON_JUDGE_GPU_MODEL: 'm',
   });

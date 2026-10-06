@@ -6,6 +6,9 @@ const DEFAULT_TTS_URL = 'http://127.0.0.1:8803/tts';
 
 const DEFAULT_TTS_LONG_URL = 'http://127.0.0.1:8803/tts-long';
 const DEFAULT_EMBED_URL = 'http://127.0.0.1:8804/embed';
+// 탐지 단계 경량 LLM 판정 전용 서버. GPU 서버에서 VLM(8801)과 따로 Qwen3.5-9B 를 8805 에 띄운다.
+const DEFAULT_JUDGE_GPU_URL = 'http://127.0.0.1:8805/v1/chat/completions';
+const DEFAULT_JUDGE_GPU_MODEL = 'qwen3.5-9b';
 const DEFAULT_BEDROCK_REGION = 'us-east-1';
 
 const DEFAULT_BEDROCK_MODEL_ID = 'anthropic.claude-sonnet-5';
@@ -66,10 +69,10 @@ function readPipelineConfig(env = process.env) {
     bedrockModelId,
     bedrockApiKey: env.AWS_BEARER_TOKEN_BEDROCK || '',
     judgeModelId,
-    // 판정 GPU LLM 은 따로 띄우지 않고 VLM 서버(같은 모델)에 글만 보낸다. Bedrock judgeModelId 는 GPU 실패 때 폴백이다.
+    // 판정 GPU LLM 은 VLM 과 따로 띄운 경량 모델(Qwen3.5-9B)에 글만 보낸다. Bedrock judgeModelId 는 GPU 실패 때 폴백이다.
     judgeBackend: readJudgeBackend({ env }),
-    judgeGpuUrl: env.SEEON_JUDGE_GPU_URL || vlmUrl,
-    judgeGpuModel: env.SEEON_JUDGE_GPU_MODEL || vlmModel,
+    judgeGpuUrl: env.SEEON_JUDGE_GPU_URL || DEFAULT_JUDGE_GPU_URL,
+    judgeGpuModel: env.SEEON_JUDGE_GPU_MODEL || DEFAULT_JUDGE_GPU_MODEL,
     summaryModelId: env.SEEON_BEDROCK_SUMMARY_MODEL_ID || DEFAULT_SUMMARY_MODEL_ID,
     // 회의 요약 마무리 재구성(듣는 글) — Sonnet. Opus 요약 초안을 낭독용으로 다듬는다.
     summaryRewriteModelId: env.SEEON_BEDROCK_SUMMARY_REWRITE_MODEL_ID || bedrockModelId,
@@ -92,5 +95,5 @@ function readPipelineConfig(env = process.env) {
 }
 
 module.exports = {
-  readPipelineConfig, ASR_LANGUAGE_LIST, DEFAULT_ASR_LANGUAGE, isAsrLanguage, JUDGE_BACKEND_LIST, DEFAULT_JUDGE_BACKEND,
+  readPipelineConfig, DEFAULT_JUDGE_GPU_URL, DEFAULT_JUDGE_GPU_MODEL, ASR_LANGUAGE_LIST, DEFAULT_ASR_LANGUAGE, isAsrLanguage, JUDGE_BACKEND_LIST, DEFAULT_JUDGE_BACKEND,
 };
