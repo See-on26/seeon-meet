@@ -1364,6 +1364,13 @@ window.seeon.onMeetReloaded(({ reason }) => {
   });
 });
 
+// GPU 서버 터널 상태: 처음 한 번 물어 오고, 이후에는 main 이 바뀔 때마다 알려 준다.
+function renderGpuTunnelStatus({ label }) {
+  $('stGpuTunnel').textContent = label;
+}
+window.seeon.getGpuTunnelStatus().then(renderGpuTunnelStatus).catch(() => {});
+window.seeon.onGpuTunnelStatus(renderGpuTunnelStatus);
+
 // 실제 키 입력은 main 이 먼저 받아 막는다(before-input-event). 여기는 main 을 거치지 않은 입력용이다.
 const FEATURE_TOGGLE_CODE_PATTERN = /^Digit([1-3])$/;
 

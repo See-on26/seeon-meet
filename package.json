@@ -12,7 +12,8 @@
     "check:renderer": "node tools/check-esm.mjs src/renderer/app/main.js"
   },
   "dependencies": {
-    "@anthropic-ai/bedrock-sdk": "^0.32.0"
+    "@anthropic-ai/bedrock-sdk": "^0.32.0",
+    "ssh2": "^1.17.0"
   },
   "devDependencies": {
     "electron": "^43.0.0",

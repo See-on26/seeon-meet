@@ -15,8 +15,12 @@ const window = require('./window');
 const { reloadMeetView, registerMeetReload } = require('./meeting/meet-reload');
 const { registerMeetMicControl } = require('./meeting/meet-mic-control');
 const { buildAppMenuTemplate, MEET_RELOAD_ACCELERATOR } = require('./app-menu');
+const { registerGpuTunnel } = require('./gpu-tunnel');
 
 app.whenReady().then(() => {
+  // GPU 서비스(127.0.0.1:880x)를 부르기 전에 터널부터 연다.
+  registerGpuTunnel({ app, ipcMain, getViewerView: window.getViewerView });
+
   fs.mkdirSync(FRAMES_DIR, { recursive: true });
   fs.mkdirSync(DEIXIS_NARRATED_DIR, { recursive: true });
   fs.mkdirSync(DEIXIS_SKIPPED_DIR, { recursive: true });
