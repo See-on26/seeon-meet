@@ -120,7 +120,7 @@ export function buildJudgeModelLabel({ config }) {
 export function countJudgeSource({ rawList }) {
   const countMap = {};
   for (const raw of rawList) {
-    const source = raw.routed?.source ?? raw.judged?.source;
+    const source = raw.output?.source;
     if (source) countMap[source] = (countMap[source] || 0) + 1;
   }
   return countMap;

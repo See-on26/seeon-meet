@@ -388,8 +388,9 @@ test('판정 모델 이름표: gpu 백엔드면 GPU 모델(폴백 Bedrock), bedr
 
 test('판정 경로별 호출 수를 센다(gpu·bedrock·그 밖)', () => {
   const rawList = [
-    { routed: { source: 'gpu' } }, { routed: { source: 'gpu' } }, { routed: { source: 'bedrock' } },
-    { judged: { source: 'gpu' } }, { judged: null, skipReason: 'no_transcript' }, { routed: { source: 'error' } },
+    { kind: 'router', output: { source: 'gpu' } }, { kind: 'router', output: { source: 'gpu' } },
+    { kind: 'router', output: { source: 'bedrock' } }, { kind: 'silence', output: { source: 'gpu' } },
+    { kind: 'silence', output: null, skipReason: 'no_transcript' }, { kind: 'router', output: { source: 'error' } },
   ];
   assert.deepEqual(countJudgeSource({ rawList }), { gpu: 3, bedrock: 1, error: 1 });
 });
