@@ -19,6 +19,22 @@ const DEFAULT_GAP_QUALITY_MODEL_ID = 'anthropic.claude-opus-4-7';
 // GPU VLM 이 응답하지 못할 때 같은 프롬프트·이미지를 보낼 Bedrock 모델. ensureUsPrefix 가 us. 를 붙인다.
 const DEFAULT_VLM_FALLBACK_MODEL_ID = 'anthropic.claude-haiku-4-5-20251001-v1:0';
 
+// ASR 전사 언어. auto 는 GPU 서버가 ko·en 중 감지 확률이 높은 쪽으로 전사한다.
+const ASR_LANGUAGE_LIST = ['ko', 'en', 'auto'];
+const DEFAULT_ASR_LANGUAGE = 'ko';
+
+function isAsrLanguage(language) {
+  return ASR_LANGUAGE_LIST.includes(language);
+}
+
+function readAsrLanguage({ env, envName }) {
+  const language = env[envName];
+  if (language === undefined || language === '') return DEFAULT_ASR_LANGUAGE;
+  if (isAsrLanguage(language)) return language;
+  console.warn(`[pipeline] ${envName}="${language}" 은 지원하지 않는 ASR 언어입니다 — ${DEFAULT_ASR_LANGUAGE} 로 전사합니다 (허용: ${ASR_LANGUAGE_LIST.join('·')})`);
+  return DEFAULT_ASR_LANGUAGE;
+}
+
 function readPipelineConfig(env = process.env) {
   const bedrockModelId = env.SEEON_BEDROCK_MODEL_ID || DEFAULT_BEDROCK_MODEL_ID;
   const judgeModelId = env.SEEON_BEDROCK_JUDGE_MODEL_ID || bedrockModelId;
@@ -26,6 +42,9 @@ function readPipelineConfig(env = process.env) {
     vlmUrl: env.SEEON_VLM_URL || DEFAULT_VLM_URL,
     vlmModel: env.SEEON_VLM_MODEL || DEFAULT_VLM_MODEL,
     asrUrl: env.SEEON_ASR_URL || DEFAULT_ASR_URL,
+    // 회의 음성과 마이크 질문(한국어 사용자)은 말하는 사람이 달라 언어를 따로 둔다.
+    asrLanguage: readAsrLanguage({ env, envName: 'SEEON_ASR_LANGUAGE' }),
+    questionAsrLanguage: readAsrLanguage({ env, envName: 'SEEON_QUESTION_ASR_LANGUAGE' }),
     ttsUrl: env.SEEON_TTS_URL || DEFAULT_TTS_URL,
     ttsLongUrl: env.SEEON_TTS_LONG_URL || DEFAULT_TTS_LONG_URL,
     embedUrl: env.SEEON_EMBED_URL || DEFAULT_EMBED_URL,
@@ -54,4 +73,4 @@ function readPipelineConfig(env = process.env) {
   };
 }
 
-module.exports = { readPipelineConfig };
+module.exports = { readPipelineConfig, ASR_LANGUAGE_LIST, DEFAULT_ASR_LANGUAGE, isAsrLanguage };
