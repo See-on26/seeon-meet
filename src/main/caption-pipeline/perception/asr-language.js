@@ -31,4 +31,11 @@ function createAsrLanguageSession({ asrClient, config }) {
   };
 }
 
-module.exports = { createAsrLanguageSession };
+// 캡처 시작 때 렌더러가 고른 회의 언어를 적용하고, 이번 세션에 쓸 회의 언어를 돌려준다.
+// 언어를 보내지 않는 옛 호출이면 지금 회의 언어를 그대로 쓴다. 허용값이 아니면 setMeetingLanguage 가 경고하고 그대로 둔다.
+function applySessionMeetingLanguage({ asrLanguageSession, asrLanguage }) {
+  if (asrLanguage !== undefined && asrLanguage !== null) asrLanguageSession.setMeetingLanguage(asrLanguage);
+  return asrLanguageSession.getMeetingLanguage();
+}
+
+module.exports = { createAsrLanguageSession, applySessionMeetingLanguage };

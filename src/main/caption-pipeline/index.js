@@ -23,7 +23,7 @@ const { createSlideTopicRegistry, SLIDE_TOPIC_VERDICT_MAP } = require('./orchest
 const { createSpeakerRegistry } = require('./orchestrator/speaker-registry');
 const { createNarrationHistory } = require('./orchestrator/narration-history');
 const { createAsrClient } = require('./perception/asr-client');
-const { createAsrLanguageSession } = require('./perception/asr-language');
+const { createAsrLanguageSession, applySessionMeetingLanguage } = require('./perception/asr-language');
 const { createEmbedClient } = require('./perception/embed-client');
 const { createTtsClient } = require('./output/tts-client');
 const { createGapInferenceAgent } = require('./output/gap-inference-agent');
@@ -302,7 +302,7 @@ function registerPipeline({ getViewerView, meetingArchive = null }) {
     return { isEmitted: true };
   }
 
-  ipcMain.handle('pipeline-session-start', async (_event, { mode = '' } = {}) => {
+  ipcMain.handle('pipeline-session-start', async (_event, { mode = '', asrLanguage } = {}) => {
     describedStore.reset();
     captionDescribed.reset();
     screenRegistry.reset();
@@ -311,13 +311,14 @@ function registerPipeline({ getViewerView, meetingArchive = null }) {
     narrationHistory.reset();
     silenceGate.reset();
     slideTextStore.reset();
-    const { sessionId } = sessionStore.startSession({ mode });
+    const meetingLanguage = applySessionMeetingLanguage({ asrLanguageSession, asrLanguage });
+    const { sessionId } = sessionStore.startSession({ mode, asrLanguage: meetingLanguage });
     contextGeneration += 1;
     contextStore.start({ sessionId, startedAt: Date.now() });
-    console.log(`[pipeline] ■ 캡처 세션 시작 (모드=${mode}, ${sessionId}) — 중복 이력·화면 레지스트리 초기화`);
+    console.log(`[pipeline] ■ 캡처 세션 시작 (모드=${mode}, 회의 언어=${meetingLanguage}, ${sessionId}) — 중복 이력·화면 레지스트리 초기화`);
     markDebug({
       stage: DEBUG_STAGE_MAP.session, verdict: DEBUG_VERDICT_MAP.info,
-      reason: '세션 시작', detail: `모드=${mode} · ${sessionId} · 기록=${recordStore.filePath}`,
+      reason: '세션 시작', detail: `모드=${mode} · 회의 언어=${meetingLanguage} · ${sessionId} · 기록=${recordStore.filePath}`,
     });
 
     return { isOk: true, sessionId, recordPath: recordStore.filePath };

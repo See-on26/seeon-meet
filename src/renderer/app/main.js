@@ -15,6 +15,10 @@ import {
   createFeatureToggleStore, FEATURE_KEY_MAP, FEATURE_KEY_LIST, FEATURE_LABEL_MAP,
   readFeatureKeyFromDigit, listDisabledNarrationClass, listDisabledFeatureLabel, isFeatureLockedDuringCapture,
 } from '../core/mode/feature-toggle-store.js';
+import {
+  createMeetingLanguageStore, MEETING_LANGUAGE_LIST, MEETING_LANGUAGE_LABEL_MAP, isMeetingLanguageLocked,
+  describeNonDefaultMeetingLanguage,
+} from '../core/mode/meeting-language-store.js';
 
 import { DelayBuffer, isCaptionDroppable, EXCESS_DROP_MS } from '../core/audio-renderer/delay-buffer.js';
 import { StreamDelaySource } from '../core/audio-renderer/stream-delay-source.js';
@@ -96,6 +100,7 @@ function readLocalStorage() {
 }
 
 const featureToggleStore = createFeatureToggleStore({ storage: readLocalStorage() });
+const meetingLanguageStore = createMeetingLanguageStore({ storage: readLocalStorage() });
 const isNarrationEntryEnabled = (entry) => featureToggleStore.isClassOn(entry.narrationClass);
 
 // 해설이 들리기 시작한 순간을 실험 모드(lab-viewer preload)에 알린다. 제품 앱에는 받는 쪽이 없어 아무 일도 하지 않는다.
@@ -1245,6 +1250,66 @@ window.seeon.onFeatureToggle(({ digit }) => {
 buildFeatureToggleList();
 syncFeatureTogglesToMain();
 
+// 회의 언어(한국어·English·자동)는 여기서 고르기만 하고, 캡처를 시작할 때 main 에 한 번 넘겨 적용한다.
+// 화자 안내처럼 잠긴 동안에도 초점을 받아 왜 못 바꾸는지 들을 수 있게 disabled 대신 aria-disabled 를 쓴다.
+const MEETING_LANGUAGE_OPEN_KEY_LIST = [' ', 'Enter', 'ArrowUp', 'ArrowDown'];
+
+function isMeetingLanguageLockedNow() {
+  return isMeetingLanguageLocked({ isCaptureActive: captureSource.isActive });
+}
+
+function announceMeetingLanguageLocked() {
+  announce('회의 언어는 회의 캡처를 시작하기 전에만 바꿀 수 있어요');
+}
+
+// 잠긴 선택 상자는 펼치지 않는다. 그래도 값이 바뀌면(문자 입력 등) change 에서 되돌린다.
+function blockLockedMeetingLanguageInput(event) {
+  if (!isMeetingLanguageLockedNow()) return;
+  if (event.type === 'keydown' && !MEETING_LANGUAGE_OPEN_KEY_LIST.includes(event.key)) return;
+  event.preventDefault();
+  announceMeetingLanguageLocked();
+}
+
+function handleChangeMeetingLanguage() {
+  const select = $('meetingLanguageSelect');
+  if (isMeetingLanguageLockedNow()) {
+    select.value = meetingLanguageStore.get();
+    announceMeetingLanguageLocked();
+    return;
+  }
+  meetingLanguageStore.set(select.value);
+}
+
+function buildMeetingLanguageSelect() {
+  const select = $('meetingLanguageSelect');
+  if (!select) return;
+  select.replaceChildren(...MEETING_LANGUAGE_LIST.map((language) => {
+    const option = document.createElement('option');
+    option.value = language;
+    option.textContent = MEETING_LANGUAGE_LABEL_MAP[language];
+    return option;
+  }));
+  select.addEventListener('mousedown', blockLockedMeetingLanguageInput);
+  select.addEventListener('keydown', blockLockedMeetingLanguageInput);
+  select.addEventListener('change', handleChangeMeetingLanguage);
+  syncMeetingLanguageUi();
+}
+
+function syncMeetingLanguageUi() {
+  const select = $('meetingLanguageSelect');
+  if (!select) return;
+  select.value = meetingLanguageStore.get();
+  select.setAttribute('aria-disabled', String(isMeetingLanguageLockedNow()));
+}
+
+// 선택 상자는 스크린리더가 바뀐 값을 읽으므로 화면 알림만 띄운다.
+meetingLanguageStore.subscribe(({ language }) => {
+  showNotice(`회의 언어 ${MEETING_LANGUAGE_LABEL_MAP[language]} — 다음 회의 캡처부터 적용돼요`);
+  syncMeetingLanguageUi();
+});
+
+buildMeetingLanguageSelect();
+
 // 지난 회의: 사용자 문서 폴더(SEEON 회의 기록)에 날짜별로 남긴 요약·대화 스크립트를 앱 안에서 읽는다.
 function setArchiveStatus(text) {
   $('archiveStatus').textContent = text;
@@ -1627,13 +1692,20 @@ async function attemptStartExperiment() {
   $('toggleBtn').disabled = true;
   try {
     showNotice('회의 캡처를 시작했습니다 — 화면 해설이 곧 표시됩니다.');
-    // 꺼 둔 기능은 다음 실행에도 남는다. 꺼진 줄 모르고 회의를 듣지 않게 시작할 때 알린다.
+    // 꺼 둔 기능과 고른 회의 언어는 다음 실행에도 남는다. 모르고 회의를 듣지 않게 시작할 때 알린다.
+    // 연달아 announce 하면 앞 문구가 스크린리더에서 묻히므로 한 번에 읽는다.
+    const startNoticeList = [];
+    const languageNotice = describeNonDefaultMeetingLanguage({ language: meetingLanguageStore.get() });
+    if (languageNotice) startNoticeList.push(`${languageNotice}. 캡처를 멈춘 뒤 설정에서 바꿀 수 있어요.`);
     const disabledLabelList = listDisabledFeatureLabel({ store: featureToggleStore });
     if (disabledLabelList.length) {
-      announce(`꺼져 있는 기능: ${disabledLabelList.join(', ')}. 설정이나 Control Shift 숫자로 켤 수 있어요`);
+      startNoticeList.push(`꺼져 있는 기능: ${disabledLabelList.join(', ')}. 설정이나 Control Shift 숫자로 켤 수 있어요`);
     }
+    if (startNoticeList.length) announce(startNoticeList.join(' '));
 
-    const sessionResult = await window.seeon.startPipelineSession({ mode: getCurrentMode() }).catch(() => null);
+    const sessionResult = await window.seeon.startPipelineSession({
+      mode: getCurrentMode(), asrLanguage: meetingLanguageStore.get(),
+    }).catch(() => null);
     currentSessionId = sessionResult?.sessionId || null;
 
     const contextPolicy = getModePolicy({ mode: getCurrentMode() });
@@ -1699,6 +1771,7 @@ async function attemptStartExperiment() {
     $('pauseBtn').disabled = false;
     setToggleUi(true);
     syncFeatureToggleUi();
+    syncMeetingLanguageUi();
     renderModeButtons();
 
     if (!audioTrack) {
@@ -1772,6 +1845,7 @@ function stopExperiment() {
   $('stBuffer').textContent = '–';
   setToggleUi(false);
   syncFeatureToggleUi();
+  syncMeetingLanguageUi();
   renderModeButtons();
   markDebug({
     stage: DEBUG_STAGE_MAP.session, verdict: DEBUG_VERDICT_MAP.info,
@@ -1980,6 +2054,7 @@ function setSettingsPanelOpen(isOpen) {
   if (!isOpen) return;
   placeSettingsPanel();
   syncFeatureToggleUi();
+  syncMeetingLanguageUi();
 }
 
 $('settingsBtn').addEventListener('click', () => setSettingsPanelOpen($('settingsPanel').hidden));
