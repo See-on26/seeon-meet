@@ -154,6 +154,10 @@
     .set-toggle { padding: 4px 12px; border-radius: 999px; border: 1px solid var(--hairline-strong); background: var(--parchment); color: var(--ink-80); font-size: 12px; font-weight: 600; }
     .set-toggle.on { background: var(--ink); border-color: var(--ink); color: #fff; }
     .set-toggle[aria-disabled="true"] { opacity: 0.45; cursor: not-allowed; }
+    #featureToggleList + .set-row { border-top: 1px solid var(--hairline); }
+    .set-select { padding: 4px 8px; border-radius: 8px; border: 1px solid var(--hairline-strong); background: var(--parchment); color: var(--ink-80); font: inherit; font-size: 12px; font-weight: 600; }
+    .set-select[aria-disabled="true"] { opacity: 0.45; cursor: not-allowed; }
+    #meetingLanguageNote { margin-top: 0; }
     .set-note { margin-top: 10px; font-size: 11px; color: var(--ink-48); line-height: 1.5; }
     .set-status { margin-top: 10px; display: grid; grid-template-columns: auto 1fr; gap: 4px 12px; font-size: 12px; }
     .set-status b { font-weight: 600; color: var(--ink-48); }
@@ -281,6 +285,11 @@
       <input type="checkbox" id="pipeChk" checked />
     </div>
     <div id="featureToggleList" role="group" aria-label="기능 켜기·끄기"></div>
+    <div class="set-row">
+      <label class="label" for="meetingLanguageSelect">회의 언어</label>
+      <select id="meetingLanguageSelect" class="set-select" aria-describedby="meetingLanguageNote"></select>
+    </div>
+    <div class="set-note" id="meetingLanguageNote">자동(한·영)은 말하는 조각마다 한국어·영어 중 하나로 전사해요. 회의 캡처 중에는 바꿀 수 없어요.</div>
     <div class="set-status">
       <b>캡처</b><span id="stCapture">off</span>
       <b>해상도</b><span id="stRes">–</span>

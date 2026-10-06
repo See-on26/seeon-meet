@@ -10,10 +10,10 @@ const ACCUMULATED_KIND_LIST = [
 function createSessionStore() {
   let currentSession = null;
 
-  function startSession({ mode = '', startedAt = Date.now() } = {}) {
+  function startSession({ mode = '', asrLanguage = null, startedAt = Date.now() } = {}) {
     const recordListByKindMap = new Map();
     for (const kind of ACCUMULATED_KIND_LIST) recordListByKindMap.set(kind, []);
-    currentSession = { sessionId: `session-${startedAt}`, mode, startedAt, recordListByKindMap };
+    currentSession = { sessionId: `session-${startedAt}`, mode, asrLanguage, startedAt, recordListByKindMap };
     return { sessionId: currentSession.sessionId };
   }
 
@@ -28,11 +28,12 @@ function createSessionStore() {
 
   function endSession({ endedAt = Date.now() } = {}) {
     if (!currentSession) return null;
-    const { sessionId, mode, startedAt, recordListByKindMap } = currentSession;
+    const { sessionId, mode, asrLanguage, startedAt, recordListByKindMap } = currentSession;
     currentSession = null;
     return {
       sessionId,
       mode,
+      asrLanguage,
       startedAt,
       endedAt,
       asrEntryList: [...recordListByKindMap.get(RECORD_KIND_MAP.asr)],
