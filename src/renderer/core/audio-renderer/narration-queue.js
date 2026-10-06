@@ -2,7 +2,7 @@ import { NARRATION_CLASS_MAP } from '../constants.js';
 import { isImmediateCaption } from './narration-entry.js';
 
 // 재생을 기다리는 해설이 겹치면 이 순서로 먼저 들려준다. 사용자가 직접 물은 답(수동 AD)이 가장 앞이다.
-// 페이지 전환과 화자 식별은 같은 순위라 먼저 들어온 쪽부터 들려준다.
+// 페이지 전환과 화자 식별은 같은 순위(공동 2순위)이고, 함께 기다리면 SAME_PRIORITY_ORDER_MAP 순서로 들려준다.
 export const NARRATION_PRIORITY_MAP = {
   [NARRATION_CLASS_MAP.userCommand]: 0,
   [NARRATION_CLASS_MAP.pageTransition]: 1,
@@ -10,6 +10,12 @@ export const NARRATION_PRIORITY_MAP = {
   [NARRATION_CLASS_MAP.silenceBased]: 2,
   [NARRATION_CLASS_MAP.speechBased]: 3,
   [NARRATION_CLASS_MAP.deixis]: 4,
+};
+
+// 같은 순위 해설이 함께 기다리면 이 순서로 들려준다. 페이지 전환과 화자 식별이 겹치면 전환을 먼저 알리고 화자를 알린다.
+export const SAME_PRIORITY_ORDER_MAP = {
+  [NARRATION_CLASS_MAP.pageTransition]: 0,
+  [NARRATION_CLASS_MAP.speakerIdentity]: 1,
 };
 
 // 재생 차례가 된 뒤 앞 해설이 끝나기를 이만큼 넘게 기다린 자동 해설은 발표가 이미 지나간 내용이라 버린다.
@@ -72,8 +78,15 @@ function isSupersededTransition({ entry, transitionList }) {
     && isOtherSlide({ entry: other, slideEntry: entry }) && isEarlierEvent({ entry, than: other }));
 }
 
+function readSamePriorityOrder({ narrationClass }) {
+  const order = SAME_PRIORITY_ORDER_MAP[narrationClass];
+  return Number.isInteger(order) ? order : 0;
+}
+
 function compareEntry(left, right) {
-  return readNarrationPriority(left) - readNarrationPriority(right) || left.seq - right.seq;
+  return readNarrationPriority(left) - readNarrationPriority(right)
+    || readSamePriorityOrder(left) - readSamePriorityOrder(right)
+    || left.seq - right.seq;
 }
 
 function pickFirst(entryList) {

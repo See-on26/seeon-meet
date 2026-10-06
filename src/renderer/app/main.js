@@ -33,6 +33,7 @@ import { CaptionNarrator } from '../core/audio-renderer/caption-narrator.js';
 import { NarrationMixer } from '../core/audio-renderer/narration-mixer.js';
 import {
   TransitionOrderGate, LEADER_STATUS_MAP, resolveFollowerInsertMs,
+  PendingTransitionTracker, resolveAfterTransitionInsertMs,
 } from '../core/audio-renderer/transition-order-gate.js';
 
 import { AudioMeter } from '../core/trigger/audio-meter.js';
@@ -524,6 +525,8 @@ const slideRegistry = new SlideEmbeddingRegistry({});
 const slideEventVideoTimeMap = new Map();
 const slideTransitionWallTsMap = new Map();
 const transitionOrderGate = new TransitionOrderGate();
+// 전환을 확정한 뒤 고지가 정해지기 전에 도착한 화자 안내는 그 고지 뒤에 들려준다(공동 2순위: 전환 → 화자).
+const pendingTransitions = new PendingTransitionTracker();
 
 const slideDwellGate = new SlideDwellGate({
   onSatisfied: ({ label, isRevisit }) => {
@@ -538,6 +541,7 @@ const slideDwellGate = new SlideDwellGate({
     if (!isSpeculativeMode()) requestPageTransitionNarration({ label, isRevisit });
   },
   onCancelled: ({ label, isRevisit }) => {
+    pendingTransitions.settle({ slideLabel: label, status: LEADER_STATUS_MAP.cancelled });
     console.log(`[slide] 체류 미달 — 고지 취소 ${label}`);
     markDebug({
       stage: DEBUG_STAGE_MAP.slide, verdict: DEBUG_VERDICT_MAP.skip,
@@ -692,6 +696,7 @@ async function confirmSlideCandidate({ isFirst, imageData }) {
   }
 
   lastScreenTransitionAt = performance.now();
+  pendingTransitions.open({ slideLabel: decision.label });
   slideEventVideoTimeMap.set(decision.label, captureSource.videoTimeMs);
   slideTransitionWallTsMap.set(decision.label, Date.now());
   console.log(`[slide] ${isRevisit ? '재방문' : (isFirst ? '첫' : '새')} 슬라이드 ${decision.label} (거리=${distance} src=${source}) → 체류 ${DWELL_MS}ms 판정`);
@@ -707,9 +712,17 @@ async function confirmSlideCandidate({ isFirst, imageData }) {
   if (isSpeculativeMode()) requestPageTransitionNarration({ label: decision.label, isRevisit });
 }
 
+// 고지를 내지 않고 끝난 전환은 기다리는 화자 안내를 바로 풀어 준다.
+function releasePendingTransition({ slideLabel }) {
+  pendingTransitions.settle({ slideLabel, status: LEADER_STATUS_MAP.unscheduled });
+}
+
 async function requestPageTransitionNarration(decision) {
   const buffer = await captureFrameJpeg();
-  if (!buffer) return;
+  if (!buffer) {
+    releasePendingTransition({ slideLabel: decision.label });
+    return;
+  }
   const ts = Date.now();
   showNotice(decision.isRevisit
     ? `이전 슬라이드 ${decision.label}로 복귀 — 고지 생성 중…`
@@ -731,12 +744,15 @@ async function requestPageTransitionNarration(decision) {
       reason: '어절 예산이 유형 하한 미달 → 드롭',
       detail: `슬라이드 ${decision.label} 모드=${getCurrentMode()} 하한=${wordBudget.minWordCount}어절`,
     });
+    releasePendingTransition({ slideLabel: decision.label });
     return;
   }
   const result = await window.seeon.sendPipelineFrame({
     ts, buffer, slideLabel: decision.label, wordBudget, isRevisit: Boolean(decision.isRevisit),
     eventVideoTimeMs: slideEventVideoTimeMap.get(decision.label) ?? captureSource.videoTimeMs,
   }).catch(() => null);
+  // 고지를 내보냈으면 캡션 도착(applyCaption)이 삽입 시각을 정하며 풀어 준다.
+  if (!result?.isEmitted) releasePendingTransition({ slideLabel: decision.label });
 }
 
 const SPEAKER_POLL_MS = 2500;
@@ -1452,8 +1468,22 @@ function isTransitionFollower(payload) {
     && Boolean(payload.slideLabel);
 }
 
+function isSpeakerCaption(payload) {
+  return payload.narrationClass === NARRATION_CLASS_MAP.speakerIdentity;
+}
+
 async function emitCaption(payload, { leaderHandle = null } = {}) {
   const isFollower = isTransitionFollower(payload);
+  const isSpeaker = isSpeakerCaption(payload);
+  if (isSpeaker && pendingTransitions.hasPending) {
+    markDebug({
+      stage: DEBUG_STAGE_MAP.queue, verdict: DEBUG_VERDICT_MAP.info,
+      narrationType: NARRATION_TYPE_MAP.speakerIdentity,
+      reason: '진행 중인 화면 전환 고지 뒤로 화자 안내를 미룸',
+      detail: `"${payload.text}"`,
+    });
+  }
+  const transitionLeaderList = isSpeaker ? await pendingTransitions.waitAll() : [];
   const leader = isFollower ? await transitionOrderGate.waitLeader({ slideLabel: payload.slideLabel }) : null;
   if (isFollower && leader.status === LEADER_STATUS_MAP.cancelled) {
     markDebug({
@@ -1480,9 +1510,12 @@ async function emitCaption(payload, { leaderHandle = null } = {}) {
     getNarrationPlayer()?.queueCaption({ ...entry, dueAt: performance.now() });
     return;
   }
-  const insertVideoTimeMs = isFollower
+  const ownInsertVideoTimeMs = isFollower
     ? resolveFollowerInsertMs({ eventVideoTimeMs: captionCaptureMs, leader })
     : isAnchoredCaption(payload) ? captionCaptureMs : await resolveInsertionTimeMs({ payload, captionCaptureMs });
+  const insertVideoTimeMs = isSpeaker
+    ? resolveAfterTransitionInsertMs({ insertVideoTimeMs: ownInsertVideoTimeMs, leaderList: transitionLeaderList })
+    : ownInsertVideoTimeMs;
   leaderHandle?.settle({ status: LEADER_STATUS_MAP.scheduled, insertVideoTimeMs });
   if (insertVideoTimeMs === null) return;
   scheduleNarration({ entry, captionCaptureMs: insertVideoTimeMs });
@@ -1498,7 +1531,13 @@ function emitCaptionSafely(payload, { leaderHandle = null } = {}) {
 function applyCaption(payload) {
   const isTransition = payload.source === CAPTION_SOURCE_TRANSITION;
   if (!isTransition || !payload.slideLabel) { emitCaptionSafely(payload); return; }
-  const leaderHandle = transitionOrderGate.registerLeader({ slideLabel: payload.slideLabel });
+  const orderHandle = transitionOrderGate.registerLeader({ slideLabel: payload.slideLabel });
+  const leaderHandle = {
+    settle: (result) => {
+      orderHandle.settle(result);
+      pendingTransitions.settle({ slideLabel: payload.slideLabel, ...result });
+    },
+  };
   const state = slideDwellGate.getState({ label: payload.slideLabel });
   if (state === DWELL_STATE_MAP.waiting) {
     console.log(`[slide] 고지 보류 — 슬라이드 ${payload.slideLabel} 체류 판정 대기 중`);
@@ -1748,6 +1787,7 @@ async function attemptStartExperiment() {
     slideEventVideoTimeMap.clear();
     slideTransitionWallTsMap.clear();
     transitionOrderGate.reset();
+    pendingTransitions.reset();
     slideDwellGate.reset();
     isConfirmingSlide = false;
     hasWarnedLocalEmbedding = false;
@@ -1814,6 +1854,7 @@ function stopExperiment() {
     ['슬라이드 히스토그램 게이트', () => histogramGate.reset()],
     ['슬라이드 레지스트리', () => {
       slideRegistry.reset(); slideEventVideoTimeMap.clear(); slideTransitionWallTsMap.clear(); transitionOrderGate.reset();
+      pendingTransitions.reset();
     }],
     ['전환 체류 게이트', () => slideDwellGate.reset()],
     ['ROI 스토어', () => roiStore.reset()],
