@@ -1,3 +1,4 @@
+const { normalizeNarrationClass, findBlockingRule, resolveMinIntervalMs } = require('./blocking-policy');
 
 const DEFAULT_SIMILARITY_THRESHOLD = 0.58;
 const PAGE_TRANSITION_SIMILARITY_THRESHOLD = 0.70;
@@ -12,9 +13,6 @@ const TARGET_STOPWORD_LIST = [
 ];
 
 const TARGET_PARTICLE_LIST = ['으로', '에서', '이랑', '와의', '과의', '을', '를', '이', '가', '은', '는', '의', '에', '와', '과', '도', '로'];
-
-const POINTED_MIN_INTERVAL_MS = 12000;
-const SPEECH_ONLY_MIN_INTERVAL_MS = 18000;
 
 function normalizeNarration({ text }) {
   return String(text || '')
@@ -43,8 +41,6 @@ function computeBigramSimilarity({ textA, textB }) {
 function createNarrationHistory({
   similarityThreshold = DEFAULT_SIMILARITY_THRESHOLD,
   pageTransitionThreshold = PAGE_TRANSITION_SIMILARITY_THRESHOLD,
-  pointedMinIntervalMs = POINTED_MIN_INTERVAL_MS,
-  speechOnlyMinIntervalMs = SPEECH_ONLY_MIN_INTERVAL_MS,
   targetOverlapThreshold = TARGET_OVERLAP_THRESHOLD,
   maxEntry = DEFAULT_MAX_ENTRY,
 } = {}) {
@@ -115,24 +111,31 @@ function createNarrationHistory({
     return { isDuplicate: false, ...best, reason: '', threshold };
   }
 
-  function findRateLimited({ source, ts = Date.now(), hasPointingRegion = false,
-    sourceGroupList = null }) {
-    const minIntervalMs = hasPointingRegion
-      ? pointedMinIntervalMs : speechOnlyMinIntervalMs;
-    const groupSet = new Set(sourceGroupList?.length ? sourceGroupList : [source]);
-    let lastTs = -Infinity;
+  // 들어온 해설을 막을 수 있는 분류(blocking-policy 표) 중 가장 최근에 내보낸 해설과의 간격을 잰다.
+  // 표에 없는 분류(순위가 더 낮은 해설·질문 답)는 아무리 최근이어도 세지 않는다.
+  function findRateLimited({ narrationClass = null, ts = Date.now(), hasPointingRegion = false }) {
+    const rule = findBlockingRule({ narrationClass });
+    if (!rule) return { isRateLimited: false, sinceMs: Infinity, minIntervalMs: 0, blockedByClass: null };
+    const minIntervalMs = resolveMinIntervalMs({ rule, hasPointingRegion });
+    let blocker = null;
     for (const entry of entryList) {
-      if (groupSet.has(entry.source) && entry.ts > lastTs) lastTs = entry.ts;
+      if (!rule.blockedByClassList.includes(entry.narrationClass)) continue;
+      if (!blocker || entry.ts > blocker.ts) blocker = entry;
     }
-    const sinceMs = ts - lastTs;
-    return { isRateLimited: sinceMs < minIntervalMs, sinceMs, minIntervalMs };
+    const sinceMs = blocker ? ts - blocker.ts : Infinity;
+    return {
+      isRateLimited: sinceMs < minIntervalMs, sinceMs, minIntervalMs,
+      blockedByClass: blocker ? blocker.narrationClass : null,
+    };
   }
 
-  function remember({ text, source = '', ts = Date.now(), slotMap = null, slideLabel = null }) {
+  function remember({ text, source = '', ts = Date.now(), slotMap = null, slideLabel = null,
+    narrationClass = null }) {
     const normalized = normalizeNarration({ text });
     if (!normalized) return;
     entryList.push({
       text, normalized, source, ts, slideLabel, targetTokenSet: buildTargetTokenSet({ slotMap }),
+      narrationClass: normalizeNarrationClass({ narrationClass }),
     });
     while (entryList.length > maxEntry) entryList.shift();
   }
@@ -149,7 +152,7 @@ function createNarrationHistory({
   }
 
   function getEntryList() {
-    return entryList.map(({ text, source, ts }) => ({ text, source, ts }));
+    return entryList.map(({ text, source, ts, narrationClass }) => ({ text, source, ts, narrationClass }));
   }
 
   function getRecentTextList({ limit = 4 } = {}) {
@@ -162,5 +165,5 @@ function createNarrationHistory({
 module.exports = {
   createNarrationHistory, normalizeNarration, computeBigramSimilarity,
   DEFAULT_SIMILARITY_THRESHOLD, PAGE_TRANSITION_SIMILARITY_THRESHOLD,
-  TARGET_OVERLAP_THRESHOLD, POINTED_MIN_INTERVAL_MS, SPEECH_ONLY_MIN_INTERVAL_MS,
+  TARGET_OVERLAP_THRESHOLD,
 };
