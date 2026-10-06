@@ -13,6 +13,7 @@ import {
 } from '../tools/eval/lib/e2e-runner.mjs';
 import { createCacheStore } from '../tools/eval/lib/cache-store.mjs';
 import { runE2eCommand, isSameModel } from '../tools/eval/lib/e2e-command.mjs';
+import { judgeRunAsrLanguage, describeAsrLanguageMismatch } from '../tools/eval/lib/e2e-language.mjs';
 
 function writeRunDir() {
   const runDir = fs.mkdtempSync(path.join(os.tmpdir(), 'e2e-run-'));
@@ -217,7 +218,8 @@ test('e2e 명령은 토큰이 없으면 멈추고, 있으면 report·metrics·an
   assert.equal(metrics.overall.conditionMap.S.ca, 1);
   assert.equal(metrics.overall.reachGain, 1);
   assert.match(fs.readFileSync(path.join(outDir, 'report.md'), 'utf8'), /C 조건 한계/);
-  assert.match(fs.readFileSync(path.join(outDir, 'report.md'), 'utf8'), /language="ko"/);
+  assert.doesNotMatch(fs.readFileSync(path.join(outDir, 'report.md'), 'utf8'), /language="ko"/);
+  assert.doesNotMatch(fs.readFileSync(path.join(outDir, 'report.md'), 'utf8'), /전사 언어 주의/);
   assert.ok(Object.keys(metrics.byLanguage).includes('ko'));
   assert.doesNotMatch(fs.readFileSync(path.join(outDir, 'answers.jsonl'), 'utf8'), /token-for-test/);
 });
@@ -394,4 +396,66 @@ test('Bedrock 요청이 실패하면 결과는 쓰되 크게 알리고 1 로 끝
   assert.deepEqual(filterJson.decisionCountMap, { keep: 0, discard: 0, undecided: 1 });
   assert.match(fs.readFileSync(path.join(filterOutDir, 'report.md'), 'utf8'), /판단 못 함 1개/);
   assert.match(filterLogList.join('\n'), /\[e2e\] 실패: Bedrock 요청 3건이 실패했다/);
+});
+
+test('영상 언어와 결과 폴더 ASR 언어: auto 는 어느 언어와도 맞고, asrLanguage 없는 옛 결과는 ko 로 전사된 것으로 본다', () => {
+  assert.deepEqual(judgeRunAsrLanguage({ videoLanguage: 'en', runJson: { asrLanguage: 'ko' } }),
+    { videoLanguage: 'en', asrLanguage: 'ko', isLegacyAsrLanguage: false, isLanguageMismatch: true });
+  assert.deepEqual(judgeRunAsrLanguage({ videoLanguage: 'en', runJson: { asrLanguage: 'en' } }),
+    { videoLanguage: 'en', asrLanguage: 'en', isLegacyAsrLanguage: false, isLanguageMismatch: false });
+  assert.equal(judgeRunAsrLanguage({ videoLanguage: 'ko', runJson: { asrLanguage: 'en' } }).isLanguageMismatch, true);
+  assert.equal(judgeRunAsrLanguage({ videoLanguage: 'en', runJson: { asrLanguage: 'auto' } }).isLanguageMismatch, false);
+  assert.equal(judgeRunAsrLanguage({ videoLanguage: 'ko', runJson: { asrLanguage: 'auto' } }).isLanguageMismatch, false);
+  assert.deepEqual(judgeRunAsrLanguage({ videoLanguage: 'en', runJson: { isComplete: true } }),
+    { videoLanguage: 'en', asrLanguage: 'ko', isLegacyAsrLanguage: true, isLanguageMismatch: true });
+  assert.deepEqual(judgeRunAsrLanguage({ videoLanguage: 'ko', runJson: { isComplete: true } }),
+    { videoLanguage: 'ko', asrLanguage: 'ko', isLegacyAsrLanguage: true, isLanguageMismatch: false });
+  // 영상 언어가 없거나 run.json 을 못 읽었으면 판단하지 않는다.
+  assert.equal(judgeRunAsrLanguage({ videoLanguage: undefined, runJson: { asrLanguage: 'en' } }).isLanguageMismatch, null);
+  assert.deepEqual(judgeRunAsrLanguage({ videoLanguage: 'en', runJson: null }),
+    { videoLanguage: 'en', asrLanguage: null, isLegacyAsrLanguage: false, isLanguageMismatch: null });
+  assert.match(describeAsrLanguageMismatch(judgeRunAsrLanguage({ videoLanguage: 'en', runJson: {} })),
+    /영상 언어 en · 전사 언어 ko\(언어 지정 전 실행\).*English 또는 자동/);
+  assert.match(describeAsrLanguageMismatch(judgeRunAsrLanguage({ videoLanguage: 'ko', runJson: { asrLanguage: 'en' } })),
+    /영상 언어 ko · 전사 언어 en —.*한국어 또는 자동/);
+});
+
+async function runLanguageCase({ videoLanguage, runJson }) {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'e2e-language-'));
+  const questionFile = path.join(dir, 'questions.json');
+  fs.writeFileSync(questionFile, JSON.stringify({ ...questionSet, videoList: [{ ...questionSet.videoList[0], language: videoLanguage }] }));
+  const runDir = writeRunDir();
+  fs.writeFileSync(path.join(runDir, 'run.json'), JSON.stringify({ mode: 'delayed', isComplete: true, videoEndedWallMs: 62000, ...runJson }));
+  const outDir = path.join(dir, 'out');
+  const logList = [];
+  const code = await runE2eCommand({
+    argList: ['--questions', questionFile, '--run', `v1=${runDir}`, '--condition', 'A', '--no-cache', '--out-dir', outDir],
+    env: { AWS_BEARER_TOKEN_BEDROCK: 'token-for-test' },
+    log: (line) => logList.push(line),
+    requestAnswer: async () => ({ text: '{"answer": 1}' }),
+  });
+  assert.equal(code, 0);
+  const { runInfo } = JSON.parse(fs.readFileSync(path.join(outDir, 'metrics.json'), 'utf8'));
+  return { logList, runStatus: runInfo.runStatusMap.v1, report: fs.readFileSync(path.join(outDir, 'report.md'), 'utf8') };
+}
+
+test('영어 영상을 언어 지정 전(ko)으로 돌린 결과 폴더는 영상별로 경고하고 보고서에 적는다', async () => {
+  const { logList, runStatus, report } = await runLanguageCase({ videoLanguage: 'en', runJson: {} });
+  assert.equal(runStatus.asrLanguage, 'ko');
+  assert.equal(runStatus.isLegacyAsrLanguage, true);
+  assert.equal(runStatus.isLanguageMismatch, true);
+  assert.ok(logList.some((line) => /\[e2e\] 주의: v1 영상 언어 en · 전사 언어 ko\(언어 지정 전 실행\)/.test(line)), logList.join('\n'));
+  assert.match(report, /전사 언어 주의: .*v1\(영상 en · 전사 ko, 언어 지정 전 실행\)/);
+  assert.match(report, /\| ko \(언어 지정 전\) · 영상 en \|/);
+  assert.doesNotMatch(report, /language="ko"/);
+});
+
+test('영어 영상을 English·자동으로 돌린 결과 폴더는 언어 경고가 없다', async () => {
+  for (const asrLanguage of ['en', 'auto']) {
+    const { logList, runStatus, report } = await runLanguageCase({ videoLanguage: 'en', runJson: { asrLanguage } });
+    assert.equal(runStatus.isLanguageMismatch, false, asrLanguage);
+    assert.ok(!logList.some((line) => /전사 언어/.test(line)), logList.join('\n'));
+    assert.doesNotMatch(report, /전사 언어 주의/);
+    assert.match(report, new RegExp(`\\| ${asrLanguage} · 영상 en \\|`));
+  }
 });

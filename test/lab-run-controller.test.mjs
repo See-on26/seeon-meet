@@ -18,6 +18,7 @@ function createHarness({
   reloadBehavior = 'ok', stopOutputError = null, finalizeError = null, clickPauseResult = true, isSessionEndImmediate = false,
   recordPath = '/out/pipeline-1.jsonl', finalize = null, createOutputWriter: createWriter = createOutputWriter,
   getLayout = undefined, hangCallList = [], lateLiveDelayMs = null, beforeSessionStart = () => {}, onPlayback = undefined,
+  sessionStartRequest = undefined,
 } = {}) {
   const clock = { nowMs: new Date(2026, 9, 5, 10, 0, 0).getTime() };
   const callList = [];
@@ -31,7 +32,7 @@ function createHarness({
   const hangIfListed = async (name) => { if (optionMap.hangCallSet.has(name)) await new Promise(() => {}); };
   const goLive = () => {
     beforeSessionStart();
-    controller.sessionListener.onStart({ isOk: true, sessionId: 'session-1', recordPath });
+    controller.sessionListener.onStart({ isOk: true, sessionId: 'session-1', recordPath }, sessionStartRequest);
     isLive = true;
   };
   const viewerDriver = {
@@ -147,13 +148,40 @@ test('시작: 평가 설정 → viewer 새로고침 → 균형 모드 → 영상
   const harness = createHarness();
   const result = await harness.controller.start({ videoPath: '/videos/발표 1.mp4', isEvalPreset: true });
   assert.equal(result.isOk, true);
-  assert.deepEqual(harness.presetList, [{ isEvalPreset: true }]);
+  assert.deepEqual(harness.presetList, [{ isEvalPreset: true, asrLanguage: 'ko' }]);
   assert.deepEqual(harness.callList, [
     'viewer.reload', 'viewer.selectMode:delayed', 'player.setRoiEditing:false',
     'player.load:file:///videos/%EB%B0%9C%ED%91%9C%201.mp4', 'player.startOutputRecording', 'viewer.clickToggle', 'player.play',
   ]);
   assert.equal(harness.controller.getStatus().phase, RUN_PHASE_MAP.running);
   assert.match(path.basename(result.runDir), /^20261005-100000-발표_1$/);
+});
+
+test('고른 회의 언어로 viewer 를 새로 불러오고, 실행 기록에 고른 언어와 viewer 가 세션 시작 때 넘긴 언어가 남는다', async () => {
+  const harness = createHarness({ sessionStartRequest: { mode: 'delayed', asrLanguage: 'en' } });
+  const result = await harness.controller.start({ videoPath: '/v.mp4', isEvalPreset: true, asrLanguage: 'en' });
+  assert.equal(result.isOk, true);
+  assert.deepEqual(harness.presetList, [{ isEvalPreset: true, asrLanguage: 'en' }]);
+  assert.equal(harness.callList[0], 'viewer.reload', '언어를 정한 뒤 viewer 를 새로 불러야 저장값을 다시 읽는다');
+  assert.match(harness.controller.getStatus().message, /균형 모드 · 회의 언어 English/);
+  await harness.controller.stop();
+  const { run } = harness.finalizedList[0];
+  assert.equal(run.asrLanguage, 'en');
+  assert.equal(run.sessionAsrLanguage, 'en');
+});
+
+test('회의 언어를 주지 않으면 한국어이고, 고를 수 없는 언어면 viewer 를 건드리지 않고 시작하지 않는다', async () => {
+  const defaultHarness = createHarness();
+  await defaultHarness.controller.start({ videoPath: '/v.mp4', isEvalPreset: true });
+  await defaultHarness.controller.stop();
+  assert.equal(defaultHarness.finalizedList[0].run.asrLanguage, 'ko');
+  assert.equal(defaultHarness.finalizedList[0].run.sessionAsrLanguage, null);
+  const invalidHarness = createHarness();
+  const result = await invalidHarness.controller.start({ videoPath: '/v.mp4', isEvalPreset: true, asrLanguage: 'ja' });
+  assert.equal(result.isOk, false);
+  assert.match(result.message, /ko·en·auto/);
+  assert.deepEqual(invalidHarness.callList, []);
+  assert.deepEqual(invalidHarness.presetList, []);
 });
 
 test('평가 설정을 끄면 제품 기본(동시) 모드이고 고른 모드가 있으면 그 모드다', async () => {

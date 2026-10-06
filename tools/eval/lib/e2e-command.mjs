@@ -14,6 +14,7 @@ import { buildAnswerCsv } from './answer-csv.mjs';
 import { createCacheStore } from './cache-store.mjs';
 import { formatRunStamp } from './run-stamp.mjs';
 import { loadRepoEnv, assertBedrockToken, REPO_ROOT } from './bedrock-env.mjs';
+import { judgeRunAsrLanguage, describeAsrLanguageMismatch } from './e2e-language.mjs';
 
 const require = createRequire(import.meta.url);
 const { readPipelineConfig } = require('../../../src/main/caption-pipeline/config.js');
@@ -92,7 +93,7 @@ function readRunJson(runDir) {
 }
 
 // 결과 폴더가 영상 끝까지 돈 완전한 실행인지 본다. 잘린 실행에서는 전사가 일찍 끝나
-// 그 뒤의 사람 작성 AD 를 H 조건만 받으므로 몇 개인지 함께 남긴다.
+// 그 뒤의 사람 작성 AD 를 H 조건만 받으므로 몇 개인지 함께 남긴다. 영상 언어와 다른 언어로 전사했는지도 본다.
 function readRunStatus({ runDir, material, video }) {
   const runJson = readRunJson(runDir);
   const endMsList = (material.utteranceList || [])
@@ -104,8 +105,10 @@ function readRunStatus({ runDir, material, video }) {
   const isVideoEnded = runJson && Object.hasOwn(runJson, 'videoEndedWallMs') ? runJson.videoEndedWallMs !== null : null;
   const mode = typeof runJson?.mode === 'string' ? runJson.mode : null;
   const videoDurationMs = Number.isFinite(runJson?.videoDurationMs) ? runJson.videoDurationMs : null;
+  const languageJudgement = judgeRunAsrLanguage({ videoLanguage: video.language, runJson });
   const warningList = [];
   if (!runJson) warningList.push('run.json 을 읽지 못해 실행이 영상 끝까지 갔는지 모른다');
+  if (languageJudgement.isLanguageMismatch) warningList.push(describeAsrLanguageMismatch(languageJudgement));
   if (isComplete === false) warningList.push('결과물에 빠진 것이 있다 (run.json isComplete=false)');
   if (isVideoEnded === false) {
     warningList.push(`영상 끝까지 가지 않았다 — 전사가 ${transcriptEndMs === null ? '–' : formatMediaClock(transcriptEndMs)} 에서 끝난다`
@@ -117,7 +120,7 @@ function readRunStatus({ runDir, material, video }) {
   if (mode && mode !== EVAL_PRESET_MODE) warningList.push(`실행 모드 ${mode} — 팀 기준은 균형 모드(${EVAL_PRESET_MODE})`);
   return {
     runDir, mode, isComplete, isVideoEnded, videoDurationMs, transcriptEndMs,
-    humanAdCount: humanAdList.length, humanAdAfterTranscriptCount, warningList,
+    humanAdCount: humanAdList.length, humanAdAfterTranscriptCount, ...languageJudgement, warningList,
   };
 }
 
@@ -145,6 +148,7 @@ function loadMaterialMap({ questionSet, runDirMap, log }) {
       runStatusMap[video.videoId] = {
         runDir: absoluteRunDir, mode: null, isComplete: null, isVideoEnded: null, videoDurationMs: null, transcriptEndMs: null,
         humanAdCount: (video.humanAdList || []).length, humanAdAfterTranscriptCount: null,
+        ...judgeRunAsrLanguage({ videoLanguage: video.language, runJson: null }),
         warningList: [`결과 폴더를 읽지 못해 이 영상의 조건을 건너뛰었다 — ${error.message}`],
       };
       continue;

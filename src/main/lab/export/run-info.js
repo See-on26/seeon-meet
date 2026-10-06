@@ -31,7 +31,8 @@ function pickModelConfig(config) {
 
 const toIso = (ms) => (Number.isFinite(ms) ? new Date(ms).toISOString() : null);
 
-function buildRunInfo({ run, modelConfig, captureStartWallMs, adTiming, countMap, errorList, isComplete }) {
+// asrLanguage 는 고른 회의 언어, asrLanguageApplied 는 그 언어가 실제로 실렸는지의 근거다(export/asr-language.js).
+function buildRunInfo({ run, modelConfig, captureStartWallMs, adTiming, countMap, errorList, isComplete, asrLanguageApplied = null }) {
   return {
     runId: run.runId,
     videoPath: run.videoPath,
@@ -43,6 +44,8 @@ function buildRunInfo({ run, modelConfig, captureStartWallMs, adTiming, countMap
     modeLabel: LAB_MODE_LABEL_MAP[run.mode] || null,
     isEvalPreset: run.isEvalPreset,
     featureToggleMap: run.featureToggleMap,
+    asrLanguage: run.asrLanguage ?? null,
+    asrLanguageApplied,
     layout: run.layout,
     playerViewport: run.videoInfo?.viewport ?? null,
     roiNormRect: run.roiNormRect,

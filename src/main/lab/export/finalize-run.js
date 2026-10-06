@@ -8,6 +8,7 @@ const { buildAdSrt } = require('./srt');
 const { buildSlideList } = require('./slides');
 const { readSessionRecordList, filterRecordKind } = require('./pipeline-records');
 const { buildRunInfo } = require('./run-info');
+const { summarizeAsrLanguage, attachDetectedLanguage } = require('./asr-language');
 const { buildFlowFile } = require('../flow/flow-snapshot');
 
 const RESULT_FILE_MAP = {
@@ -34,16 +35,18 @@ const FINALIZE_ERROR_MAP = {
   slideCopyFailed: 'slide_copy_failed',
   writeFailed: 'write_failed',
   flowFailed: 'flow_failed',
+  asrLanguageMismatch: 'asr_language_mismatch',
 };
 
 // 이 오류가 하나라도 있으면 결과물에 빠진 것이 있다(run.json.isComplete=false).
 // 녹음(output-audio.webm)은 사람 평가 입력이고, 해설이 왔는데 재생 알림이 없으면 AD 타임라인의 들린 자리가 모두 빠진다.
+// 고른 회의 언어로 전사되지 않았으면(asr_language_mismatch) 전사·해설이 그 언어 기준이 아니라 평가에 쓸 수 없다.
 // 문자열 코드는 실행 제어기(run-controller.js RUN_ERROR_MAP) 것이다. 녹음 시작·정지·쓰기 실패는 파일이 비지 않아도
 // 끝부분이 빠졌을 수 있어 빠진 것으로 본다. start_failed 는 결과 폴더를 만든 뒤 재생을 시작하지 못한 실행이다.
 const INCOMPLETE_CODE_LIST = [
   FINALIZE_ERROR_MAP.sessionUnknown, FINALIZE_ERROR_MAP.recordReadFailed, FINALIZE_ERROR_MAP.noPlayerTime,
   FINALIZE_ERROR_MAP.noOutputAudio, FINALIZE_ERROR_MAP.noPlaybackReport,
-  FINALIZE_ERROR_MAP.writeFailed, 'capture_failed', 'session_end_timeout', 'roi_missing',
+  FINALIZE_ERROR_MAP.writeFailed, FINALIZE_ERROR_MAP.asrLanguageMismatch, 'capture_failed', 'session_end_timeout', 'roi_missing',
   'output_record_failed', 'start_failed',
 ];
 
@@ -122,7 +125,20 @@ async function finalizeRun({ run, modelConfig, fsApi = fs.promises, readRecords 
     captureRequestedWallMs: run.captureRequestedWallMs, playbackList: run.playbackList,
   });
 
-  const asrEventList = run.asrEventList.length ? run.asrEventList : toAsrEventListFromRecordList(recordList);
+  const asrRecordList = filterRecordKind(recordList, 'asr');
+  const asrLanguageApplied = summarizeAsrLanguage({
+    requestedLanguage: run.asrLanguage, sessionLanguage: run.sessionAsrLanguage, asrRecordList,
+  });
+  if (asrLanguageApplied.isMatched === false) {
+    errorList.push({
+      code: FINALIZE_ERROR_MAP.asrLanguageMismatch,
+      message: `회의 언어를 ${run.asrLanguage} 로 골랐는데 다른 언어로 전사했다 (세션 시작 ${asrLanguageApplied.sessionLanguage ?? '모름'}`
+        + ` · ASR 요청 ${JSON.stringify(asrLanguageApplied.requestLanguageCountMap)})`,
+    });
+  }
+  const asrEventList = attachDetectedLanguage({
+    asrEventList: run.asrEventList.length ? run.asrEventList : toAsrEventListFromRecordList(recordList), asrRecordList,
+  });
   const utteranceList = buildTranscriptUtteranceList({ asrEventList, toMediaMs });
   const { adList, droppedList } = buildAdTimeline({
     captionEventList: run.captionEventList,
@@ -171,7 +187,7 @@ async function finalizeRun({ run, modelConfig, fsApi = fs.promises, readRecords 
     flowCount,
   };
   const runInfo = buildRunInfo({
-    run, modelConfig, captureStartWallMs, adTiming: summarizeAdTiming({ adList }), countMap, errorList, isComplete,
+    run, modelConfig, captureStartWallMs, adTiming: summarizeAdTiming({ adList }), countMap, errorList, isComplete, asrLanguageApplied,
   });
   await writeResultFile({ fsApi, runDir, name: RESULT_FILE_MAP.runInfo, content: `${JSON.stringify(runInfo, null, 2)}\n`, errorList });
   // run.json 자체를 못 쓴 실패는 run.json 에 남길 수 없으므로 돌려주는 값에만 반영한다.

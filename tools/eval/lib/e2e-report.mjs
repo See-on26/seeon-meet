@@ -1,5 +1,6 @@
 import { createRequire } from 'node:module';
 import { CONDITION_LIST } from './e2e-material.mjs';
+import { buildAsrLanguageLineList, formatRunAsrLanguageCell } from './e2e-language.mjs';
 
 const require = createRequire(import.meta.url);
 const { formatMediaClock } = require('../../../src/main/lab/export/clock-format.js');
@@ -57,20 +58,21 @@ function buildGitLine(git) {
 }
 
 // 결과 폴더(L2)가 영상 끝까지 돈 완전한 실행인지. 잘린 실행이면 전사 뒤의 사람 작성 AD 를 H 조건만 받는다.
+// 전사 언어 칸은 결과 폴더의 회의 언어(run.json.asrLanguage)와 문항 셋의 영상 언어다.
 function buildRunStatusSection(runStatusMap = {}) {
   const entryList = Object.entries(runStatusMap);
   if (!entryList.length) return ['## 결과 폴더 상태', '', '- 읽은 결과 폴더가 없다', ''];
   const lineList = [
     '## 결과 폴더 상태',
     '',
-    '| 영상 | 결과 폴더 | 실행 모드 | 영상 끝까지 | 결과물 완료 | 전사 끝 | 사람 AD (전사 뒤) | 주의 |',
-    '|---|---|---|---|---|---|---|---|',
+    '| 영상 | 결과 폴더 | 실행 모드 | 전사 언어 | 영상 끝까지 | 결과물 완료 | 전사 끝 | 사람 AD (전사 뒤) | 주의 |',
+    '|---|---|---|---|---|---|---|---|---|',
   ];
   for (const [videoId, status] of entryList) {
     const transcriptEnd = status.transcriptEndMs === null ? '–' : formatMediaClock(status.transcriptEndMs);
     const videoLength = status.videoDurationMs ? ` / ${formatMediaClock(status.videoDurationMs)}` : '';
     lineList.push(`| ${escapeCell(videoId)} | ${escapeCell(status.runDir)} | ${escapeCell(status.mode ?? '모름')}`
-      + ` | ${formatFlag(status.isVideoEnded)} | ${formatFlag(status.isComplete)} | ${transcriptEnd}${videoLength}`
+      + ` | ${escapeCell(formatRunAsrLanguageCell(status))} | ${formatFlag(status.isVideoEnded)} | ${formatFlag(status.isComplete)} | ${transcriptEnd}${videoLength}`
       + ` | ${status.humanAdCount} (${status.humanAdAfterTranscriptCount ?? '–'}) | ${escapeCell(status.warningList.join(' / ') || '–')} |`);
   }
   return [...lineList, ''];
@@ -115,7 +117,7 @@ export function buildE2eReport({ runInfo, metrics, repeatSummary, skippedList, s
     '',
     '"알 수 없음"은 오답으로 셌다. 응답 오류(답 번호를 못 읽음)는 정답률 분모에서 빼고 따로 셌다.',
     'C 조건 한계: LLM 은 영상을 볼 수 없어 슬라이드 대표 이미지로 "화면"을 대신했다. 슬라이드가 아닌 화면(영상·판서)은 이미지가 부족할 수 있다.',
-    '전사 한계: GPU ASR 서버가 언어를 한국어로 고정한다(tools/gpu-server/asr_server.py language="ko"). 영어 영상의 A·S·H·C 전사는 그 영향을 받는다.',
+    ...buildAsrLanguageLineList(runInfo.runStatusMap),
     '',
     ...buildRunStatusSection(runInfo.runStatusMap),
     '## 전체',
@@ -172,6 +174,7 @@ export function buildFilterReport({ runInfo, decisionList, filterSummaryMap = nu
     ...buildGitLine(runInfo.git),
     ...buildRequestFailLine(runInfo),
     '- 필터 단계는 "제공된 자료만" 지시 없이 물었다.',
+    ...buildAsrLanguageLineList(runInfo.runStatusMap).map((line) => `- ${line}`),
     `- 유지 ${countOf('keep')}개 · 폐기 ${countOf('discard')}개 · 판단 못 함 ${countOf('undecided')}개`,
     '- 판단 못 함 = 폐기 사유는 없지만 응답 오류·자료 없음으로 판단하지 못한 필터가 있는 문항이다. 유지로 세지 않는다. 다시 돌리거나 직접 본다.',
     '',

@@ -13,6 +13,7 @@ function render(status) {
   const isIdle = IDLE_PHASE_LIST.includes(status.phase);
   $('pickBtn').disabled = !isIdle;
   $('modeSelect').disabled = !isIdle;
+  $('languageSelect').disabled = !isIdle;
   $('evalPresetChk').disabled = !isIdle;
   $('roiBtn').disabled = !isIdle;
   $('roiBtn').classList.toggle('on', isRoiEditing);
@@ -48,7 +49,7 @@ $('roiBtn').addEventListener('click', async () => {
 $('startBtn').addEventListener('click', async () => {
   isRoiEditing = false;
   const result = await window.labControl.start({
-    videoPath, mode: $('modeSelect').value, isEvalPreset: $('evalPresetChk').checked,
+    videoPath, mode: $('modeSelect').value, isEvalPreset: $('evalPresetChk').checked, asrLanguage: $('languageSelect').value,
   });
   if (!result?.isOk) $('statusText').textContent = `[시작 실패] ${result?.message || ''}`;
 });

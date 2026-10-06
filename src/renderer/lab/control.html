@@ -6,12 +6,13 @@
   <style>
     :root { color-scheme: dark; font-family: -apple-system, "Apple SD Gothic Neo", sans-serif; }
     html, body { margin: 0; height: 100%; background: #1d1d1f; color: #f5f5f7; font-size: 13px; }
-    .bar { display: flex; align-items: center; gap: 8px; height: 64px; padding: 0 12px; box-sizing: border-box; flex-wrap: nowrap; }
+    /* 조작 줄 아래에 상태 줄을 따로 두어 좁은 창에서도 상태(모드·회의 언어·결과)가 잘리지 않게 한다. */
+    .bar { display: flex; flex-wrap: wrap; align-items: center; align-content: center; gap: 4px 8px; height: 64px; padding: 0 12px; box-sizing: border-box; }
     button, select { font: inherit; padding: 5px 10px; border-radius: 6px; border: 1px solid #555; background: #2c2c2e; color: inherit; }
     button:disabled, select:disabled { opacity: 0.4; }
     button.on { background: #0066cc; border-color: #0066cc; }
     .video-name { max-width: 180px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: #c7c7cc; }
-    .status { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: #a1a1a6; }
+    .status { flex: 1 0 100%; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: #a1a1a6; font-size: 12px; line-height: 16px; }
     label { display: flex; align-items: center; gap: 4px; white-space: nowrap; }
   </style>
 </head>
@@ -24,6 +25,11 @@
       <option value="listening">품질</option>
       <option value="realtime_sic">성능</option>
       <option value="realtime_mix">동시</option>
+    </select>
+    <select id="languageSelect" aria-label="회의 언어" title="이번 실행의 회의 언어(ASR 전사 언어). 영어 영상은 English 또는 자동">
+      <option value="ko" selected>한국어</option>
+      <option value="en">English</option>
+      <option value="auto">자동(한·영)</option>
     </select>
     <label><input type="checkbox" id="evalPresetChk" checked /> 평가 설정</label>
     <button id="roiBtn" type="button">ROI 편집</button>
