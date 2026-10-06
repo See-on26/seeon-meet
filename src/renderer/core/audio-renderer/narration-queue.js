@@ -1,14 +1,15 @@
 import { NARRATION_CLASS_MAP } from '../constants.js';
 import { isImmediateCaption } from './narration-entry.js';
 
-// 재생을 기다리는 해설이 겹치면 이 순서로 먼저 들려준다. 사용자가 직접 물은 답이 가장 앞이다.
+// 재생을 기다리는 해설이 겹치면 이 순서로 먼저 들려준다. 사용자가 직접 물은 답(수동 AD)이 가장 앞이다.
+// 페이지 전환과 화자 식별은 같은 순위라 먼저 들어온 쪽부터 들려준다.
 export const NARRATION_PRIORITY_MAP = {
   [NARRATION_CLASS_MAP.userCommand]: 0,
   [NARRATION_CLASS_MAP.pageTransition]: 1,
-  [NARRATION_CLASS_MAP.deixis]: 2,
+  [NARRATION_CLASS_MAP.speakerIdentity]: 1,
+  [NARRATION_CLASS_MAP.silenceBased]: 2,
   [NARRATION_CLASS_MAP.speechBased]: 3,
-  [NARRATION_CLASS_MAP.silenceBased]: 4,
-  [NARRATION_CLASS_MAP.speakerIdentity]: 5,
+  [NARRATION_CLASS_MAP.deixis]: 4,
 };
 
 // 재생 차례가 된 뒤 앞 해설이 끝나기를 이만큼 넘게 기다린 자동 해설은 발표가 이미 지나간 내용이라 버린다.
@@ -43,7 +44,7 @@ function isPageTransition(entry) {
   return entry.narrationClass === NARRATION_CLASS_MAP.pageTransition;
 }
 
-// 전환 고지는 순위가 가장 높아 앞 해설 하나만 기다리므로 시간으로 버리지 않는다.
+// 전환 고지는 자동 해설 중 순위가 가장 높아(화자 식별과 같음) 오래 기다리지 않으므로 시간으로 버리지 않는다.
 // 지난 슬라이드 고지는 다른 슬라이드의 더 늦은 고지가 있을 때 버려 쌓이지 않는다(takeNext).
 function isExpirable(entry) {
   return !isImmediateCaption(entry) && !isPageTransition(entry);
