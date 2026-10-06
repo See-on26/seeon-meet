@@ -23,6 +23,7 @@ const { createSlideTopicRegistry, SLIDE_TOPIC_VERDICT_MAP } = require('./orchest
 const { createSpeakerRegistry } = require('./orchestrator/speaker-registry');
 const { createNarrationHistory } = require('./orchestrator/narration-history');
 const { createAsrClient } = require('./perception/asr-client');
+const { createAsrLanguageSession } = require('./perception/asr-language');
 const { createEmbedClient } = require('./perception/embed-client');
 const { createTtsClient } = require('./output/tts-client');
 const { createGapInferenceAgent } = require('./output/gap-inference-agent');
@@ -81,6 +82,7 @@ function registerPipeline({ getViewerView, meetingArchive = null }) {
 
   const gapAgent = createGapInferenceAgent({ config });
   const asrClient = createAsrClient({ config });
+  const asrLanguageSession = createAsrLanguageSession({ asrClient, config });
   const judgeClient = createDeixisJudgeClient({ config });
   const routerClient = createUnifiedRouter({ config });
   const isRouterMode = config.routerMode === ROUTER_MODE_MAP.unified;
@@ -94,6 +96,7 @@ function registerPipeline({ getViewerView, meetingArchive = null }) {
   const featureGate = createFeatureGate();
   const silenceNarrator = createSilenceNarrator({ gate: silenceGate, judge: createSilenceJudge({ config }) });
   console.log(`[pipeline] 발화 축 판정 경로: ${config.routerMode}`);
+  console.log(`[pipeline] ASR 언어: 회의 ${config.asrLanguage} · 질문 ${config.questionAsrLanguage}`);
 
   const contextFile = createContextFileWriter({ outDir: CONTEXT_DIR });
   const contextStore = createContextStore({
@@ -743,11 +746,13 @@ function registerPipeline({ getViewerView, meetingArchive = null }) {
     const startedAt = Date.now();
     pendingAsrCount += 1;
     try {
-      const result = await asrClient.transcribeSegment({ webmBuffer: Buffer.from(buffer), startTs });
+      const result = await asrLanguageSession.transcribeMeetingSegment({ webmBuffer: Buffer.from(buffer), startTs });
       const textReadyAt = Date.now();
       await appendRecord({
         kind: RECORD_KIND_MAP.asr, ts: startTs,
         text: result.text, segmentList: result.segmentList, speakerHint,
+        language: result.requestedLanguage, detectedLanguage: result.language,
+        languageProbability: result.languageProbability,
         ...(result.hallucinationText
           ? { skipReason: 'hallucination', hallucinationText: result.hallucinationText } : {}),
       });
@@ -1081,7 +1086,7 @@ function registerPipeline({ getViewerView, meetingArchive = null }) {
   // 질문 음성은 pipeline-audio 를 쓰지 않는다. 그 경로는 asr 기록을 남겨 회의 전사·지시 탐지·저장소에 섞인다.
   ipcMain.handle('pipeline-question-audio', async (_event, { buffer, startTs }) => {
     try {
-      const result = await asrClient.transcribeSegment({ webmBuffer: Buffer.from(buffer), startTs });
+      const result = await asrLanguageSession.transcribeQuestionSegment({ webmBuffer: Buffer.from(buffer), startTs });
       const text = (result.text || '').trim();
       markDebug({
         stage: DEBUG_STAGE_MAP.question, verdict: text ? DEBUG_VERDICT_MAP.info : DEBUG_VERDICT_MAP.skip,
@@ -1143,6 +1148,9 @@ function registerPipeline({ getViewerView, meetingArchive = null }) {
   return {
     config,
     ttsClient,
+    // 회의 음성 전사 언어(ko·en·auto). 마이크 질문 언어(config.questionAsrLanguage)는 바꾸지 않는다.
+    setAsrLanguage: (language) => asrLanguageSession.setMeetingLanguage(language),
+    getAsrLanguage: () => asrLanguageSession.getMeetingLanguage(),
     consumeLastSession() {
       const session = lastSession;
       lastSession = null;
