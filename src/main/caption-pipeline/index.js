@@ -306,33 +306,40 @@ function registerPipeline({ getViewerView, meetingArchive = null }) {
       return { isEmitted: false };
     }
     narrationHistory.remember({ text, source, ts, slotMap, slideLabel, narrationClass: resolvedClass });
-    let wavData = null;
-    try {
-      wavData = await ttsClient.synthesize({ text });
-      await appendRecord({ kind: RECORD_KIND_MAP.tts, ts, byteLength: wavData.byteLength });
-      markDebug({
-        stage: DEBUG_STAGE_MAP.tts, verdict: DEBUG_VERDICT_MAP.pass, narrationType: source, ts,
-        reason: '합성 완료', detail: `${Math.round(wavData.byteLength / 1024)}KB · "${text}"`,
-      });
-    } catch (ttsError) {
-      console.warn(`[pipeline]   TTS 실패(텍스트만 전송) [${source}]: ${ttsError.message}`);
-      markDebug({
-        stage: DEBUG_STAGE_MAP.tts, verdict: DEBUG_VERDICT_MAP.fail, narrationType: source, ts,
-        reason: 'TTS 실패(텍스트만)', detail: ttsError.message,
-      });
-    }
+    // Orchestrator 의 main 단계는 여기까지다(기능 끄기 → 차단 규칙 → 중복). 렌더러의 우선순위 대기 줄이 재생할 해설을 고르면
+    // 그때 pipeline-tts 로 합성한다(Orchestrator → TTS → 전달 Layer). 대기 줄에서 버려지는 해설은 합성하지 않는다.
     await appendRecord({
       kind: RECORD_KIND_MAP.narration, ts, source, text, slideLabel, isEmitted: true,
-      hasAudio: Boolean(wavData), narrationClass: resolvedClass,
+      narrationClass: resolvedClass,
       eventVideoTimeMs: Number.isFinite(eventVideoTimeMs) ? eventVideoTimeMs : null,
     });
     getViewerView()?.webContents.send('pipeline-event', {
-      type: 'caption', ts, text, source, slideLabel, wavData, rationale,
+      type: 'caption', ts, text, source, slideLabel, rationale,
       narrationClass: resolvedClass,
       eventVideoTimeMs: Number.isFinite(eventVideoTimeMs) ? eventVideoTimeMs : null,
     });
     return { isEmitted: true };
   }
+
+  // 전달 Layer 앞의 TTS. 렌더러 대기 줄이 이번에 재생할 해설로 고른 것만 합성한다.
+  ipcMain.handle('pipeline-tts', async (_event, { ts = Date.now(), text = '', source = null } = {}) => {
+    try {
+      const wavData = await ttsClient.synthesize({ text });
+      await appendRecord({ kind: RECORD_KIND_MAP.tts, ts, byteLength: wavData.byteLength });
+      markDebug({
+        stage: DEBUG_STAGE_MAP.tts, verdict: DEBUG_VERDICT_MAP.pass, narrationType: source, ts,
+        reason: '합성 완료', detail: `${Math.round(wavData.byteLength / 1024)}KB · "${text}"`,
+      });
+      return { isOk: true, wavData };
+    } catch (ttsError) {
+      console.warn(`[pipeline]   TTS 실패(소리 없이 넘어감) [${source}]: ${ttsError.message}`);
+      markDebug({
+        stage: DEBUG_STAGE_MAP.tts, verdict: DEBUG_VERDICT_MAP.fail, narrationType: source, ts,
+        reason: 'TTS 실패(소리 없이 넘어감)', detail: ttsError.message,
+      });
+      return { isOk: false, message: ttsError.message };
+    }
+  });
 
   ipcMain.handle('pipeline-session-start', async (_event, { mode = '', asrLanguage } = {}) => {
     describedStore.reset();

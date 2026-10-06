@@ -105,7 +105,17 @@ const featureToggleStore = createFeatureToggleStore({ storage: readLocalStorage(
 const meetingLanguageStore = createMeetingLanguageStore({ storage: readLocalStorage() });
 const isNarrationEntryEnabled = (entry) => featureToggleStore.isClassOn(entry.narrationClass);
 
+// Orchestrator → TTS → 전달 Layer: 우선순위 대기 줄이 이번에 재생할 해설을 고른 뒤에만 main 에 합성을 요청한다.
+async function synthesizeEntryAudio(entry) {
+  const result = await window.seeon.synthesizeNarration({ ts: entry.ts, text: entry.text, source: entry.source })
+    .catch(() => null);
+  const wavData = result?.isOk ? result.wavData : null;
+  if (!wavData) return null;
+  return wavData.buffer.slice(wavData.byteOffset, wavData.byteOffset + wavData.byteLength);
+}
+
 const narrator = new CaptionNarrator({
+  prepareAudio: synthesizeEntryAudio,
   getLiveVideo: getPlaybackVideo,
   onStatus: handleNarrationStatus,
   onDrop: handleNarrationDrop,
@@ -248,6 +258,7 @@ function startNarrationPlayer({ stream }) {
   if (policy?.isMixed) {
     narrationMixer = new NarrationMixer({
       onStatus: handleNarrationStatus, onDrop: handleNarrationDrop, isEntryEnabled: isNarrationEntryEnabled,
+      prepareAudio: synthesizeEntryAudio,
     });
     narrationMixer.start(stream);
 
@@ -1512,13 +1523,8 @@ async function emitCaption(payload, { leaderHandle = null } = {}) {
     return;
   }
   const captionCaptureMs = handleCaption(payload);
-  if (!payload.wavData) {
-    leaderHandle?.settle({ status: LEADER_STATUS_MAP.unscheduled });
-    return;
-  }
+  // 소리는 아직 없다. 대기 줄이 재생 차례로 고를 때 합성한다(synthesizeEntryAudio).
   const entry = {
-    wavArrayBuffer: payload.wavData.buffer.slice(
-      payload.wavData.byteOffset, payload.wavData.byteOffset + payload.wavData.byteLength),
     narrationClass: payload.narrationClass, slideLabel: payload.slideLabel ?? null,
     source: payload.source, text: payload.text, ts: payload.ts, eventTimeMs: captionCaptureMs,
   };

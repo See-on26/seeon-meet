@@ -1,4 +1,4 @@
-import { NarrationQueue, shouldInterrupt, QUEUE_DROP_REASON_MAP } from './narration-queue.js';
+import { NarrationQueue, shouldInterrupt, QUEUE_DROP_REASON_MAP, readEntryAudio } from './narration-queue.js';
 
 export const DEFAULT_DUCK_DB = -12;
 const DEFAULT_RAMP_MS = 120;
@@ -24,8 +24,9 @@ export function createSidePanner({ audioContext, positionX }) {
 export class NarrationMixer {
   constructor({ onStatus = null, onDrop = null, duckDecibel = DEFAULT_DUCK_DB,
     createAudioContext = () => new AudioContext(), now = () => performance.now(),
-    isEntryEnabled = () => true } = {}) {
+    isEntryEnabled = () => true, prepareAudio = readEntryAudio } = {}) {
     this.onStatus = onStatus || (() => {});
+    this.prepareAudio = prepareAudio;
     this.onDrop = onDrop || (() => {});
     this.duckDecibel = duckDecibel;
     this.createAudioContext = createAudioContext;
@@ -105,7 +106,14 @@ export class NarrationMixer {
     this.currentEntry = entry;
     try {
       if (this.audioContext.state === 'suspended') await this.audioContext.resume();
-      const audioBuffer = await this.audioContext.decodeAudioData(entry.wavArrayBuffer);
+      const wavArrayBuffer = await this.prepareAudio(entry);
+      if (token !== this.playToken) return;
+      if (!wavArrayBuffer) {
+        this.onDrop({ entry, reason: QUEUE_DROP_REASON_MAP.ttsFailed });
+        this.handleNarrationEnded();
+        return;
+      }
+      const audioBuffer = await this.audioContext.decodeAudioData(wavArrayBuffer);
       if (token !== this.playToken) return;
       const source = this.audioContext.createBufferSource();
       source.buffer = audioBuffer;

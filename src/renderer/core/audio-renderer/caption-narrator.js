@@ -1,5 +1,5 @@
 import { SIC_CATCHUP_MIN_RATE, SIC_CATCHUP_MAX_RATE, SIC_CATCHUP_RATE_PER_SEC } from '../constants.js';
-import { NarrationQueue, shouldInterrupt, QUEUE_DROP_REASON_MAP } from './narration-queue.js';
+import { NarrationQueue, shouldInterrupt, QUEUE_DROP_REASON_MAP, readEntryAudio } from './narration-queue.js';
 import { isImmediateCaption } from './narration-entry.js';
 import {
   computeGainFromDecibel, createSidePanner, DEFAULT_DUCK_DB, NARRATION_PAN_X,
@@ -14,8 +14,9 @@ export function computeCatchupRate({ pausedSec, minRate, maxRate, ratePerSec }) 
 export class CaptionNarrator {
   constructor({ getLiveVideo, onStatus = null, onDrop = null, getRateRange = null, isCatchupDelegated = null,
     createAudioContext = () => new AudioContext(), now = () => performance.now(),
-    isEntryEnabled = () => true }) {
+    isEntryEnabled = () => true, prepareAudio = readEntryAudio }) {
     this.getLiveVideo = getLiveVideo;
+    this.prepareAudio = prepareAudio;
     this.onStatus = onStatus || (() => {});
     this.onDrop = onDrop || (() => {});
     this.createAudioContext = createAudioContext;
@@ -125,7 +126,16 @@ export class CaptionNarrator {
     this.currentEntry = entry;
     try {
       if (this.audioContext.state === 'suspended') await this.audioContext.resume();
-      const audioBuffer = await this.audioContext.decodeAudioData(entry.wavArrayBuffer);
+      // 교차 모드는 이미 회의를 멈춘 뒤라 합성하는 동안 회의가 해설 자리를 지나가지 않는다.
+      const wavArrayBuffer = await this.prepareAudio(entry);
+      if (token !== this.playToken) return;
+      if (!wavArrayBuffer) {
+        this.onDrop({ entry, reason: QUEUE_DROP_REASON_MAP.ttsFailed });
+        this.currentNarrationSec = 0;
+        this._onNarrationEnded();
+        return;
+      }
+      const audioBuffer = await this.audioContext.decodeAudioData(wavArrayBuffer);
       if (token !== this.playToken) return;
       this.currentNarrationSec = audioBuffer.duration || 0;
       const source = this.audioContext.createBufferSource();

@@ -96,4 +96,5 @@ contextBridge.exposeInMainWorld('seeon', {
   appendDebugLog(entry) { ipcRenderer.send('pipeline-debug', entry); },
   reportNarrationDropped(payload) { ipcRenderer.send('pipeline-narration-dropped', payload); },
   reportTransitionCancelled(payload) { ipcRenderer.send('pipeline-transition-cancelled', payload); },
+  synthesizeNarration({ ts, text, source = null }) { return ipcRenderer.invoke('pipeline-tts', { ts, text, source }); },
 });

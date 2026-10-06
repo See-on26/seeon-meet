@@ -26,6 +26,7 @@ export const QUEUE_DROP_REASON_MAP = {
   slideChanged: 'slide_changed',
   interrupted: 'interrupted',
   featureOff: 'feature_off',
+  ttsFailed: 'tts_failed',
 };
 
 export const QUEUE_DROP_LABEL_MAP = {
@@ -33,7 +34,13 @@ export const QUEUE_DROP_LABEL_MAP = {
   [QUEUE_DROP_REASON_MAP.slideChanged]: '다음 슬라이드 전환 고지가 앞서 — 이전 슬라이드 해설 버림',
   [QUEUE_DROP_REASON_MAP.interrupted]: '질문 답이 재생 중인 해설을 끊음',
   [QUEUE_DROP_REASON_MAP.featureOff]: '기능 꺼짐 — 대기 중이던 해설 버림',
+  [QUEUE_DROP_REASON_MAP.ttsFailed]: 'TTS 합성 실패 — 소리 없이 건너뜀',
 };
+
+// 대기 줄이 재생할 해설을 고른 뒤에 소리를 만든다(Orchestrator → TTS). 기본은 해설에 이미 담긴 wav 를 쓴다.
+export async function readEntryAudio(entry) {
+  return entry?.wavArrayBuffer || null;
+}
 
 // main 은 분류가 빠진 캡션을 지시로 취급한다. 같은 순위로 맞춘다.
 export function readNarrationPriority({ narrationClass }) {
