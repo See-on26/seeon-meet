@@ -28,6 +28,13 @@ test('실험 진입점은 파이프라인 등록 전에 세션 결과 엿보기�
   }
 });
 
+test('실험 진입점도 제품 앱처럼 파이프라인 등록 전에 GPU 서버 터널을 연다', () => {
+  const source = fs.readFileSync(new URL('../src/main/lab/index.js', import.meta.url), 'utf8');
+  assert.match(source, /require\('\.\.\/gpu-tunnel'\)/);
+  assert.match(source, /registerGpuTunnel\(\{ app, ipcMain, getViewerView: labWindow\.getViewerView \}\)/);
+  assert.ok(source.indexOf('registerGpuTunnel({') < source.indexOf('registerPipeline({'));
+});
+
 test('실험 창은 viewer·재생 화면 세션을 나누고 서로를 캡처하며 viewer 녹음은 로컬 소리를 살린다', () => {
   const source = fs.readFileSync(new URL('../src/main/lab/window.js', import.meta.url), 'utf8');
   assert.match(source, /'persist:lab-viewer'/);

@@ -16,6 +16,7 @@ const { observeIpcHandleList } = require('./ipc-observer');
 const labWindow = require('./window');
 const { registerLabIpc } = require('./lab-ipc');
 const { readAutorunOption } = require('./autorun-option');
+const { registerGpuTunnel } = require('../gpu-tunnel');
 
 // 파이프라인이 세션 시작·종료 결과(세션 ID·기록 파일)를 돌려줄 때 실험 기록에도 넘긴다. 등록보다 먼저 감싼다.
 // 세션 시작은 viewer 가 보낸 요청({ mode, asrLanguage })도 함께 넘겨 이번 실행에 실린 회의 언어를 남긴다.
@@ -45,6 +46,9 @@ async function startAutorun({ controller, autorun }) {
 }
 
 app.whenReady().then(() => {
+  // 제품 앱처럼 GPU 서비스(127.0.0.1:880x)를 부르기 전에 터널부터 연다. 외부 터널이 포트를 쓰고 있으면 그대로 둔다.
+  registerGpuTunnel({ app, ipcMain, getViewerView: labWindow.getViewerView });
+
   for (const dir of [FRAMES_DIR, DEIXIS_NARRATED_DIR, DEIXIS_SKIPPED_DIR, SLIDES_DIR, SUMMARIES_DIR]) {
     fs.mkdirSync(dir, { recursive: true });
   }
