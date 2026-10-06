@@ -84,7 +84,7 @@ contextBridge.exposeInMainWorld('seeon', {
   onPipelineEvent(callback) { ipcRenderer.on('pipeline-event', (_e, payload) => callback(payload)); },
   onRoiUpdate(callback) { ipcRenderer.on('roi-update', (_e, payload) => callback(payload)); },
   appendBoundaryLog(entry) { ipcRenderer.send('pipeline-boundary', entry); },
-  startPipelineSession({ mode }) { return ipcRenderer.invoke('pipeline-session-start', { mode }); },
+  startPipelineSession({ mode, asrLanguage }) { return ipcRenderer.invoke('pipeline-session-start', { mode, asrLanguage }); },
   endPipelineSession() { return ipcRenderer.invoke('pipeline-session-end'); },
   generateSummary() { return ipcRenderer.invoke('summary-generate'); },
   listMeetingArchive() { return ipcRenderer.invoke('meeting-archive-list'); },
