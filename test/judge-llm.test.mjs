@@ -160,30 +160,39 @@ function createFakeJudgeLlm({ text, source = 'gpu', error = null }) {
   };
 }
 
-test('통합 라우터는 판정 LLM 의 답을 읽고 실제로 답한 경로(gpu)를 source 로 남긴다', async () => {
-  const judgeLlm = createFakeJudgeLlm({
-    text: '{"candidateList":[{"type":"deixis","subKind":"simple","reference":"explicit","anchor":"이 막대"}],"blockedReason":null}',
-  });
+const triggerCandidate = { type: 'demonstrative', phrase: '이 막대', start: 0, end: 4 };
+
+test('통합 라우터는 트리거 후보마다 판정 LLM 의 O/X 를 읽고 실제로 답한 경로(gpu)를 source 로 남긴다', async () => {
+  const judgeLlm = createFakeJudgeLlm({ text: '{"judgeList":[{"id":1,"gap":"O","reason":"무엇인지 없다"}]}' });
   const router = createUnifiedRouter({ config: { ...gpuConfig, bedrockApiKey: '' }, judgeLlm });
-  const routed = await router.route({ utterance: '이 막대를 보시면', before: '', after: '' });
+  const routed = await router.route({ utterance: '이 막대를 보시면', before: '', after: '', candidateList: [triggerCandidate] });
   assert.equal(routed.source, ROUTER_SOURCE_MAP.gpu);
+  assert.equal(routed.candidateList[0].type, 'deixis');
   assert.equal(routed.candidateList[0].anchor, '이 막대');
+  assert.equal(routed.judgeList[0].isGap, true);
   assert.match(judgeLlm.requestList[0].messageList.at(-1).content[0].text, /이 막대를 보시면/);
+  assert.match(judgeLlm.requestList[0].messageList.at(-1).content[0].text, /1\) \[지시대명사\] "이 막대"/);
   assert.ok(judgeLlm.requestList[0].systemPrompt.length > 0);
 });
 
-test('통합 라우터: 판정 백엔드가 없으면(bedrock 인데 키 없음) 부르지 않고 통과, 판정 실패는 error 로 통과', async () => {
+test('통합 라우터: 판정할 수 없으면(백엔드 없음·판정 실패·후보 없음) 해설하지 않는다(최소 출력 원칙)', async () => {
   const unusedJudgeLlm = createFakeJudgeLlm({ text: '' });
   const noBackendRouter = createUnifiedRouter({ config: { ...gpuConfig, judgeBackend: 'bedrock', bedrockApiKey: '' }, judgeLlm: unusedJudgeLlm });
-  assert.equal((await noBackendRouter.route({ utterance: '이것' })).source, ROUTER_SOURCE_MAP.fallback);
+  const noBackend = await noBackendRouter.route({ utterance: '이것', candidateList: [triggerCandidate] });
+  assert.equal(noBackend.source, ROUTER_SOURCE_MAP.fallback);
+  assert.deepEqual(noBackend.candidateList, []);
+  assert.equal(noBackend.blockedReason, 'judge_unavailable');
+  const noCandidate = await noBackendRouter.route({ utterance: '이것', candidateList: [] });
+  assert.equal(noCandidate.blockedReason, 'no_candidate');
   assert.equal(unusedJudgeLlm.requestList.length, 0);
   const originalError = console.error;
   console.error = () => {};
   try {
     const failingRouter = createUnifiedRouter({ config: gpuConfig, judgeLlm: createFakeJudgeLlm({ error: new Error('둘 다 실패') }) });
-    const routed = await failingRouter.route({ utterance: '이것' });
+    const routed = await failingRouter.route({ utterance: '이것', candidateList: [triggerCandidate] });
     assert.equal(routed.source, ROUTER_SOURCE_MAP.error);
-    assert.equal(routed.candidateList[0].type, 'deixis');
+    assert.deepEqual(routed.candidateList, []);
+    assert.equal(routed.blockedReason, 'judge_error');
   } finally {
     console.error = originalError;
   }

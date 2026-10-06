@@ -23,6 +23,8 @@ const CONTEXT_AFTER_LISTENING_MS = 30000;
 const CONTEXT_AFTER_DELAYED_MS = 7000;
 const CONTEXT_AFTER_REALTIME_MS = 2000;
 
+// 판단 LLM 의 앞 문맥은 모든 모드에서 마지막 화면 전환 이후의 발화(최대 60초)다(「성능 평가 방식」 1.3).
+// window 는 화면 전환과 관계없이 최근 60초를 쓰던 방식으로, 다른 화면에서 한 말이 섞인다.
 export const CONTEXT_ANCHOR_MAP = {
   screenTransition: 'screen_transition',
   window: 'window',
@@ -67,7 +69,7 @@ export const MODE_POLICY_MAP = {
   },
   [MODE_MAP.realtimeSic]: {
     delayMs: 0, maxNarrationMs: 3000, rateMin: 1.5, rateMax: 1.8,
-    contextAnchor: CONTEXT_ANCHOR_MAP.window,
+    contextAnchor: CONTEXT_ANCHOR_MAP.screenTransition,
     beforeMs: CONTEXT_BEFORE_MS, afterMs: CONTEXT_AFTER_REALTIME_MS,
     asrSegmentMs: ASR_SEGMENT_REALTIME_MS,
     asrMinSegmentMs: ASR_MIN_SEGMENT_REALTIME_MS,
@@ -76,7 +78,7 @@ export const MODE_POLICY_MAP = {
   },
   [MODE_MAP.realtimeMix]: {
     delayMs: 0, maxNarrationMs: 6000, rateMin: 1.0, rateMax: 1.0,
-    contextAnchor: CONTEXT_ANCHOR_MAP.window,
+    contextAnchor: CONTEXT_ANCHOR_MAP.screenTransition,
     beforeMs: CONTEXT_BEFORE_MS, afterMs: CONTEXT_AFTER_REALTIME_MS,
     asrSegmentMs: ASR_SEGMENT_REALTIME_MS,
     asrMinSegmentMs: ASR_MIN_SEGMENT_REALTIME_MS,

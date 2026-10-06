@@ -55,9 +55,9 @@ contextBridge.exposeInMainWorld('seeon', {
   requestSlideText({ slideLabel, buffer }) {
     return ipcRenderer.invoke('pipeline-slide-text', { slideLabel, buffer: new Uint8Array(buffer) });
   },
-  sendPipelineDeixis({ ts, buffer, utterance, recentTranscript, beforeTranscript = '', afterTranscript = '', hasPointingRegion = false, pointingOrderHint = '', slideLabel = null, wordBudgetMap = null, eventVideoTimeMs = null }) {
+  sendPipelineDeixis({ ts, buffer, utterance, recentTranscript, beforeTranscript = '', afterTranscript = '', hasPointingRegion = false, pointingOrderHint = '', slideLabel = null, wordBudgetMap = null, eventVideoTimeMs = null, triggerCandidateList = [] }) {
     return ipcRenderer.invoke('pipeline-deixis',
-      { ts, buffer: new Uint8Array(buffer), utterance, recentTranscript, beforeTranscript, afterTranscript, hasPointingRegion, pointingOrderHint, slideLabel, wordBudgetMap, eventVideoTimeMs });
+      { ts, buffer: new Uint8Array(buffer), utterance, recentTranscript, beforeTranscript, afterTranscript, hasPointingRegion, pointingOrderHint, slideLabel, wordBudgetMap, eventVideoTimeMs, triggerCandidateList });
   },
   sendPipelineCommand({ ts, buffer, command = null, questionText = null, recentTranscript = '', wordBudget = null, eventVideoTimeMs = null }) {
     return ipcRenderer.invoke('pipeline-command',

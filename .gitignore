@@ -5,6 +5,9 @@ node_modules/
 dist/
 out/
 
+# 한국어 트리거용 Kiwi 모델 — npm run setup:kiwi 가 받는다 (약 87MB, 저장소에 올리지 않는다)
+vendor/
+
 # 환경변수 — 실제 키가 들어간다. 커밋 금지 (템플릿은 .env.example)
 .env
 .env.*

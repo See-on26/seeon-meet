@@ -21,6 +21,11 @@ const SLIDE_TEXT_PROMPT_MARKER = '그대로 옮겨 적어라';
 const MOCK_SLIDE_TEXT = '2분기 매출 요약\n2분기 매출 | 120억 원\n전년 동기 대비 | 15% 성장';
 
 const SLIDE_RECAPTION_PROMPT_MARKER = '요약본의 재료';
+// 탐지 판단 LLM(통합 라우터). 목 서버는 후보를 모두 공백(O)으로 판단해 해설 생성 경로를 끝까지 태운다.
+const ROUTER_JUDGE_PROMPT_MARKER = '판단(JSON 한 줄)';
+const MOCK_ROUTER_JUDGE = {
+  judgeList: [1, 2, 3, 4, 5].map((id) => ({ id, gap: 'O', reason: '목 서버 판단' })),
+};
 const MOCK_SLIDE_RECAPTION = {
   title: '2분기 매출 요약',
   bodyText: '분기별 매출 추이를 담은 표가 있다. 2분기 매출은 120억 원이고 전년 동기 대비 15% 성장했다.',
@@ -83,7 +88,8 @@ async function startMockServerList({
 
     let content;
 
-    if (body.includes(SLIDE_RECAPTION_PROMPT_MARKER)) content = JSON.stringify(MOCK_SLIDE_RECAPTION);
+    if (body.includes(ROUTER_JUDGE_PROMPT_MARKER)) content = JSON.stringify(MOCK_ROUTER_JUDGE);
+    else if (body.includes(SLIDE_RECAPTION_PROMPT_MARKER)) content = JSON.stringify(MOCK_SLIDE_RECAPTION);
     else if (body.includes(SLIDE_TEXT_PROMPT_MARKER)) content = MOCK_SLIDE_TEXT;
     else if (body.includes(GROUNDING_PROMPT_MARKER)) content = MOCK_GROUNDING_CAPTION;
     else if (body.includes(PAGE_TRANSITION_PROMPT_MARKER)) content = JSON.stringify(MOCK_PAGE_TRANSITION);

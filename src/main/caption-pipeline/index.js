@@ -10,6 +10,9 @@ const { buildSpeakerIdentityFromDom } = require('./agents/speaker-identity-agent
 const { DEBUG_STAGE_MAP, DEBUG_VERDICT_MAP } = require('./contracts/debug-events');
 const { createAgentFieldMap } = require('./agents');
 const { createUnifiedRouter, ROUTER_MODE_MAP } = require('./router/unified-router');
+const { createSpeechTrigger, TRIGGER_TYPE_LABEL_MAP } = require('./trigger/speech-trigger');
+const { createKiwiTokenizer } = require('./trigger/kiwi-tokenizer');
+const { resolveKiwiModelDir } = require('./trigger/kiwi-model');
 const { createDeixisJudgeClient } = require('./router/deixis-judge');
 const { createSilenceJudge } = require('./router/silence-judge');
 const { createSilenceNarrationGate, SILENCE_GATE_LABEL_MAP } = require('./orchestrator/silence-gate');
@@ -67,6 +70,18 @@ function truncateForLog(text, maxLength = 60) {
   return text.length > maxLength ? `${text.slice(0, maxLength)}…` : text;
 }
 
+function readElectronApp() {
+  try {
+    return require('electron').app;
+  } catch {
+    return undefined;
+  }
+}
+
+function formatTriggerCandidateList(candidateList = []) {
+  return candidateList.map((candidate) => `${TRIGGER_TYPE_LABEL_MAP[candidate.type] || candidate.type}:"${candidate.phrase}"`).join(', ');
+}
+
 function registerPipeline({ getViewerView, meetingArchive = null }) {
   const config = readPipelineConfig();
   const recordStore = createRecordStore({ outDir: OUT_DIR });
@@ -83,6 +98,17 @@ function registerPipeline({ getViewerView, meetingArchive = null }) {
   const judgeClient = createDeixisJudgeClient({ config });
   const routerClient = createUnifiedRouter({ config });
   const isRouterMode = config.routerMode === ROUTER_MODE_MAP.unified;
+  // 탐지 Layer 트리거: 한국어는 Kiwi 형태소 분석으로 맞춘다. 모델을 읽는 1초 남짓 이 스레드가 멈추므로 앱이 뜬 뒤 한 번만 만든다.
+  const electronApp = readElectronApp();
+  const kiwiTokenizer = createKiwiTokenizer({
+    modelDir: resolveKiwiModelDir({ isPackaged: Boolean(electronApp?.isPackaged), resourcesPath: process.resourcesPath }),
+  });
+  const speechTrigger = createSpeechTrigger({ tokenizer: kiwiTokenizer });
+  setImmediate(() => {
+    kiwiTokenizer.load()
+      .then(({ elapsedMs }) => console.log(`[pipeline] 트리거 형태소 분석기(Kiwi) 준비 (${elapsedMs}ms)`))
+      .catch((error) => console.warn(`[pipeline] Kiwi 를 띄우지 못해 한국어 트리거를 대체 규칙으로 잡는다: ${error.message}`));
+  });
   const describedStore = createDescribedStore();
   const captionDescribed = createCaptionDescribedRegistry({ describedStore });
   const screenRegistry = createScreenRegistry();
@@ -773,8 +799,17 @@ function registerPipeline({ getViewerView, meetingArchive = null }) {
       }
 
       if (result.text) {
+        const trigger = speechTrigger.detect({ text: result.text });
+        if (trigger.candidateList.length) {
+          markDebug({
+            stage: DEBUG_STAGE_MAP.router, verdict: DEBUG_VERDICT_MAP.info, ts: startTs,
+            reason: `트리거 후보 ${trigger.candidateList.length}개 (${trigger.analyzer})`,
+            detail: `${formatTriggerCandidateList(trigger.candidateList)} · 전사="${truncateForLog(result.text, 80)}"`,
+          });
+        }
         getViewerView()?.webContents.send('pipeline-event', {
           type: 'asr', ts: startTs, endTs, text: result.text, segmentList: result.segmentList,
+          triggerCandidateList: trigger.candidateList,
         });
       }
 
@@ -800,7 +835,7 @@ function registerPipeline({ getViewerView, meetingArchive = null }) {
     }
   });
 
-  ipcMain.handle('pipeline-deixis', async (_event, { ts, buffer, utterance, recentTranscript, beforeTranscript, afterTranscript, hasPointingRegion, pointingOrderHint, slideLabel, wordBudgetMap, eventVideoTimeMs = null }) => {
+  ipcMain.handle('pipeline-deixis', async (_event, { ts, buffer, utterance, recentTranscript, beforeTranscript, afterTranscript, hasPointingRegion, pointingOrderHint, slideLabel, wordBudgetMap, eventVideoTimeMs = null, triggerCandidateList = [] }) => {
     let stage = PIPELINE_STAGE_MAP.judge;
     const startedAt = Date.now();
     const hasAnySpeech = [utterance, beforeTranscript, afterTranscript, recentTranscript]
@@ -811,7 +846,7 @@ function registerPipeline({ getViewerView, meetingArchive = null }) {
         slideLabel, skipReason: 'no-speech-at-all',
       });
       markDebug({
-        stage: DEBUG_STAGE_MAP.judge, verdict: DEBUG_VERDICT_MAP.skip, ts,
+        stage: DEBUG_STAGE_MAP.router, verdict: DEBUG_VERDICT_MAP.skip, ts,
         narrationType: NARRATION_TYPE_MAP.deixis,
         reason: '트리거 발화도 인접 맥락도 없다 — 모사할 말이 없다',
         detail: '2-2는 상황 슬롯을 발화 모사로 채우는 형식이라, 말이 하나도 없으면 상투구밖에 나오지 않는다',
@@ -844,8 +879,19 @@ function registerPipeline({ getViewerView, meetingArchive = null }) {
       let selectedCandidate = null;
       if (utterance && utterance.trim()) {
         if (isRouterMode) {
-          const routed = await routerClient.route({ utterance, before: beforeText, after: afterText });
+          // 트리거가 뽑은 후보 구마다 판단 LLM 이 앞뒤 발화로 공백(O)인지 가린다.
+          const routed = await routerClient.route({
+            utterance, before: beforeText, after: afterText, candidateList: triggerCandidateList,
+          });
           judgeReason = routed.blockedReason;
+          markDebug({
+            stage: DEBUG_STAGE_MAP.router, ts,
+            verdict: routed.candidateList.length ? DEBUG_VERDICT_MAP.pass : DEBUG_VERDICT_MAP.skip,
+            reason: `판단 LLM ${routed.judgeList.filter((entry) => entry.isGap).length}/${routed.judgeList.length} 공백`,
+            detail: routed.judgeList
+              .map((entry) => `${TRIGGER_TYPE_LABEL_MAP[entry.type] || entry.type}:"${entry.phrase}"=${entry.isGap ? 'O' : 'X'}(${entry.reason || '-'})`)
+              .join(' · ') || '후보 없음',
+          });
           const { selected, excludedList } = selectGeneratableCandidate({
             candidateList: routed.candidateList, isScaleEnabled: config.isScaleEnabled,
           });

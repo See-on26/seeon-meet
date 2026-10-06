@@ -901,13 +901,13 @@ let lastDeixisDecidedAt = -Infinity;
 
 const candidateScheduler = new DeixisCandidateScheduler({ onDecide: runDeixisDecision, getLastSpeechWallTs });
 const deixisDetector = new DeixisDetector({
-  onDeixis: ({ text, trigger, captureTs, eventWallTs }) => {
+  onDeixis: ({ text, trigger, candidateList, captureTs, eventWallTs }) => {
     const { region, pointingOrderHint } = getPointingSequence();
     console.log(`[deixis] 🗣 발화 지시 "${trigger}" → look-ahead 대기`);
     const nowVideoTimeMs = captureSource.videoTimeMs;
     const nowTs = performance.now();
     candidateScheduler.submit({
-      source: CANDIDATE_SOURCE_MAP.speech, utterance: text, trigger, region, pointingOrderHint,
+      source: CANDIDATE_SOURCE_MAP.speech, utterance: text, trigger, candidateList, region, pointingOrderHint,
       captureTs: nowTs, videoTimeMs: nowVideoTimeMs,
       eventVideoTimeMs: wallToVideoTimeMs({ wallTs: eventWallTs, nowVideoTimeMs }) ?? nowVideoTimeMs,
       leadText: transcriptWindow.getOpenSentenceLead({ nowTs, sinceTs: lastDeixisDecidedAt }),
@@ -974,7 +974,7 @@ const SCREEN_DEPENDENCY_LABEL_MAP = {
   [SCREEN_DEPENDENCY_REASON_MAP.unsupportedSource]: '발화가 아닌 출처 — 트리거로 쓰지 않는다',
 };
 
-async function runDeixisDecision({ source, utterance, triggerList, region, pointingOrderHint,
+async function runDeixisDecision({ source, utterance, triggerList, candidateList = [], region, pointingOrderHint,
   captureTs, videoTimeMs, eventVideoTimeMs = null,
   triggerUtterance = utterance, leadText = '', followText = '', isSentenceWaited = false }) {
   lastDeixisDecidedAt = performance.now();
@@ -1012,7 +1012,7 @@ async function runDeixisDecision({ source, utterance, triggerList, region, point
       detail: `버린 발화 ${droppedCount}건 · 남은 맥락 ${tokenCount}토큰 (예산 ${CONTEXT_TOKEN_BUDGET})`,
     });
   }
-  const screenVerdict = judgeScreenDependency({ source, utterance: triggerUtterance });
+  const screenVerdict = judgeScreenDependency({ source, candidateList });
   if (!screenVerdict.isScreenDependent) {
     console.log(`[deixis] 화면 의존성 없음 → 스킵 label="${label}" (${screenVerdict.reason})`);
     markDebug({
@@ -1053,7 +1053,7 @@ async function runDeixisDecision({ source, utterance, triggerList, region, point
   const result = await window.seeon.sendPipelineDeixis({
     ts, buffer, utterance, recentTranscript, beforeTranscript: before, afterTranscript: after,
     hasPointingRegion: Boolean(region), pointingOrderHint, slideLabel: slideRegistry.currentLabel(),
-    wordBudgetMap, eventVideoTimeMs,
+    wordBudgetMap, eventVideoTimeMs, triggerCandidateList: candidateList,
   }).catch(() => null);
 
   const isNarrated = Boolean(result?.isOk && result.isGrounded);
@@ -1082,7 +1082,7 @@ function collectGapCandidateList({ segmentList, chunkStartTs, chunkEndTs }) {
   return boundaryList.length;
 }
 
-function handleAsrTranscript({ text, ts, endTs, segmentList = [] }) {
+function handleAsrTranscript({ text, ts, endTs, segmentList = [], triggerCandidateList = [] }) {
   const trimmed = (text || '').trim();
   if (trimmed) {
     markDebug({
@@ -1096,7 +1096,7 @@ function handleAsrTranscript({ text, ts, endTs, segmentList = [] }) {
     const { isDecided } = candidateScheduler.appendTranscript({ text: trimmed, endTs });
     if (!isDecided) {
       deixisDetector.handleTranscript({
-        text: trimmed, captureTs: endTs,
+        text: trimmed, candidateList: triggerCandidateList, captureTs: endTs,
         resolveEventWallTs: ({ trigger }) => resolveSpeechEndWallTs({
           chunkStartTs: ts, chunkEndTs: endTs, segmentList, trigger,
         }),
