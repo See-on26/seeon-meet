@@ -1,8 +1,13 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
+import { createRequire } from 'node:module';
 import {
-  NarrationQueue, NARRATION_QUEUE_TTL_MS, QUEUE_DROP_REASON_MAP, readNarrationPriority, shouldInterrupt,
+  NarrationQueue, NARRATION_QUEUE_TTL_MS, QUEUE_DROP_REASON_MAP, NARRATION_PRIORITY_MAP, readNarrationPriority,
+  shouldInterrupt,
 } from '../src/renderer/core/audio-renderer/narration-queue.js';
+
+const require = createRequire(import.meta.url);
+const mainBlockingPolicy = require('../src/main/caption-pipeline/orchestrator/blocking-policy.js');
 
 function createClock(startMs = 0) {
   const clock = { nowMs: startMs };
@@ -51,6 +56,21 @@ test('같은 순위면 먼저 들어온 해설부터 꺼낸다', () => {
 test('분류가 없는 해설은 main 과 같이 지시 순위로 본다', () => {
   assert.equal(readNarrationPriority({ narrationClass: undefined }), readNarrationPriority({ narrationClass: 'deixis' }));
   assert.equal(readNarrationPriority({ narrationClass: 'unknown' }), readNarrationPriority({ narrationClass: 'deixis' }));
+});
+
+test('재생 우선순위 표는 main 차단 규칙(blocking-policy)의 표와 같다', () => {
+  assert.deepEqual(NARRATION_PRIORITY_MAP, mainBlockingPolicy.NARRATION_PRIORITY_MAP);
+});
+
+test('분류가 빠졌거나 모르는 분류의 순위는 main 차단 규칙과 같게 읽는다', () => {
+  const classList = [...Object.keys(NARRATION_PRIORITY_MAP), null, undefined, '', 'unknown', 'constructor'];
+  for (const narrationClass of classList) {
+    assert.equal(
+      readNarrationPriority({ narrationClass }),
+      mainBlockingPolicy.readNarrationPriority({ narrationClass }),
+      String(narrationClass),
+    );
+  }
 });
 
 test('재생 차례가 된 뒤 8초 넘게 기다린 자동 해설은 버리고 기다린 시간을 남긴다', () => {

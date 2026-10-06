@@ -22,6 +22,9 @@ const { createScreenRegistry } = require('./orchestrator/screen-registry');
 const { createSlideTopicRegistry, SLIDE_TOPIC_VERDICT_MAP } = require('./orchestrator/slide-topic-registry');
 const { createSpeakerRegistry } = require('./orchestrator/speaker-registry');
 const { createNarrationHistory } = require('./orchestrator/narration-history');
+const {
+  readBlockingRelation, NARRATION_CLASS_LABEL_MAP, BLOCKING_RELATION_LABEL_MAP,
+} = require('./orchestrator/blocking-policy');
 const { createAsrClient } = require('./perception/asr-client');
 const { createAsrLanguageSession, applySessionMeetingLanguage } = require('./perception/asr-language');
 const { createEmbedClient } = require('./perception/embed-client');
@@ -50,12 +53,6 @@ const ASR_DRAIN_POLL_MS = 100;
 const PIPELINE_STAGE_MAP = { frame: 'frame', judge: 'judge', vlm: 'vlm', caption: 'caption', tts: 'tts', asr: 'asr' };
 
 const RECENT_NARRATION_LIMIT = 4;
-
-const SPEECH_AXIS_SOURCE_LIST = [
-  NARRATION_TYPE_MAP.deixis,
-  NARRATION_TYPE_MAP.interpretation,
-  NARRATION_TYPE_MAP.visualDescription,
-];
 
 async function appendErrorRecordSafely({ appendRecord, record }) {
   try {
@@ -215,7 +212,7 @@ function registerPipeline({ getViewerView, meetingArchive = null }) {
   });
 
   async function sendCaption({ ts, text, source, slideLabel = null, isDedupeExempt = false,
-    rationale = null, slotMap = null, hasPointingRegion = false, isRateLimitExempt = true,
+    rationale = null, slotMap = null, hasPointingRegion = false,
     narrationClass = null, eventVideoTimeMs = null }) {
     if (!narrationClass) {
       markDebug({
@@ -238,24 +235,31 @@ function registerPipeline({ getViewerView, meetingArchive = null }) {
       });
       return { isEmitted: false };
     }
-    if (!isRateLimitExempt) {
-      const rate = narrationHistory.findRateLimited({
-        source, ts, hasPointingRegion, sourceGroupList: SPEECH_AXIS_SOURCE_LIST,
+    // 간격 억제: 어느 분류가 어느 분류를 얼마 동안 막는지는 orchestrator/blocking-policy.js 표가 정한다.
+    const rate = narrationHistory.findRateLimited({ narrationClass: resolvedClass, ts, hasPointingRegion });
+    if (rate.isRateLimited) {
+      const blockingRelation = readBlockingRelation({
+        narrationClass: resolvedClass, blockedByClass: rate.blockedByClass,
       });
-      if (rate.isRateLimited) {
-        await appendRecord({
-          kind: RECORD_KIND_MAP.narration, ts, source, text, slideLabel, isEmitted: false,
-          skipReason: 'rate-limited', sinceMs: rate.sinceMs, minIntervalMs: rate.minIntervalMs,
-        });
-        console.log(`[pipeline]   간격 억제 [${source}] "${truncateForLog(text)}" (직전 ${Math.round(rate.sinceMs / 1000)}초 < ${rate.minIntervalMs / 1000}초)`);
-        markDebug({
-          stage: DEBUG_STAGE_MAP.dedupe, verdict: DEBUG_VERDICT_MAP.skip, narrationType: source, ts,
-          reason: '간격 억제',
-          detail: `"${text}" — 직전 같은 축 캡션과 ${Math.round(rate.sinceMs / 1000)}초 간격`
-            + ` (최소 ${rate.minIntervalMs / 1000}초${hasPointingRegion ? ', 필기 있음' : ', 발화만'})`,
-        });
-        return { isEmitted: false };
-      }
+      const blockedByLabel = NARRATION_CLASS_LABEL_MAP[rate.blockedByClass];
+      const relationLabel = BLOCKING_RELATION_LABEL_MAP[blockingRelation];
+      const sinceSec = Math.round(rate.sinceMs / 1000);
+      await appendRecord({
+        kind: RECORD_KIND_MAP.narration, ts, source, text, slideLabel, isEmitted: false,
+        skipReason: 'rate-limited', narrationClass: resolvedClass, blockedByClass: rate.blockedByClass,
+        blockingRelation, sinceMs: rate.sinceMs, minIntervalMs: rate.minIntervalMs,
+      });
+      console.log(`[pipeline]   간격 억제 [${resolvedClass}] "${truncateForLog(text)}"`
+        + ` ← 직전 ${blockedByLabel} 해설(${relationLabel}) ${sinceSec}초 < ${rate.minIntervalMs / 1000}초`);
+      // 기록을 읽는 도구가 reason '간격 억제' 를 그대로 대조하므로 reason 은 두고, 막은 분류·관계는 detail 에 적는다.
+      markDebug({
+        stage: DEBUG_STAGE_MAP.dedupe, verdict: DEBUG_VERDICT_MAP.skip, narrationType: source, ts,
+        reason: '간격 억제',
+        detail: `"${text}" — 직전 ${blockedByLabel} 해설(${relationLabel})과 ${sinceSec}초 간격`
+          + ` (최소 ${rate.minIntervalMs / 1000}초 · ${NARRATION_CLASS_LABEL_MAP[resolvedClass] || resolvedClass}`
+          + `${hasPointingRegion ? ', 필기 있음' : ''})`,
+      });
+      return { isEmitted: false };
     }
     const duplicate = isDedupeExempt
       ? { isDuplicate: false, matchedText: '', similarity: 0, reason: '', threshold: 0 }
@@ -275,7 +279,7 @@ function registerPipeline({ getViewerView, meetingArchive = null }) {
       });
       return { isEmitted: false };
     }
-    narrationHistory.remember({ text, source, ts, slotMap, slideLabel });
+    narrationHistory.remember({ text, source, ts, slotMap, slideLabel, narrationClass: resolvedClass });
     let wavData = null;
     try {
       wavData = await ttsClient.synthesize({ text });
@@ -953,7 +957,7 @@ function registerPipeline({ getViewerView, meetingArchive = null }) {
       stage = PIPELINE_STAGE_MAP.tts;
       const sent = await sendCaption({
         ts, text, source: narrationType, slideLabel, slotMap,
-        hasPointingRegion, isRateLimitExempt: false,
+        hasPointingRegion,
         narrationClass: toNarrationClass({ narrationType }), eventVideoTimeMs,
         rationale: {
           utterance,
