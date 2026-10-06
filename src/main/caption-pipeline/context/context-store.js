@@ -12,6 +12,8 @@ const LABEL_STATUS_MAP = {
 
 const SLIDE_FRAME_KIND_BASE = 'base';
 const USER_COMMAND_CLASS = 'user_command';
+// 전환 고지 생성이 이 사유로 끝나면 고지 문장 대신 화면 주제로 스크립트에 한 줄을 남긴다. 다른 사유(무관한 화면·같은 화면)는 남기지 않는다.
+const TOPIC_FALLBACK_SKIP_REASON = 'incomplete_description';
 
 function toSlideMajor(slideLabel) {
   const major = Number.parseInt(String(slideLabel ?? '').split('-')[0], 10);
@@ -53,6 +55,10 @@ function createContextStore({ onChange = () => {} } = {}) {
   let utteranceList = [];
   let narrationList = [];
   let qaList = [];
+  // 회의 스크립트에 넣을 화면 전환 AD. 페이지 전환 설명 에이전트가 만든 문장이다.
+  let transitionList = [];
+  // 체류 3초를 못 채워 취소된 전환. 스크립트에서 그 전환 줄과 방문을 뺀다. 고지·마크보다 먼저 와도 되게 따로 둔다.
+  let cancelledTransitionList = [];
   let currentMajor = null;
 
   // 파일 쓰기 같은 후속 처리가 실패해도 저장소 반영은 계속한다.
@@ -118,6 +124,36 @@ function createContextStore({ onChange = () => {} } = {}) {
       slide.describedElementList = record.describedElementList
         .filter((element) => typeof element === 'string' && element.trim());
     }
+    const transitionText = resolveTransitionText({ record, slide });
+    if (transitionText && Number.isFinite(record.ts)) {
+      transitionList.push({
+        ts: record.ts, slideMajor: major, text: transitionText,
+        isRevisit: Boolean(record.isRevisit), isTopicFallback: !record.narration,
+      });
+      transitionList.sort((left, right) => left.ts - right.ts);
+    }
+    return true;
+  }
+
+  function resolveTransitionText({ record, slide }) {
+    if (typeof record.narration === 'string' && record.narration.trim()) return record.narration.trim();
+    if (record.skipReason !== TOPIC_FALLBACK_SKIP_REASON) return '';
+    const topic = typeof record.pageTopic === 'string' ? record.pageTopic.trim() : '';
+    if (!topic) return '';
+    const number = slide.displayNumber ?? (Number.isFinite(record.displayNumber) ? record.displayNumber : null);
+    return number ? `슬라이드 ${number}: ${topic}` : topic;
+  }
+
+  // requestTs 는 그 전환의 고지 요청 시각(전환 기록의 ts), transitionTs 는 방문을 연 시각이다.
+  function cancelTransition({ slideLabel, requestTs = null, transitionTs = null }) {
+    const major = toSlideMajor(slideLabel);
+    if (major === null) return false;
+    cancelledTransitionList.push({
+      slideMajor: major,
+      requestTs: Number.isFinite(requestTs) ? requestTs : null,
+      transitionTs: Number.isFinite(transitionTs) ? transitionTs : null,
+    });
+    notifyChange();
     return true;
   }
 
@@ -262,6 +298,8 @@ function createContextStore({ onChange = () => {} } = {}) {
     utteranceList = [];
     narrationList = [];
     qaList = [];
+    transitionList = [];
+    cancelledTransitionList = [];
     currentMajor = null;
   }
 
@@ -280,13 +318,15 @@ function createContextStore({ onChange = () => {} } = {}) {
       utteranceList: utteranceList.map((utterance) => ({ ...utterance })),
       narrationList: narrationList.map((narration) => ({ ...narration })),
       qaList: qaList.map((qa) => ({ ...qa, slideMajorList: [...qa.slideMajorList] })),
+      transitionList: transitionList.map((transition) => ({ ...transition })),
+      cancelledTransitionList: cancelledTransitionList.map((cancelled) => ({ ...cancelled })),
     };
   }
 
   return {
     start, reset,
     getSessionInfo: () => ({ sessionId, startedAt }),
-    applyRecord, applySlideText, listReadyForLabelMajors, markLabelRequested, setLabel, addQa,
+    applyRecord, applySlideText, cancelTransition, listReadyForLabelMajors, markLabelRequested, setLabel, addQa,
     getSlide, getSlideList, getCurrentSlideMajor: () => currentMajor,
     getUtteranceList, getNarrationList, getLastQa: () => qaList[qaList.length - 1] || null,
     buildIndex, resolveSlideNumber, snapshot,

@@ -178,3 +178,28 @@ test('슬라이드 마크에 실제 전환 시각이 있으면 그 시각으로 
   assert.deepEqual(store.getSlide(2).visitList, [{ startTs: 6000, endTs: null }]);
   assert.equal(store.getUtteranceList()[0].slideMajor, 2);
 });
+
+test('전환 고지 문장은 스크립트용 화면 전환 AD 로 모은다 (주제 대체·고지 없는 사유 구분)', () => {
+  const store = createContextStore();
+  store.applyRecord(baseMark({ ts: 1000, slideLabel: '1' }));
+  store.applyRecord({ kind: 'page_transition', ts: 1100, slideLabel: '1', narration: '슬라이드 1: 표지', displayNumber: 1 });
+  store.applyRecord({ kind: 'page_transition', ts: 2100, slideLabel: '2', narration: '',
+    skipReason: 'incomplete_description', pageTopic: '분기 매출', displayNumber: 2 });
+  store.applyRecord({ kind: 'page_transition', ts: 3100, slideLabel: '3', narration: '', skipReason: 'same_topic', pageTopic: '분기 매출' });
+  store.applyRecord({ kind: 'page_transition', ts: 4100, slideLabel: '1', narration: '이전 슬라이드 1: 표지', isRevisit: true });
+  assert.deepEqual(store.snapshot().transitionList.map(({ ts, slideMajor, text, isRevisit }) => [ts, slideMajor, text, isRevisit]), [
+    [1100, 1, '슬라이드 1: 표지', false],
+    [2100, 2, '슬라이드 2: 분기 매출', false],
+    [4100, 1, '이전 슬라이드 1: 표지', true],
+  ]);
+});
+
+test('체류 미달로 취소된 전환은 스냅숏에 남겨 스크립트가 뺄 수 있게 하고, 새 세션에서는 비운다', () => {
+  const store = createContextStore();
+  assert.equal(store.cancelTransition({ slideLabel: '4-2', requestTs: 5100, transitionTs: 5000 }), true);
+  assert.equal(store.cancelTransition({ slideLabel: '' }), false);
+  assert.deepEqual(store.snapshot().cancelledTransitionList, [{ slideMajor: 4, requestTs: 5100, transitionTs: 5000 }]);
+  store.start({ sessionId: 's2', startedAt: 0 });
+  assert.deepEqual(store.snapshot().cancelledTransitionList, []);
+  assert.deepEqual(store.snapshot().transitionList, []);
+});

@@ -676,6 +676,11 @@ function registerPipeline({ getViewerView, meetingArchive = null }) {
     });
   });
 
+  // 체류 3초를 못 채운 화면. 회의 스크립트에서 그 전환 AD 줄과 방문을 뺀다.
+  ipcMain.on('pipeline-transition-cancelled', (_event, { slideLabel = null, requestTs = null, transitionTs = null } = {}) => {
+    contextStore.cancelTransition({ slideLabel, requestTs, transitionTs });
+  });
+
   ipcMain.handle('pipeline-feature-toggles', async (_event, { disabledClassList = [] } = {}) => {
     const { reenabledClassList } = featureGate.setDisabledClassList(disabledClassList);
     const appliedList = featureGate.getDisabledClassList();

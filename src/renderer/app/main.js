@@ -38,6 +38,7 @@ import {
 
 import { AudioMeter } from '../core/trigger/audio-meter.js';
 import { AsrSegmenter } from '../core/trigger/asr-segmenter.js';
+import { SpeakerTimeline } from '../core/trigger/speaker-timeline.js';
 import {
   UtteranceBoundaryDetector, classifyUtteranceEnding, buildSegmentBoundaryList,
 } from '../core/trigger/utterance-boundary-detector.js';
@@ -67,6 +68,7 @@ const $ = (id) => document.getElementById(id);
 const captureSource = new MeetCaptureSession();
 
 const roiStore = new RoiStore({ isFullFrameFallback: false, isStabilized: true });
+const speakerTimeline = new SpeakerTimeline();
 
 const ROI_CHANGE_SUPPRESS_MS = 1500;
 const FRAME_ASPECT_TOLERANCE = 0.02;
@@ -496,6 +498,7 @@ window.seeon.onRoiUpdate((payload) => {
   latestMeetUrl = payload.url || '';
   latestMeetTileCount = payload.roiList.length;
   roiStore.submitViewportRoiList(payload);
+  speakerTimeline.record({ wallTs: Date.now(), name: roiStore.getCurrentSpeakerName() });
   syncToggleAvailability();
 });
 buildModeButtons();
@@ -524,6 +527,8 @@ const slideRegistry = new SlideEmbeddingRegistry({});
 // 슬라이드 전환을 확정한 영상 시각. 체류 판정 후 생성하는 모드에서도 원 사건 시각을 잃지 않게 보관한다.
 const slideEventVideoTimeMap = new Map();
 const slideTransitionWallTsMap = new Map();
+// 선판정 모드는 체류 확정 전에 고지를 요청한다. 체류 미달로 취소되면 이 요청 시각으로 main 의 스크립트에서 그 전환을 뺀다.
+const slideTransitionRequestTsMap = new Map();
 const transitionOrderGate = new TransitionOrderGate();
 // 전환을 확정한 뒤 고지가 정해지기 전에 도착한 화자 안내는 그 고지 뒤에 들려준다(공동 2순위: 전환 → 화자).
 const pendingTransitions = new PendingTransitionTracker();
@@ -542,6 +547,12 @@ const slideDwellGate = new SlideDwellGate({
   },
   onCancelled: ({ label, isRevisit }) => {
     pendingTransitions.settle({ slideLabel: label, status: LEADER_STATUS_MAP.cancelled });
+    window.seeon.reportTransitionCancelled({
+      slideLabel: label,
+      requestTs: slideTransitionRequestTsMap.get(label) ?? null,
+      transitionTs: slideTransitionWallTsMap.get(label) ?? null,
+    });
+    slideTransitionRequestTsMap.delete(label);
     console.log(`[slide] 체류 미달 — 고지 취소 ${label}`);
     markDebug({
       stage: DEBUG_STAGE_MAP.slide, verdict: DEBUG_VERDICT_MAP.skip,
@@ -724,6 +735,7 @@ async function requestPageTransitionNarration(decision) {
     return;
   }
   const ts = Date.now();
+  slideTransitionRequestTsMap.set(decision.label, ts);
   showNotice(decision.isRevisit
     ? `이전 슬라이드 ${decision.label}로 복귀 — 고지 생성 중…`
     : `슬라이드 ${decision.label} 전환 — 화면 고지 생성 중…`);
@@ -848,12 +860,17 @@ function getSpeakerHint() {
   return lastResolvedSpeakerName && isFresh ? lastResolvedSpeakerName : null;
 }
 
+// 회의 스크립트는 발화마다 화자를 적는다. 조각 구간에 Meet 표시로 가장 오래 말한 사람, 없으면 지금 화자 힌트를 쓴다.
+function resolveSegmentSpeaker({ startTs, endTs }) {
+  return speakerTimeline.resolveDominant({ startTs, endTs }) || getSpeakerHint();
+}
+
 const asrSegmenter = new AsrSegmenter({
   onSegment: ({ startTs, endTs, buffer }) => {
     if (!isPipelineEnabled()) return;
 
     window.seeon.sendPipelineAudio({
-      startTs, endTs, buffer, speakerHint: getSpeakerHint(),
+      startTs, endTs, buffer, speakerHint: resolveSegmentSpeaker({ startTs, endTs }),
     }).catch(() => {});
   },
   onError: (error) => console.warn('[pipeline] ASR 세그먼트 오류', error),
@@ -1786,6 +1803,7 @@ async function attemptStartExperiment() {
     slideRegistry.reset();
     slideEventVideoTimeMap.clear();
     slideTransitionWallTsMap.clear();
+    slideTransitionRequestTsMap.clear();
     transitionOrderGate.reset();
     pendingTransitions.reset();
     slideDwellGate.reset();
@@ -1854,11 +1872,11 @@ function stopExperiment() {
     ['슬라이드 히스토그램 게이트', () => histogramGate.reset()],
     ['슬라이드 레지스트리', () => {
       slideRegistry.reset(); slideEventVideoTimeMap.clear(); slideTransitionWallTsMap.clear(); transitionOrderGate.reset();
-      pendingTransitions.reset();
+      slideTransitionRequestTsMap.clear(); pendingTransitions.reset();
     }],
     ['전환 체류 게이트', () => slideDwellGate.reset()],
     ['ROI 스토어', () => roiStore.reset()],
-    ['발화자 힌트', () => { lastResolvedSpeakerName = ''; lastResolvedSpeakerAt = 0; }],
+    ['발화자 힌트', () => { lastResolvedSpeakerName = ''; lastResolvedSpeakerAt = 0; speakerTimeline.reset(); }],
     ['지연 버퍼', () => stopDelayBuffer()],
     ['캡처 세션', () => captureSource.stop()],
     ['PiP', () => { if (document.pictureInPictureElement) document.exitPictureInPicture().catch(() => {}); }],

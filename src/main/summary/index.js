@@ -15,7 +15,10 @@ function registerSummary({ getViewerView, pipelineHandle, meetingArchive = null 
     if (!session) return { isOk: false, message: '요약할 세션이 없습니다' };
     try {
       const result = await generator.generate({ session, contextSnapshot });
-      // 사용자 문서 폴더의 회의 기록에 요약 텍스트·음성을 같이 둔다. 실패해도 요약 결과는 돌려준다.
+      // 사용자 문서 폴더의 회의 기록에 화면 줄을 채운 스크립트와 요약 텍스트·음성을 같이 둔다. 실패해도 요약 결과는 돌려준다.
+      await meetingArchive?.replaceScript({
+        sessionId: session.sessionId, startedAt: session.startedAt, scriptText: result.scriptText,
+      }).catch((error) => console.warn(`[archive] 스크립트 갱신 실패(무시): ${error.message}`));
       await meetingArchive?.saveSummary({
         sessionId: session.sessionId, startedAt: session.startedAt,
         summaryText: result.documentText, audioFilePath: result.audioFilePath,
