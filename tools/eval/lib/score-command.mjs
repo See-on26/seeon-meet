@@ -6,7 +6,9 @@ import { validateDetectionItemList, formatIssueList, ISSUE_LEVEL_MAP } from './d
 import { createMethodologyMatcher, MATCHER_KIND_MAP } from './methodology-matcher.mjs';
 import { createFetchRecorder } from './fetch-recorder.mjs';
 import { createCacheStore } from './cache-store.mjs';
-import { createJudgeRunner, PATH_ERROR_MAP } from './judge-runner.mjs';
+import {
+  createJudgeRunner, PATH_ERROR_MAP, buildJudgeModelLabel, countJudgeSource,
+} from './judge-runner.mjs';
 import { buildScorePlan, evaluateScorePlan } from './score-rows.mjs';
 import { buildModeMetrics, listErrorCase } from './detection-metrics.mjs';
 import { buildDetectionReport } from './detection-report.mjs';
@@ -81,7 +83,7 @@ export function resolveScoreOption(values) {
 
 const toJsonl = (rowList) => rowList.map((row) => JSON.stringify(row)).join('\n') + (rowList.length ? '\n' : '');
 
-// 판정기 호출이 Bedrock 에 닿지 못한 경로 오류. parse·empty_text 는 모델이 낸 응답이라 측정 대상이고, 이 둘은 실행 실패다.
+// 판정기 호출이 판정 LLM(GPU·Bedrock)에 닿지 못한 경로 오류. parse·empty_text 는 모델이 낸 응답이라 측정 대상이고, 이 둘은 실행 실패다.
 const REQUEST_FAIL_KIND_LIST = [PATH_ERROR_MAP.http, PATH_ERROR_MAP.noToken];
 
 export function summarizeRequestFailure({ rawList, rowList }) {
@@ -98,9 +100,9 @@ export function summarizeRequestFailure({ rawList, rowList }) {
 // 토큰 만료·네트워크 오류면 표는 정상처럼 보여도 그 위치가 빠져 있다. 마지막 줄로 크게 알린다.
 function formatRequestFailLine({ requestFailure, totalCallCount }) {
   const kindText = Object.entries(requestFailure.byKindMap).map(([kind, count]) => `${kind} ${count}`).join(' · ');
-  return `[score] 실패: 판정기 호출 ${requestFailure.callCount}회가 Bedrock 에 닿지 못했다 (${kindText}) — 전체 ${totalCallCount}회 중.`
+  return `[score] 실패: 판정기 호출 ${requestFailure.callCount}회가 판정 LLM(GPU·Bedrock)에 닿지 못했다 (${kindText}) — 전체 ${totalCallCount}회 중.`
     + ` 결과 파일은 썼지만 판정 결과를 모르는 위치 ${requestFailure.rowCount}개(모드·반복 합계)가 경로 오류다(판정기 성능에서 빠진다).`
-    + ' 토큰(AWS_BEARER_TOKEN_BEDROCK) 만료·네트워크를 확인한다. 실패한 호출은 캐시에 넣지 않으므로 같은 명령을 다시 돌리면 그것만 다시 묻는다(종료 코드 1).';
+    + ' GPU 서버 연결(터널)·토큰(AWS_BEARER_TOKEN_BEDROCK) 만료·네트워크를 확인한다. 실패한 호출은 캐시에 넣지 않으므로 같은 명령을 다시 돌리면 그것만 다시 묻는다(종료 코드 1).';
 }
 
 export async function runScoreCommand({
@@ -176,7 +178,7 @@ export async function runScoreCommand({
     judgeSilence: (input) => silenceJudge.judge(input),
     capture: recorder.capture,
     cache: createCacheStore({ cacheDir }),
-    routerModelId: config.judgeModelId,
+    routerModelId: buildJudgeModelLabel({ config }),
   });
   const matcher = await createMatcher({ kind: matcherKind });
   const plan = buildScorePlan({ itemList, matcher });
@@ -208,6 +210,8 @@ export async function runScoreCommand({
     inputPath: path.resolve(values.in),
     progress: plan.progress,
     judgeModelId: config.judgeModelId,
+    judgeModelLabel: buildJudgeModelLabel({ config }),
+    judgeSourceCountMap: countJudgeSource({ rawList: allRawList }),
     routerMode: config.routerMode,
     isScaleEnabled: config.isScaleEnabled,
     matcherKind: matcher.kind,

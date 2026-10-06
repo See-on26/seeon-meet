@@ -37,7 +37,8 @@ export function createFetchRecorder({ baseFetch = globalThis.fetch.bind(globalTh
 // 기록된 요청이 하나도 없을 때의 errorMessage. production 이 토큰이 없어 요청 전에 멈춘 경우다.
 export const NO_REQUEST_ERROR = 'no_request';
 
-// Bedrock Converse 응답 원문에서 글·종료 사유·사용량을 꺼낸다.
+// 판정 응답 원문에서 글·종료 사유·사용량을 꺼낸다. Bedrock Converse 와 GPU LLM(OpenAI chat) 두 형식을 읽는다.
+// GPU 가 실패해 Bedrock 으로 넘어간 판정은 마지막 응답이 실제 답이다.
 export function summarizeConverseCapture(captureList) {
   const last = captureList.at(-1);
   if (!last) return { status: null, stopReason: null, usage: null, rawText: null, errorMessage: NO_REQUEST_ERROR, elapsedMs: null };
@@ -50,11 +51,15 @@ export function summarizeConverseCapture(captureList) {
   const partList = json?.output?.message?.content;
   const textPart = Array.isArray(partList)
     ? partList.find((part) => typeof part?.text === 'string' && part.text.trim()) : null;
+  const chatChoice = Array.isArray(json?.choices) ? json.choices[0] : null;
+  const chatText = typeof chatChoice?.message?.content === 'string' && chatChoice.message.content.trim()
+    ? chatChoice.message.content : null;
+  const text = textPart ? textPart.text : chatText;
   return {
     status: last.status,
-    stopReason: json?.stopReason ?? null,
+    stopReason: json?.stopReason ?? chatChoice?.finish_reason ?? null,
     usage: json?.usage ?? null,
-    rawText: textPart ? textPart.text : (last.status === 200 ? '' : last.bodyText.slice(0, 300)),
+    rawText: text || (last.status === 200 ? '' : last.bodyText.slice(0, 300)),
     errorMessage: last.errorMessage,
     elapsedMs: last.elapsedMs,
   };

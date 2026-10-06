@@ -10,7 +10,7 @@ import { mapWithConcurrency } from '../tools/eval/lib/concurrency.mjs';
 import {
   createJudgeRunner, resolveLexicalVerdict, classifyRouterPathError, classifySilencePathError,
   isRouterTextWellFormed, PATH_ERROR_MAP,
-  hashProductionSource, PRODUCTION_SOURCE_FILE_LIST_MAP, PRODUCTION_SOURCE_HASH_MAP,
+  hashProductionSource, PRODUCTION_SOURCE_FILE_LIST_MAP, PRODUCTION_SOURCE_HASH_MAP, buildJudgeModelLabel, countJudgeSource,
 } from '../tools/eval/lib/judge-runner.mjs';
 import { buildScorePlan, evaluateScorePlan, SYSTEM_MISS_REASON_MAP } from '../tools/eval/lib/score-rows.mjs';
 import { REGEX_MATCHER } from '../tools/eval/lib/methodology-matcher.mjs';
@@ -345,4 +345,51 @@ test('판정 결과를 만드는 production 코드가 바뀌면 캐시 키가 �
   assert.equal((await changedRunner.runRouter({ input: routerInput, repeatIndex: 0 })).isCacheHit, false, '라우터 코드가 바뀌면 다시 묻는다');
   assert.equal((await changedRunner.runSilence({ input: silenceInput, repeatIndex: 0 })).isCacheHit, false, '무발화 판정기 코드가 바뀌면 다시 묻는다');
   assert.deepEqual(callLog, { route: 2, judge: 2 });
+});
+
+const chatBody = (content, finishReason = 'stop') => JSON.stringify({
+  choices: [{ message: { content }, finish_reason: finishReason }], usage: { prompt_tokens: 10, completion_tokens: 5 },
+});
+
+test('GPU LLM(OpenAI chat) 응답 원문에서도 글·종료 사유·사용량을 꺼낸다', () => {
+  const summary = summarizeConverseCapture([{ url: 'http://127.0.0.1:8801/v1/chat/completions', status: 200, bodyText: chatBody('{"cue":true}'), elapsedMs: 480, errorMessage: null }]);
+  assert.equal(summary.rawText, '{"cue":true}');
+  assert.equal(summary.stopReason, 'stop');
+  assert.deepEqual(summary.usage, { prompt_tokens: 10, completion_tokens: 5 });
+});
+
+test('GPU 가 실패하고 Bedrock 으로 넘어간 판정은 마지막(Bedrock) 응답을 읽는다', () => {
+  const summary = summarizeConverseCapture([
+    { url: 'http://127.0.0.1:8801/v1/chat/completions', status: null, bodyText: '', elapsedMs: 3, errorMessage: 'fetch failed' },
+    { url: 'https://bedrock', status: 200, bodyText: converseBody('{"cue":false}'), elapsedMs: 2100, errorMessage: null },
+  ]);
+  assert.equal(summary.rawText, '{"cue":false}');
+});
+
+test('무발화 판정이 gpu 로 답했으면 bedrock 과 같이 원문 형식을 검사한다', () => {
+  const capture = { rawText: '{"cue":true,"reason":"presenting"}' };
+  assert.equal(classifySilencePathError({ judged: { source: 'gpu' }, capture }), null);
+  assert.equal(classifySilencePathError({ judged: { source: 'gpu' }, capture: { rawText: 'cue=yes' } }), PATH_ERROR_MAP.parse);
+  assert.equal(classifySilencePathError({ judged: { source: 'gpu' }, capture: { rawText: '' } }), PATH_ERROR_MAP.emptyText);
+});
+
+test('판정 원문 해시에 판정 LLM 경로 모듈(judge-llm.js)과 설정(config.js)이 들어간다', () => {
+  for (const fileList of Object.values(PRODUCTION_SOURCE_FILE_LIST_MAP)) {
+    assert.ok(fileList.includes('src/main/caption-pipeline/agents/shared/judge-llm.js'));
+    assert.ok(fileList.includes('src/main/caption-pipeline/config.js'));
+  }
+});
+
+test('판정 모델 이름표: gpu 백엔드면 GPU 모델(폴백 Bedrock), bedrock 이면 Bedrock 모델', () => {
+  assert.equal(buildJudgeModelLabel({ config: { judgeBackend: 'gpu', judgeGpuModel: 'qwen3.5-35b-a3b', judgeModelId: 'anthropic.claude-sonnet-5' } }),
+    'gpu:qwen3.5-35b-a3b');
+  assert.equal(buildJudgeModelLabel({ config: { judgeBackend: 'bedrock', judgeModelId: 'anthropic.claude-sonnet-5' } }), 'anthropic.claude-sonnet-5');
+});
+
+test('판정 경로별 호출 수를 센다(gpu·bedrock·그 밖)', () => {
+  const rawList = [
+    { routed: { source: 'gpu' } }, { routed: { source: 'gpu' } }, { routed: { source: 'bedrock' } },
+    { judged: { source: 'gpu' } }, { judged: null, skipReason: 'no_transcript' }, { routed: { source: 'error' } },
+  ];
+  assert.deepEqual(countJudgeSource({ rawList }), { gpu: 3, bedrock: 1, error: 1 });
 });

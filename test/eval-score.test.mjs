@@ -323,11 +323,11 @@ test('판정기 호출이 Bedrock 에 닿지 못하면(http·no_token) 결과는
     assert.equal(code, 1, kind);
     assert.deepEqual(fs.readdirSync(outDir).sort(), ['errors.jsonl', 'metrics.json', 'raw.jsonl', 'report.md']);
     const logText = logList.join('\n');
-    assert.match(logText, new RegExp(`\\[score\\] 실패: 판정기 호출 2회가 Bedrock 에 닿지 못했다 \\(${kind} 2\\)`), logText);
+    assert.match(logText, new RegExp(`\\[score\\] 실패: 판정기 호출 2회가 판정 LLM\\(GPU·Bedrock\\)에 닿지 못했다 \\(${kind} 2\\)`), logText);
     assert.match(logText, /캐시에 넣지 않으므로 같은 명령을 다시 돌리면 그것만 다시 묻는다/);
     assert.match(logList.at(-1), /실패: 판정기 호출/);
     const report = fs.readFileSync(path.join(outDir, 'report.md'), 'utf8');
-    assert.match(report.split('\n').slice(0, 12).join('\n'), /주의: 판정기 호출 2회가 Bedrock 에 닿지 못했다/);
+    assert.match(report.split('\n').slice(0, 12).join('\n'), /주의: 판정기 호출 2회가 판정 LLM\(GPU·Bedrock\)에 닿지 못했다/);
     const { runInfo } = JSON.parse(fs.readFileSync(path.join(outDir, 'metrics.json'), 'utf8'));
     assert.deepEqual(runInfo.requestFailure, { callCount: 2, rowCount: 2, byKindMap: { [kind]: 2 } });
   }

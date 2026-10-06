@@ -39,12 +39,16 @@ export const PRODUCTION_SOURCE_FILE_LIST_MAP = {
     'src/main/caption-pipeline/router/unified-router.js',
     'src/main/caption-pipeline/prompts/unified-router.js',
     'src/main/caption-pipeline/agents/shared/bedrock-converse.js',
+    'src/main/caption-pipeline/agents/shared/judge-llm.js',
+    'src/main/caption-pipeline/config.js',
     'src/main/caption-pipeline/contracts/narration-types.js',
   ],
   silence: [
     'src/main/caption-pipeline/router/silence-judge.js',
     'src/main/caption-pipeline/prompts/silence-judge.js',
     'src/main/caption-pipeline/agents/shared/bedrock-converse.js',
+    'src/main/caption-pipeline/agents/shared/judge-llm.js',
+    'src/main/caption-pipeline/config.js',
   ],
 };
 
@@ -101,10 +105,25 @@ export function classifySilencePathError({ judged, capture }) {
   if (judged.source === SILENCE_JUDGE_SOURCE_MAP.error) {
     return capture?.errorMessage === NO_REQUEST_ERROR ? PATH_ERROR_MAP.noToken : PATH_ERROR_MAP.http;
   }
-  if (judged.source !== SILENCE_JUDGE_SOURCE_MAP.bedrock) return null;
+  if (![SILENCE_JUDGE_SOURCE_MAP.bedrock, SILENCE_JUDGE_SOURCE_MAP.gpu].includes(judged.source)) return null;
   if (!capture.rawText) return PATH_ERROR_MAP.emptyText;
   if (!isSilenceTextWellFormed(capture.rawText)) return PATH_ERROR_MAP.parse;
   return null;
+}
+
+// 캐시 키·보고서에 쓰는 판정 모델 이름표. gpu 백엔드는 GPU 모델로 판정하고 실패한 호출만 Bedrock 이 답한다.
+export function buildJudgeModelLabel({ config }) {
+  return config.judgeBackend === 'gpu' ? `gpu:${config.judgeGpuModel}` : config.judgeModelId;
+}
+
+// 실제로 어느 경로가 답했는지 센다. gpu 백엔드인데 bedrock 이 있으면 그만큼 GPU 가 실패해 Bedrock 이 판정한 것이다.
+export function countJudgeSource({ rawList }) {
+  const countMap = {};
+  for (const raw of rawList) {
+    const source = raw.routed?.source ?? raw.judged?.source;
+    if (source) countMap[source] = (countMap[source] || 0) + 1;
+  }
+  return countMap;
 }
 
 const describeCandidate = (candidate) => `${candidate.type}/${candidate.subKind || '-'}`;

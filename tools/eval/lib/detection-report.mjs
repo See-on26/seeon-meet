@@ -87,11 +87,11 @@ function buildLanguageSectionList(modeMetrics) {
     ].join('\n'));
 }
 
-// 판정기 호출이 Bedrock 에 닿지 못한(http·no_token) 실행은 표가 정상처럼 보여도 그 위치가 빠져 있으므로 맨 위에 알린다.
+// 판정기 호출이 판정 LLM(GPU·Bedrock)에 닿지 못한(http·no_token) 실행은 표가 정상처럼 보여도 그 위치가 빠져 있으므로 맨 위에 알린다.
 function buildRequestFailLine(requestFailure) {
   if (!requestFailure?.callCount) return [];
   const kindText = Object.entries(requestFailure.byKindMap).map(([kind, count]) => `${kind} ${count}`).join(' · ');
-  return [`- **주의: 판정기 호출 ${requestFailure.callCount}회가 Bedrock 에 닿지 못했다** (${kindText})`
+  return [`- **주의: 판정기 호출 ${requestFailure.callCount}회가 판정 LLM(GPU·Bedrock)에 닿지 못했다** (${kindText})`
     + ` — 판정 결과를 모르는 위치 ${requestFailure.rowCount}개(모드·반복 합계)가 경로 오류다(판정기 성능에서 빠진다).`
     + ' 토큰(AWS_BEARER_TOKEN_BEDROCK) 만료·네트워크를 확인하고 같은 명령을 다시 돌린다(실패한 호출만 다시 묻는다).'];
 }
@@ -127,13 +127,30 @@ function buildModeSection(modeMetrics) {
   ].join('\n');
 }
 
+// gpu 백엔드면 GPU 모델로 판정하고, GPU 가 실패한 호출만 Bedrock(judgeModelId)이 답한다. 옛 결과(이름표 없음)는 Bedrock 모델만 적는다.
+function formatJudgeModel(runInfo) {
+  const label = runInfo.judgeModelLabel || runInfo.judgeModelId;
+  return label.startsWith('gpu:')
+    ? `GPU ${label.slice('gpu:'.length)} (실패하면 Bedrock ${runInfo.judgeModelId})` : label;
+}
+
+// 실제로 답한 경로별 호출 수. GPU 판정 결과에 Bedrock 답이 섞였으면 모델이 섞인 결과라 따로 알린다.
+function buildJudgeSourceLine(runInfo) {
+  const countMap = runInfo.judgeSourceCountMap;
+  if (!countMap || !Object.keys(countMap).length) return [];
+  const countText = Object.entries(countMap).map(([source, count]) => `${source} ${count}`).join(' · ');
+  const isMixed = String(runInfo.judgeModelLabel || '').startsWith('gpu:') && countMap.bedrock > 0;
+  return [`- 판정 경로별 호출 ${countText}${isMixed ? ' — 주의: GPU 가 실패한 호출은 Bedrock 이 판정해 모델이 섞였다' : ''}`];
+}
+
 export function buildDetectionReport({ runInfo, modeMetricsList }) {
   return [
     '# 3.1 탐지 평가 결과',
     '',
     `- 실행: ${runInfo.startedAt} · 입력 ${runInfo.inputPath}`,
     `- 채점 위치 ${runInfo.progress.scoredCount}개 · 라벨 안 붙은 위치(null) ${runInfo.progress.nullCount}개 · 라벨 파일에 없는 새 후보 ${runInfo.progress.newCandidateCount}개`,
-    `- 판정 모델 ${runInfo.judgeModelId} · 라우터 경로 ${runInfo.routerMode} · 척도 생성 ${runInfo.isScaleEnabled ? '켜짐' : '꺼짐(기본)'}`,
+    `- 판정 모델 ${formatJudgeModel(runInfo)} · 라우터 경로 ${runInfo.routerMode} · 척도 생성 ${runInfo.isScaleEnabled ? '켜짐' : '꺼짐(기본)'}`,
+    ...buildJudgeSourceLine(runInfo),
     `- 한국어 말주머니 매처 ${runInfo.matcherKind}${runInfo.matcherVersion ? ` ${runInfo.matcherVersion}` : ''}`
       + `${runInfo.isApproximate ? ' — 근사(어절 경계 정규식)' : ''} · 영어는 단어 경계 대조`,
     `- 모드 ${runInfo.modeList.join(', ')} · 반복 ${runInfo.repeatCount}회 · 동시 호출 ${runInfo.concurrency} · 캐시 ${runInfo.cacheDir || '끔'}`,
