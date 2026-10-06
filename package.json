@@ -11,7 +11,8 @@
     "test": "node --test test/*.test.mjs",
     "check:renderer": "node tools/check-esm.mjs src/renderer/app/main.js",
     "dist:win": "electron-builder --config electron-builder.config.js --win nsis --x64 --publish never",
-    "dist:mac:dir": "electron-builder --config electron-builder.config.js --mac --dir --publish never"
+    "dist:mac:dir": "electron-builder --config electron-builder.config.js --mac --dir --publish never",
+    "dist:win:kit": "node tools/windows-kit/build-windows-kit.mjs"
   },
   "dependencies": {
     "@anthropic-ai/bedrock-sdk": "^0.32.0",
