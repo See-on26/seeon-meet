@@ -69,8 +69,8 @@ function buildInput(patch = {}) {
   return {
     debugList: buildDebugList(),
     captionEventList: [
-      { type: 'caption', ts: at(20000), text: DEIXIS_TEXT, source: 'deixis', narrationClass: 'deixis', hasAudio: true },
-      { type: 'caption', ts: at(40000), text: SILENCE_TEXT, source: 'visual_description', narrationClass: 'silence_based', hasAudio: true },
+      { type: 'caption', ts: at(20000), text: DEIXIS_TEXT, source: 'deixis', narrationClass: 'deixis' },
+      { type: 'caption', ts: at(40000), text: SILENCE_TEXT, source: 'visual_description', narrationClass: 'silence_based' },
     ],
     playbackList: [
       { ts: at(20000), text: DEIXIS_TEXT, wallMs: at(33000), durationMs: 4000, playbackVideoTimeMs: null, liveVideoTimeMs: null },
@@ -433,8 +433,8 @@ test('사진 단독 제시의 2-4A 묘사는 전환 흐름 안에서 자기 에�
     debug(3020, 'tts', 'pass', '합성 완료', `120KB · "${followerText}"`, 'visual_description'),
   ];
   const captionEventList = [
-    { ts: at(3020), text: leaderText, source: 'page-transition', narrationClass: 'page_transition', slideLabel: '4', hasAudio: true },
-    { ts: at(3020), text: followerText, source: 'visual_description', narrationClass: 'page_transition', slideLabel: '4', hasAudio: true },
+    { ts: at(3020), text: leaderText, source: 'page-transition', narrationClass: 'page_transition', slideLabel: '4' },
+    { ts: at(3020), text: followerText, source: 'visual_description', narrationClass: 'page_transition', slideLabel: '4' },
   ];
   const playbackList = [
     { ts: at(3020), text: leaderText, wallMs: at(5000), durationMs: 2000 },
@@ -484,4 +484,33 @@ test('목록 갱신은 새 카드만 덧붙이거나 바뀐 카드만 갈아 끼
   assert.deepEqual(planNodeListUpdate([a, b, c], [b, c, d]), { kind: 'reset' }, '앞이 빠지고 밀리면 통째로');
   assert.deepEqual(planNodeListUpdate([a, b, c], [a, c]), { kind: 'reset' });
   assert.deepEqual(planNodeListUpdate([], [a]), { kind: 'append', appendList: [a] });
+});
+
+test('트리거 후보 기록은 그 후보를 판단한 결정 흐름에 붙고, 후보마다 O/X 는 판정 단계이며, TTS 실패 버림은 소리 없음이다', () => {
+  const text = '빨간 막대 설명';
+  const debugList = [
+    debug(1000, 'router', 'info', '트리거 후보 2개 (kiwi)', '지시대명사:"이 부분", 단순 수치:"30%" · 전사="이 부분이 30%예요"'),
+    debug(1500, 'router', 'info', '트리거 후보 1개 (kiwi)', '지시대명사:"저기" · 전사="저기 보세요"'),
+    debug(4000, 'router', 'pass', '판단 LLM 1/2 공백', '지시대명사:"이 부분"=O(대상 없음) · 단순 수치:"30%"=X(앞에서 밝힘)'),
+    debug(4000, 'router', 'pass', '확정 deixis/simple', '발화="이 부분이 30%예요" 후보=[deixis/simple] 경로=gpu', 'deixis'),
+    debug(4000, 'vlm', 'pass', '생성 deixis/simple', `발화="이 부분이 30%예요" → "${text}" (900ms, 예산 4~10어절)`, 'deixis'),
+    debug(4000, 'tts', 'fail', 'TTS 실패(소리 없이 넘어감)', 'HTTP 500', 'deixis'),
+  ];
+  const view = buildFlowView({
+    debugList,
+    captionEventList: [{ type: 'caption', ts: at(4000), text, source: 'deixis', narrationClass: 'deixis' }],
+    droppedList: [{ ts: at(4000), text, reason: 'tts_failed' }],
+    toMediaMs: (wallMs) => wallMs - BASE_MS,
+    isFinal: true,
+  });
+  assert.equal(view.flowList.length, 1, '트리거 후보 기록이 따로 흐름이 되지 않는다');
+  const [flow] = view.flowList;
+  assert.deepEqual(flow.stepList.filter((step) => step.stage === 'router').map((step) => [step.stepKind, step.label]), [
+    [STEP_KIND_MAP.trigger, '트리거 후보(형태소 분석)'],
+    [STEP_KIND_MAP.judge, '경량 LLM 판단(후보마다 O/X)'],
+    [STEP_KIND_MAP.judge, '경량 LLM 판단(통합 라우터)'],
+  ]);
+  assert.equal(flow.stepList.find((step) => step.stepKind === STEP_KIND_MAP.trigger).summary, '지시대명사:"이 부분", 단순 수치:"30%"');
+  assert.deepEqual([flow.outcome.kind, flow.outcome.reason], [OUTCOME_KIND_MAP.dropped, 'no_audio']);
+  assert.ok(view.sessionInfoList.some((info) => info.reason === '트리거 후보 1개 (kiwi)'), '결정에 이르지 않은 트리거 후보는 세션 기록이다');
 });

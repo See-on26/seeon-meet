@@ -60,6 +60,8 @@ test('모델 설정에는 비밀값이 실리지 않는다', () => {
   assert.equal(modelConfig.bedrockModelId, 'anthropic.claude-sonnet-5');
   assert.equal(modelConfig.hasBedrockCredentials, true);
   assert.doesNotMatch(JSON.stringify(modelConfig), /secret-token-value/);
+  assert.deepEqual([modelConfig.judgeBackend, modelConfig.judgeGpuUrl, modelConfig.judgeGpuModel],
+    ['gpu', 'http://127.0.0.1:8805/v1/chat/completions', 'qwen3.5-9b'], '판단 LLM 이 어느 GPU 서버로 갔는지 남긴다');
 });
 
 function prepareRunDir() {
@@ -89,7 +91,7 @@ function buildRun({ runDir, recordPath, patch = {} }) {
     outputMimeType: 'audio/webm', playStartWallMs: 2000, videoEndedWallMs: 62000,
     sessionId: 'session-1', recordPath, isSessionEnded: true, roiNormRect: null,
     asrEventList: [{ type: 'asr', ts: 3000, endTs: 5000, text: '이 부분이요', segmentList: [] }],
-    captionEventList: [{ type: 'caption', ts: 50000, text: '해설', source: 'deixis', narrationClass: 'deixis', slideLabel: '1', eventVideoTimeMs: 4000, hasAudio: true, rationale: { utterance: '이 부분이요', summary: '근거 표현=이 부분' } }],
+    captionEventList: [{ type: 'caption', ts: 50000, text: '해설', source: 'deixis', narrationClass: 'deixis', slideLabel: '1', eventVideoTimeMs: 4000, rationale: { utterance: '이 부분이요', summary: '근거 표현=이 부분' } }],
     playbackList: [{ ts: 50000, text: '해설', narrationClass: 'deixis', mode: 'realtime_mix', wallMs: 6000, durationMs: 2000, playbackVideoTimeMs: null, liveVideoTimeMs: 5000 }],
     playerTimeList: [{ wallMs: 1000, mediaMs: 0, paused: true, ended: false }, { wallMs: 2000, mediaMs: 0, paused: false, ended: false }, { wallMs: 62000, mediaMs: 60000, paused: false, ended: true }],
     rendererDropList: [],

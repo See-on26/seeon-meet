@@ -97,7 +97,7 @@ const captureStartWallMs = 1000;
 function caption(patch) {
   return {
     type: 'caption', ts: 50000, text: '해설', source: 'deixis', narrationClass: 'deixis', slideLabel: '2',
-    eventVideoTimeMs: 9000, hasAudio: true, audioDurationMs: 2100, rationale: { utterance: '이 부분이요', summary: '근거 표현=이 부분 · 필기/포인터 영역 있음' },
+    eventVideoTimeMs: 9000, rationale: { utterance: '이 부분이요', summary: '근거 표현=이 부분 · 필기/포인터 영역 있음' },
     ...patch,
   };
 }
@@ -107,8 +107,10 @@ test('들린 해설은 사건 시각·들린 자리·녹음 위치·지연·겹�
   const { adList, droppedList } = buildAdTimeline({
     captionEventList: [
       caption({}),
-      caption({ ts: 60000, text: '음성 없음', hasAudio: false }),
+      caption({ ts: 60000, text: '음성 없음' }),
       caption({ ts: 61000, text: '대기 초과' }),
+      caption({ ts: 62000, text: '지연 초과' }),
+      caption({ ts: 63000, text: '알림 없음' }),
       caption({ ts: 70000, text: '전환', source: 'page-transition', narrationClass: 'page_transition', eventVideoTimeMs: null, rationale: null }),
     ],
     playbackList: [
@@ -117,7 +119,11 @@ test('들린 해설은 사건 시각·들린 자리·녹음 위치·지연·겹�
     ],
     deixisRecordList: [{ kind: 'deixis', ts: 50000, caption: '해설', utterance: '이 부분이요', judgeReason: null }],
     narrationRecordList: [{ kind: 'narration', ts: 40000, text: '중복', source: 'deixis', isEmitted: false, skipReason: 'duplicate:text' }],
-    rendererDropList: [{ ts: 61000, text: '대기 초과', reason: 'expired' }],
+    rendererDropList: [
+      { ts: 60000, text: '음성 없음', reason: 'tts_failed' },
+      { ts: 61000, text: '대기 초과', reason: 'expired' },
+      { ts: 62000, text: '지연 초과', reason: 'delay_exceeded' },
+    ],
     utteranceList,
     toMediaMs,
     captureStartWallMs,
@@ -137,8 +143,8 @@ test('들린 해설은 사건 시각·들린 자리·녹음 위치·지연·겹�
   assert.deepEqual(deixis.trigger, { utterance: '이 부분이요', anchor: '이 부분', judgeReason: null });
   assert.equal(transition.eventMediaMs, 69000, '사건 영상 시각이 없으면 캡션 ts');
   assert.deepEqual(droppedList.map((drop) => [drop.text, drop.reason]), [
-    ['음성 없음', 'no_audio'], ['대기 초과', 'expired'], ['중복', 'duplicate:text'],
-  ]);
+    ['음성 없음', 'no_audio'], ['대기 초과', 'expired'], ['지연 초과', 'delay_exceeded'], ['알림 없음', 'not_played'], ['중복', 'duplicate:text'],
+  ], 'TTS 합성 실패(tts_failed)만 소리 없음이고 다른 버림 사유는 그대로, 알림이 없으면 재생 안 됨이다');
   assert.deepEqual(summarizeAdTiming({ adList }), {
     adCount: 2, latencyMeanMs: 1000, latencyMedianMs: 1000, overlapSpeechTotalMs: 500, overlapAdCount: 1,
   });
@@ -178,7 +184,8 @@ test('교차 모드에서 지연 재생 위치가 0 인데 원본이 지연보�
 
 test('AD 가 하나도 안 들렸으면 빈 목록과 버린 목록만 남는다', () => {
   const { adList, droppedList } = buildAdTimeline({
-    captionEventList: [caption({ hasAudio: false })], playbackList: [], toMediaMs, captureStartWallMs,
+    captionEventList: [caption({})], playbackList: [], toMediaMs, captureStartWallMs,
+    rendererDropList: [{ ts: 50000, text: '해설', reason: 'tts_failed' }],
   });
   assert.deepEqual(adList, []);
   assert.equal(droppedList[0].reason, 'no_audio');

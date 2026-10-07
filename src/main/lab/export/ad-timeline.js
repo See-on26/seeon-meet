@@ -21,6 +21,16 @@ const DROP_REASON_MAP = {
   suppressed: 'suppressed',
 };
 
+// 렌더러 버림 알림(reportNarrationDropped)의 사유 중 TTS 합성 실패.
+const RENDERER_TTS_FAILED_REASON = 'tts_failed';
+
+// 렌더러가 알린 버림 사유를 결과 폴더의 사유로 옮긴다. TTS 합성 실패는 "소리 없음"(no_audio)이고,
+// 그 밖의 사유(delay_exceeded·leader_cancelled·dwell_cancelled·emit_failed·stopped·expired 등)는 그대로 둔다.
+function resolveRendererDropReason(reason) {
+  if (!reason) return null;
+  return reason === RENDERER_TTS_FAILED_REASON ? DROP_REASON_MAP.noAudio : reason;
+}
+
 const roundOrNull = (value) => (Number.isFinite(value) ? Math.round(value) : null);
 const buildCaptionKey = ({ ts, text }) => `${ts}|${text}`;
 
@@ -81,11 +91,11 @@ function buildAdTimeline({
     if (!playback) {
       droppedList.push({
         text: caption.text, type, narrationClass: caption.narrationClass, slideLabel: caption.slideLabel ?? null, eventMediaMs,
-        reason: dropMap.get(key)?.reason || (caption.hasAudio === false ? DROP_REASON_MAP.noAudio : DROP_REASON_MAP.notPlayed),
+        reason: resolveRendererDropReason(dropMap.get(key)?.reason) || DROP_REASON_MAP.notPlayed,
       });
       continue;
     }
-    const durationMs = Number.isFinite(playback.durationMs) ? playback.durationMs : (caption.audioDurationMs ?? null);
+    const durationMs = Number.isFinite(playback.durationMs) ? playback.durationMs : null;
     const playedWallMs = resolvePlayedWallMs(playback);
     const playedMediaMs = Number.isFinite(playedWallMs) ? roundOrNull(toMediaMs(playedWallMs)) : null;
     const heardMediaRange = resolveHeardMediaRange({ playback, toMediaMs, durationMs });
@@ -146,6 +156,6 @@ function summarizeAdTiming({ adList }) {
 }
 
 module.exports = {
-  buildAdTimeline, summarizeAdTiming, computeOverlapSpeechMs, resolveHeardMediaRange, parseAnchorText,
+  buildAdTimeline, summarizeAdTiming, computeOverlapSpeechMs, resolveHeardMediaRange, parseAnchorText, resolveRendererDropReason,
   AID_MAP, DROP_REASON_MAP,
 };

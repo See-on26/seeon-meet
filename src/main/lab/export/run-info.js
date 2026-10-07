@@ -2,13 +2,15 @@ const path = require('path');
 const { LAB_MODE_LABEL_MAP } = require('../lab-mode');
 
 // 모델 이름과 엔드포인트만 남긴다. 토큰·키 같은 비밀값은 목록에 없어서 실리지 않는다.
+// 판단 LLM 은 VLM 과 따로 띄운 GPU 서버(judgeGpuUrl)가 먼저 답하고 실패한 호출만 Bedrock(judgeModelId)이 답한다.
 const MODEL_CONFIG_KEY_LIST = [
-  'vlmUrl', 'vlmModel', 'asrUrl', 'ttsUrl', 'ttsLongUrl', 'embedUrl', 'bedrockRegion', 'bedrockModelId', 'judgeModelId',
+  'vlmUrl', 'vlmModel', 'asrUrl', 'ttsUrl', 'ttsLongUrl', 'embedUrl', 'bedrockRegion', 'bedrockModelId',
+  'judgeBackend', 'judgeGpuUrl', 'judgeGpuModel', 'judgeModelId',
   'summaryModelId', 'summaryRewriteModelId', 'gapModelByModeMap', 'routerMode', 'isScaleEnabled', 'isVlmFallbackEnabled',
   'vlmFallbackModelId', 'hasBedrockCredentials',
 ];
 
-const ENDPOINT_KEY_LIST = ['vlmUrl', 'asrUrl', 'ttsUrl', 'ttsLongUrl', 'embedUrl'];
+const ENDPOINT_KEY_LIST = ['vlmUrl', 'asrUrl', 'ttsUrl', 'ttsLongUrl', 'embedUrl', 'judgeGpuUrl'];
 
 // 엔드포인트 주소에 사용자 정보(user:password@)나 쿼리·조각(?token=…)이 붙어 있으면 떼고 남긴다.
 function toEndpointUrl(value) {

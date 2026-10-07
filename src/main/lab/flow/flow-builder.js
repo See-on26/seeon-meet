@@ -1,4 +1,5 @@
 const { resolvePlayedWallMs } = require('../time-map');
+const { resolveRendererDropReason } = require('../export/ad-timeline');
 
 // 파이프라인 debug 기록을 "무엇이 트리거됐고 → 어떤 판정을 거쳐 → 어떤 에이전트가 불려 → 무엇이 나갔는지" 흐름으로 묶는다.
 // 실행 중 흐름 창과 결과 폴더 flow.json 이 같은 함수를 쓴다. 입력을 바꾸지 않고 매번 처음부터 다시 만든다.
@@ -40,6 +41,8 @@ const AGENT_LABEL_MAP = {
 };
 
 const ROUTER_JUDGE_LABEL = '경량 LLM 판단(통합 라우터)';
+const CANDIDATE_JUDGE_LABEL = '경량 LLM 판단(후보마다 O/X)';
+const TRIGGER_CANDIDATE_LABEL = '트리거 후보(형태소 분석)';
 const SILENCE_JUDGE_LABEL = '경량 LLM 판단(무발화)';
 
 const STEP_KIND_MAP = {
@@ -57,7 +60,8 @@ const OUTCOME_KIND_MAP = { played: 'played', dropped: 'dropped', blocked: 'block
 const NO_RESULT_REASON = '결과 기록 없음';
 
 // 끝난 실행에서 해설은 만들었는데 들리지 않은 이유(ad-timeline droppedList 와 같은 코드).
-const UNPLAYED_REASON_MAP = { noAudio: 'no_audio', notPlayed: 'not_played', featureOff: 'feature_off', rateLimited: 'rate-limited' };
+// 소리 없음(no_audio)은 렌더러 버림 알림의 tts_failed 로 정한다(ad-timeline resolveRendererDropReason).
+const UNPLAYED_REASON_MAP = { notPlayed: 'not_played', featureOff: 'feature_off', rateLimited: 'rate-limited' };
 
 const UTTERANCE_TYPE_LIST = [FLOW_TYPE_MAP.deixis, FLOW_TYPE_MAP.interpretation, FLOW_TYPE_MAP.visualDescription];
 // 해설 문장을 만들어 내는 단계. 한 결정에서 둘 이상 나올 수 있다(전환 고지 + 사진 단독 묘사).
@@ -76,6 +80,12 @@ const SLIDE_DETECT_PATTERN = /슬라이드 확정$/;
 const SLIDE_DWELL_PATTERN = /^체류 (확정|미달) \(/;
 const SLIDE_CANCEL_PATTERN = /^(체류 미달 — 재생 전 취소|전환 고지 취소)/;
 const SLIDE_TOPIC_PATTERN = /^주제 판정/;
+// main 이 전사 직후 트리거(speech-trigger)로 후보 구를 뽑았다는 기록(시각은 ASR 조각 시작)과
+// 판단 LLM 이 후보마다 낸 O/X 기록(시각은 결정 시각).
+const TRIGGER_CANDIDATE_PATTERN = /^트리거 후보 \d+개/;
+const CANDIDATE_JUDGE_PATTERN = /^판단 LLM \d+\/\d+ 공백/;
+// 트리거 후보 기록은 look-ahead·문장 끝 대기 뒤의 결정에 붙는다. 이 안에서 같은 후보 구를 판단한 결정을 찾는다.
+const TRIGGER_ATTACH_WINDOW_MS = 20000;
 
 const ENTRY_ROLE_MAP = {
   asr: 'asr',
@@ -85,6 +95,7 @@ const ENTRY_ROLE_MAP = {
   slideDetect: 'slide_detect',
   slideDwell: 'slide_dwell',
   textFloat: 'text_float',
+  triggerCandidate: 'trigger_candidate',
 };
 
 const STAGE_LABEL_MAP = {
@@ -167,6 +178,7 @@ function classifyEntry(entry) {
     if (SLIDE_CANCEL_PATTERN.test(reason || '')) return ENTRY_ROLE_MAP.textFloat;
     return ENTRY_ROLE_MAP.session;
   }
+  if (stage === 'router' && TRIGGER_CANDIDATE_PATTERN.test(reason || '')) return ENTRY_ROLE_MAP.triggerCandidate;
   if (stage === 'screen_dependency') return ENTRY_ROLE_MAP.utterance;
   if (stage === 'budget') {
     if (narrationType === FLOW_TYPE_MAP.pageTransition) return ENTRY_ROLE_MAP.slideDwell;
@@ -287,6 +299,25 @@ function attachSlideEntryList({ detectList, dwellList, groupList, captionEventLi
   }
 }
 
+// 트리거 후보 기록의 후보 구("…" 안). 뒤의 전사="…" 는 빼고 읽는다.
+function readTriggerPhraseList(detail) {
+  const candidateText = String(detail || '').split(' · 전사=')[0];
+  return [...candidateText.matchAll(/:"([^"]*)"/g)].map((match) => match[1]).filter(Boolean);
+}
+
+// 트리거 후보 기록을 그 후보 구를 판단 LLM 에 넘긴 결정 흐름에 붙인다. 쿨다운 등으로 결정에 이르지 않은 후보는 세션 기록이다.
+function attachTriggerCandidateList({ triggerList, groupList, sessionList }) {
+  const routeGroupList = groupList.filter(isUtteranceRouteGroup).sort((groupA, groupB) => groupA.keyTs - groupB.keyTs);
+  for (const entry of triggerList) {
+    const phraseList = readTriggerPhraseList(entry.detail);
+    const target = routeGroupList.find((group) => group.keyTs >= entry.ts && group.keyTs - entry.ts <= TRIGGER_ATTACH_WINDOW_MS
+      && group.entryList.some((member) => member.stage === 'router' && CANDIDATE_JUDGE_PATTERN.test(member.reason || '')
+        && phraseList.some((phrase) => (member.detail || '').includes(`"${phrase}"`))));
+    if (target) target.entryList.push(entry);
+    else sessionList.push(entry);
+  }
+}
+
 function findLatestGroupByText({ groupList, text, ts }) {
   return groupList
     .filter((group) => group.text === text && group.keyTs <= ts)
@@ -393,6 +424,13 @@ function buildStepListForEntry({ entry, typeKey }) {
       return [createStep({ entry, stepKind, label: STAGE_LABEL_MAP.budget, summary: trigger ? `트리거="${trigger}"` : null })];
     }
     case 'router': {
+      if (TRIGGER_CANDIDATE_PATTERN.test(entry.reason || '')) {
+        const summary = String(entry.detail || '').split(' · 전사=')[0];
+        return [createStep({ entry, stepKind: STEP_KIND_MAP.trigger, label: TRIGGER_CANDIDATE_LABEL, summary })];
+      }
+      if (CANDIDATE_JUDGE_PATTERN.test(entry.reason || '')) {
+        return [createStep({ entry, stepKind: STEP_KIND_MAP.judge, label: CANDIDATE_JUDGE_LABEL })];
+      }
       const candidate = /후보=\[[^\]]*\]/.exec(entry.detail || '')?.[0];
       const route = /경로=\S+/.exec(entry.detail || '')?.[0];
       return [createStep({ entry, stepKind: STEP_KIND_MAP.judge, label: ROUTER_JUDGE_LABEL, summary: [candidate, route].filter(Boolean).join(' · ') || null })];
@@ -473,13 +511,10 @@ function resolveItemOutcome({ item, isOnlyItem, group, stepList, playbackList, d
     return { kind: OUTCOME_KIND_MAP.played, reason: null, playedMediaMs, playback };
   }
   const drop = droppedList.find(isOwn);
-  if (drop) return { kind: OUTCOME_KIND_MAP.dropped, reason: drop.reason || null, playedMediaMs: null };
+  if (drop) return { kind: OUTCOME_KIND_MAP.dropped, reason: resolveRendererDropReason(drop.reason), playedMediaMs: null };
   const dropStep = stepList.find((step) => isDropStep(step) && (!step.matchText || step.matchText === item.text));
   if (dropStep) return { kind: OUTCOME_KIND_MAP.dropped, reason: mapStepDropReason(dropStep), playedMediaMs: null };
-  if (isFinal) {
-    const reason = item.caption?.hasAudio === false ? UNPLAYED_REASON_MAP.noAudio : UNPLAYED_REASON_MAP.notPlayed;
-    return { kind: OUTCOME_KIND_MAP.dropped, reason, playedMediaMs: null };
-  }
+  if (isFinal) return { kind: OUTCOME_KIND_MAP.dropped, reason: UNPLAYED_REASON_MAP.notPlayed, playedMediaMs: null };
   return { kind: OUTCOME_KIND_MAP.pending, reason: null, playedMediaMs: null };
 }
 
@@ -621,6 +656,7 @@ function buildFlowView({
 
   const groupList = groupCoreEntryList(roleListMap[ENTRY_ROLE_MAP.core]);
   attachUtteranceEntryList({ utteranceList: roleListMap[ENTRY_ROLE_MAP.utterance], groupList, sessionList });
+  attachTriggerCandidateList({ triggerList: roleListMap[ENTRY_ROLE_MAP.triggerCandidate], groupList, sessionList });
   attachSlideEntryList({
     detectList: roleListMap[ENTRY_ROLE_MAP.slideDetect], dwellList: roleListMap[ENTRY_ROLE_MAP.slideDwell],
     groupList, captionEventList, sessionList,

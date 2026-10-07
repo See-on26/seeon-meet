@@ -18,7 +18,7 @@ const { observeIpcHandleList } = require('../src/main/lab/ipc-observer.js');
 const { computeDrainDeadlineMs, computeDrainTargetMs } = require('../src/main/lab/drain-policy.js');
 const { buildSelectModeScript, buildClickScript, VIEWER_SELECTOR_MAP, READ_MODE_SCRIPT } = require('../src/main/lab/viewer-driver.js');
 const { buildPlayerCallScript } = require('../src/main/lab/player-driver.js');
-const { readWavDurationMs, toForwardedPipelineEvent, buildPlaybackReport } = require('../src/preload/lab/forward-event.js');
+const { toForwardedPipelineEvent, buildPlaybackReport } = require('../src/preload/lab/forward-event.js');
 const { captureExposedApi, exposeCapturedApi } = require('../src/preload/lab/capture-exposed-api.js');
 const { isRoiPayloadShape } = require('../src/main/ipc.js');
 const { createRunRecorder } = require('../src/main/lab/run-recorder.js');
@@ -95,24 +95,7 @@ test('재생 화면 호출 스크립트는 정해진 함수만 부른다', () =>
   assert.throws(() => buildPlayerCallScript({ method: 'eval' }), /없는 함수/);
 });
 
-function buildWav({ sampleRate = 24000, channelCount = 1, bitDepth = 16, sampleCount }) {
-  const byteRate = sampleRate * channelCount * (bitDepth / 8);
-  const dataSize = sampleCount * channelCount * (bitDepth / 8);
-  const buffer = Buffer.alloc(44 + dataSize);
-  buffer.write('RIFF', 0); buffer.writeUInt32LE(36 + dataSize, 4); buffer.write('WAVE', 8);
-  buffer.write('fmt ', 12); buffer.writeUInt32LE(16, 16); buffer.writeUInt16LE(1, 20); buffer.writeUInt16LE(channelCount, 22);
-  buffer.writeUInt32LE(sampleRate, 24); buffer.writeUInt32LE(byteRate, 28); buffer.writeUInt16LE(channelCount * (bitDepth / 8), 32);
-  buffer.writeUInt16LE(bitDepth, 34); buffer.write('data', 36); buffer.writeUInt32LE(dataSize, 40);
-  return new Uint8Array(buffer);
-}
-
-test('해설 음성 길이는 WAV 머리로 구하고 WAV 가 아니면 null 이다', () => {
-  assert.equal(readWavDurationMs(buildWav({ sampleCount: 36000 })), 1500);
-  assert.equal(readWavDurationMs(new Uint8Array(10)), null);
-  assert.equal(readWavDurationMs(null), null);
-});
-
-test('pipeline-event 는 asr·caption·debug 만 넘기고 음성 데이터 대신 길이를 싣는다', () => {
+test('pipeline-event 는 asr·caption·debug 만 넘기고 캡션은 그대로(음성 데이터가 실려 오면 빼고) 넘긴다', () => {
   assert.equal(toForwardedPipelineEvent({ type: 'summary', text: 'x' }), null);
   assert.deepEqual(toForwardedPipelineEvent({
     type: 'debug', stage: 'router', verdict: 'skip', reason: '후보 없음', detail: '후보=[없음]', narrationType: null, ts: 7, extra: 'x',
@@ -120,11 +103,11 @@ test('pipeline-event 는 asr·caption·debug 만 넘기고 음성 데이터 대�
   assert.deepEqual(toForwardedPipelineEvent({ type: 'asr', ts: 1, endTs: 2, text: '말', segmentList: [{ startSec: 0 }] }), {
     type: 'asr', ts: 1, endTs: 2, text: '말', segmentList: [{ startSec: 0 }],
   });
-  const forwarded = toForwardedPipelineEvent({ type: 'caption', ts: 3, text: '해설', wavData: buildWav({ sampleCount: 24000 }), narrationClass: 'deixis' });
-  assert.equal('wavData' in forwarded, false);
-  assert.equal(forwarded.hasAudio, true);
-  assert.equal(forwarded.audioDurationMs, 1000);
-  assert.equal(toForwardedPipelineEvent({ type: 'caption', ts: 3, text: 'x', wavData: null }).hasAudio, false);
+  const caption = { type: 'caption', ts: 3, text: '해설', source: 'deixis', narrationClass: 'deixis', slideLabel: null, rationale: null, eventVideoTimeMs: 1 };
+  assert.deepEqual(toForwardedPipelineEvent(caption), caption, 'production 캡션에는 음성이 없다(재생 차례에 pipeline-tts 로 합성)');
+  const withAudio = toForwardedPipelineEvent({ ...caption, wavData: new Uint8Array(100) });
+  assert.equal('wavData' in withAudio, false);
+  assert.equal('hasAudio' in withAudio, false, '음성 유무는 캡션이 아니라 버림 알림(tts_failed)으로 안다');
   assert.deepEqual(buildPlaybackReport({
     entry: { text: '해설', ts: 3, narrationClass: 'deixis' }, durationMs: 1000, wallMs: 50, mode: 'delayed', playbackVideoTimeMs: 10, liveVideoTimeMs: 20,
   }), { text: '해설', ts: 3, narrationClass: 'deixis', durationMs: 1000, wallMs: 50, mode: 'delayed', playbackVideoTimeMs: 10, liveVideoTimeMs: 20 });
@@ -170,7 +153,7 @@ test('실험 viewer preload 는 production API 전부 + 재생 시작 알림을 
   assert.deepEqual(labKeyList.filter((key) => !productionKeyList.includes(key)), ['reportLabNarrationPlayback']);
   assert.deepEqual(productionKeyList.filter((key) => !labKeyList.includes(key)), []);
   assert.deepEqual(JSON.parse(storageMap.get('seeon.featureToggles')), { page_transition: false, speaker_identity: false, meeting_summary: false });
-  fake.listenerMap['pipeline-event']({}, { type: 'caption', ts: 1, text: '해설', wavData: null });
+  fake.listenerMap['pipeline-event']({}, { type: 'caption', ts: 1, text: '해설' });
   fake.listenerMap['pipeline-event']({}, { type: 'debug', stage: 'vlm', ts: 1 });
   fake.listenerMap['pipeline-event']({}, { type: 'summary' });
   fake.exposedMap.seeon.reportLabNarrationPlayback({ entry: { text: '해설', ts: 1 }, durationMs: 900, wallMs: 5 });
@@ -204,8 +187,8 @@ test('실험 기록으로 넘기다 실패해도 production 화면의 pipeline-e
     require('../src/preload/lab-viewer.js');
     const receivedList = [];
     fake.exposedMap.seeon.onPipelineEvent((payload) => receivedList.push(payload.text));
-    assert.doesNotThrow(() => fake.emit('pipeline-event', { type: 'caption', ts: 1, text: '해설', wavData: null }));
-    assert.doesNotThrow(() => fake.emit('pipeline-event', { type: 'caption', ts: 2, text: '깨진 음성', wavData: { byteLength: 100 } }));
+    assert.doesNotThrow(() => fake.emit('pipeline-event', { type: 'caption', ts: 1, text: '해설' }));
+    assert.doesNotThrow(() => fake.emit('pipeline-event', { type: 'caption', ts: 2, text: '깨진 음성' }));
     assert.doesNotThrow(() => fake.emit('pipeline-event', { type: 'debug', stage: 'vlm', text: 'debug', ts: 3 }));
     assert.deepEqual(receivedList, ['해설', '깨진 음성', 'debug'], 'production listener 가 세 이벤트를 모두 받는다');
     assert.equal(warnList.length, 3);
@@ -271,7 +254,7 @@ function deliverToRecorder({ sentList, recorder }) {
   for (const [channel, payload] of sentList) channelHandlerMap[channel]?.(structuredClone(payload));
 }
 
-test('실험 viewer preload 가 넘긴 해설·재생 시작 알림·renderer 버림 사유가 AD 타임라인에서 같은 해설로 이어진다', () => {
+test('실험 viewer preload 가 넘긴 해설·재생 시작 알림·renderer 버림 사유(TTS 실패 포함)가 AD 타임라인에서 같은 해설로 이어진다', () => {
   const fake = installFakeElectron();
   globalThis.window = { localStorage: { setItem: () => {}, getItem: () => null } };
   delete require.cache[require.resolve('../src/preload/viewer.js')];
@@ -282,15 +265,22 @@ test('실험 viewer preload 가 넘긴 해설·재생 시작 알림·renderer �
 
   const heardCaption = {
     type: 'caption', ts: 1000, text: '들린 해설', source: 'deixis', narrationClass: 'deixis', slideLabel: null,
-    wavData: buildWav({ sampleCount: 24000 }), rationale: { utterance: '여기 보세요', summary: '근거 표현=여기 · 대상=표' }, eventVideoTimeMs: 500,
+    rationale: { utterance: '여기 보세요', summary: '근거 표현=여기 · 대상=표' }, eventVideoTimeMs: 500,
   };
   const offCaption = {
     type: 'caption', ts: 2000, text: '꺼진 해설', source: 'page-transition', narrationClass: 'page_transition', slideLabel: 2,
-    wavData: buildWav({ sampleCount: 2400 }), rationale: null, eventVideoTimeMs: 1500,
+    rationale: null, eventVideoTimeMs: 1500,
   };
-  fake.listenerMap['pipeline-event']({}, { type: 'asr', ts: 900, endTs: 1900, text: '여기 보세요', segmentList: [] });
+  const silentCaption = {
+    type: 'caption', ts: 3000, text: '소리 못 만든 해설', source: 'interpretation', narrationClass: 'speech_based', slideLabel: null,
+    rationale: null, eventVideoTimeMs: 2500,
+  };
+  fake.listenerMap['pipeline-event']({}, {
+    type: 'asr', ts: 900, endTs: 1900, text: '여기 보세요', segmentList: [], triggerCandidateList: [{ type: 'demonstrative', phrase: '여기', start: 0, end: 2 }],
+  });
   fake.listenerMap['pipeline-event']({}, heardCaption);
   fake.listenerMap['pipeline-event']({}, offCaption);
+  fake.listenerMap['pipeline-event']({}, silentCaption);
   // main.js 가 보내는 모양 그대로: 재생 시작 알림은 buildPlayStartInfo + 모드·재생 위치, 버림은 handleNarrationDrop 의 reportNarrationDropped.
   const heardEntry = { text: heardCaption.text, narrationClass: 'deixis', slideLabel: null, source: 'deixis', ts: 1000, eventTimeMs: 500 };
   fake.exposedMap.seeon.reportLabNarrationPlayback({
@@ -301,12 +291,16 @@ test('실험 viewer preload 가 넘긴 해설·재생 시작 알림·renderer �
     ts: offCaption.ts, text: offCaption.text, slideLabel: 2, source: 'page-transition', narrationClass: 'page_transition',
     reason: QUEUE_DROP_REASON_MAP.featureOff,
   });
+  fake.exposedMap.seeon.reportNarrationDropped({
+    ts: silentCaption.ts, text: silentCaption.text, slideLabel: null, source: 'interpretation', narrationClass: 'speech_based',
+    reason: QUEUE_DROP_REASON_MAP.ttsFailed,
+  });
   deliverToRecorder({ sentList: fake.sentList, recorder });
   delete globalThis.window;
 
   const run = recorder.getRun();
   assert.equal(run.asrEventList.length, 1);
-  assert.deepEqual(run.captionEventList.map((caption) => [caption.hasAudio, caption.audioDurationMs, 'wavData' in caption]), [[true, 1000, false], [true, 100, false]]);
+  assert.deepEqual(run.captionEventList.map((caption) => caption.text), ['들린 해설', '꺼진 해설', '소리 못 만든 해설']);
   const { adList, droppedList } = buildAdTimeline({
     captionEventList: run.captionEventList, playbackList: run.playbackList, rendererDropList: run.rendererDropList,
     toMediaMs: (wallMs) => wallMs, captureStartWallMs: 1000,
@@ -317,9 +311,10 @@ test('실험 viewer preload 가 넘긴 해설·재생 시작 알림·renderer �
     { text: '들린 해설', eventMediaMs: 1500, playedMediaMs: 2000, latencyMs: 500, durationMs: 1000 },
   );
   assert.deepEqual(adList[0].trigger, { utterance: '여기 보세요', anchor: '여기', judgeReason: null });
-  assert.deepEqual(droppedList, [{
-    text: '꺼진 해설', type: 'page_transition', narrationClass: 'page_transition', slideLabel: 2, eventMediaMs: 2500, reason: 'feature_off',
-  }]);
+  assert.deepEqual(droppedList, [
+    { text: '꺼진 해설', type: 'page_transition', narrationClass: 'page_transition', slideLabel: 2, eventMediaMs: 2500, reason: 'feature_off' },
+    { text: '소리 못 만든 해설', type: 'interpretation', narrationClass: 'speech_based', slideLabel: null, eventMediaMs: 3500, reason: 'no_audio' },
+  ]);
 });
 
 test('ROI 기본값은 레터박스를 뺀 영상 표시 영역이다', () => {
