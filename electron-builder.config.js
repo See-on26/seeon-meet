@@ -23,6 +23,11 @@ const NATIVE_BINARY_EXCLUDE_LIST = [
   '!node_modules/ssh2/lib/protocol/crypto/build/**',
 ];
 
+// ssh2 가 Pageant(Windows SSH 에이전트) 연결에 쓰는 서명 없는 exe. 터널은 키 파일로 접속해 쓰지 않고, 백신 검사 대상만 늘린다.
+const UNUSED_EXECUTABLE_EXCLUDE_LIST = [
+  '!node_modules/ssh2/util/pagent.exe',
+];
+
 // 한국어 트리거의 Kiwi 모델. npm run setup:kiwi(dist 전에 자동)가 받는다. 없으면 한국어 트리거가 대체 규칙으로 떨어지므로 만들지 않고 멈춘다.
 function buildKiwiModelResource({ fileExists, modelDir = DEV_KIWI_MODEL_DIR }) {
   const missingList = KIWI_MODEL_FILE_LIST.filter((name) => !fileExists(path.join(modelDir, name)));
@@ -57,7 +62,7 @@ function createBuilderConfig({
     // author 가 없으면 exe 회사 이름·설치 정보 게시자가 Electron 기본값(GitHub, Inc.)으로 남는다.
     extraMetadata: { productName: PRODUCT_NAME, author: { name: PRODUCT_NAME } },
     directories: { output: 'dist', buildResources: 'build' },
-    files: ['src/**/*', 'package.json', ...NATIVE_BINARY_EXCLUDE_LIST],
+    files: ['src/**/*', 'package.json', ...NATIVE_BINARY_EXCLUDE_LIST, ...UNUSED_EXECUTABLE_EXCLUDE_LIST],
     npmRebuild: false,
     // Kiwi wasm 은 asar 밖에 풀어 두고 읽는다(src/main/caption-pipeline/trigger/kiwi-tokenizer.js).
     asarUnpack: ['node_modules/kiwi-nlp/dist/*.wasm'],
