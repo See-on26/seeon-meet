@@ -35,3 +35,10 @@ test('잘못된 구간이나 초기화 뒤에는 null', () => {
   timeline.reset();
   assert.equal(timeline.resolveDominant({ startTs: 1000, endTs: 5000 }), null);
 });
+
+test('화자 식별을 끈 동안 이름 없음으로 기록하면 그 구간에는 화자가 붙지 않는다', () => {
+  const timeline = new SpeakerTimeline();
+  timeline.record({ wallTs: 1000, name: '김지오' });
+  timeline.record({ wallTs: 2000, name: null });
+  assert.equal(timeline.resolveDominant({ startTs: 2000, endTs: 6000 }), null);
+});

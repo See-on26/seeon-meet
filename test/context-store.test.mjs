@@ -203,3 +203,13 @@ test('체류 미달로 취소된 전환은 스냅숏에 남겨 스크립트가 �
   assert.deepEqual(store.snapshot().cancelledTransitionList, []);
   assert.deepEqual(store.snapshot().transitionList, []);
 });
+
+test('ASR 기록의 화자 식별 여부를 발화에 남긴다(값이 없던 예전 기록은 켜진 것으로 본다)', () => {
+  const store = createContextStore();
+  store.applyRecord({ kind: 'asr', ts: 1000, text: '켜짐', speakerHint: '김지오', isSpeakerTracked: true });
+  store.applyRecord({ kind: 'asr', ts: 2000, text: '꺼짐', speakerHint: null, isSpeakerTracked: false });
+  store.applyRecord({ kind: 'asr', ts: 3000, text: '예전 기록', speakerHint: null });
+  assert.deepEqual(store.snapshot().utteranceList.map((utterance) => [utterance.text, utterance.isSpeakerTracked]), [
+    ['켜짐', true], ['꺼짐', false], ['예전 기록', true],
+  ]);
+});

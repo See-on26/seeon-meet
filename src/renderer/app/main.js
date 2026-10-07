@@ -509,7 +509,8 @@ window.seeon.onRoiUpdate((payload) => {
   latestMeetUrl = payload.url || '';
   latestMeetTileCount = payload.roiList.length;
   roiStore.submitViewportRoiList(payload);
-  speakerTimeline.record({ wallTs: Date.now(), name: roiStore.getCurrentSpeakerName() });
+  // 화자 안내를 끄면 화자 판별을 하지 않는다. 꺼진 구간은 이름 없음으로 남겨 켠 뒤에 앞 화자가 이어 붙지 않게 한다.
+  speakerTimeline.record({ wallTs: Date.now(), name: isSpeakerTrackingOn() ? roiStore.getCurrentSpeakerName() : null });
   syncToggleAvailability();
 });
 buildModeButtons();
@@ -863,8 +864,13 @@ async function pollSpeakerIdentity() {
   }
 }
 
+// 화자 식별 기능(C15)이 켜져 있을 때만 화자를 판별한다(안내·스크립트 모두).
+function isSpeakerTrackingOn() {
+  return featureToggleStore.isOn(FEATURE_KEY_MAP.speakerIdentity);
+}
+
 function getSpeakerHint() {
-  if (!featureToggleStore.isOn(FEATURE_KEY_MAP.speakerIdentity)) return null;
+  if (!isSpeakerTrackingOn()) return null;
   const domName = roiStore.getCurrentSpeakerName();
   if (domName) return domName;
   const isFresh = performance.now() - lastResolvedSpeakerAt <= SPEAKER_HINT_TTL_MS;
@@ -873,6 +879,7 @@ function getSpeakerHint() {
 
 // 회의 스크립트는 발화마다 화자를 적는다. 조각 구간에 Meet 표시로 가장 오래 말한 사람, 없으면 지금 화자 힌트를 쓴다.
 function resolveSegmentSpeaker({ startTs, endTs }) {
+  if (!isSpeakerTrackingOn()) return null;
   return speakerTimeline.resolveDominant({ startTs, endTs }) || getSpeakerHint();
 }
 
@@ -882,6 +889,7 @@ const asrSegmenter = new AsrSegmenter({
 
     window.seeon.sendPipelineAudio({
       startTs, endTs, buffer, speakerHint: resolveSegmentSpeaker({ startTs, endTs }),
+      isSpeakerTracked: isSpeakerTrackingOn(),
     }).catch(() => {});
   },
   onError: (error) => console.warn('[pipeline] ASR 세그먼트 오류', error),

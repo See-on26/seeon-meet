@@ -172,7 +172,8 @@ function createContextStore({ onChange = () => {} } = {}) {
       const endTs = baseTs + Math.round((Number(segment.endSec) || 0) * 1000);
       utteranceList.push({
         ts, endTs: Math.max(ts, endTs), text,
-        speakerHint: record.speakerHint || null, slideMajor: findSlideMajorAt(ts),
+        speakerHint: record.speakerHint || null, isSpeakerTracked: record.isSpeakerTracked !== false,
+        slideMajor: findSlideMajorAt(ts),
       });
       isAdded = true;
     }

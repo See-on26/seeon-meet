@@ -1,7 +1,7 @@
 const { formatElapsed } = require('./clock-format');
 
 const EMPTY_SCRIPT_TEXT = '(기록된 발화가 없습니다)';
-// Meet 화면 표시로 누가 말했는지 알 수 없던 발화. 화자를 빠짐없이 적되 지어내지 않는다.
+// 화자 식별이 켜져 있었는데 Meet 화면 표시로 누가 말했는지 알 수 없던 발화. 화자를 빠짐없이 적되 지어내지 않는다.
 const UNKNOWN_SPEAKER_LABEL = '화자 미상';
 const NO_SCREEN_TEXT_LINE = '화면이 바뀌었습니다 (화면 설명 없음)';
 // 전환 고지 요청은 방문을 연 뒤에 나간다(교차 모드는 체류 3초 뒤). 그 사이의 시각 차를 이만큼까지 같은 전환으로 본다.
@@ -52,12 +52,13 @@ function buildFillEventList({ slideList, transitionList, cancelledList, screenFi
   return eventList;
 }
 
+// 화자 식별을 끈 동안의 발화(isSpeakerTracked=false)는 화자를 구분하지 않고 발화만 적는다.
 function formatUtteranceLine({ utterance, isSpeakerHidden }) {
-  if (isSpeakerHidden) return utterance.text;
+  if (isSpeakerHidden || utterance.isSpeakerTracked === false) return utterance.text;
   return `${utterance.speakerHint || UNKNOWN_SPEAKER_LABEL}: ${utterance.text}`;
 }
 
-// 회의 한 건의 대화 전문. 발화마다 화자를 적고, 화면이 바뀔 때마다 페이지 전환 설명 에이전트가 만든 AD 를 한 줄로 끼운다.
+// 회의 한 건의 대화 전문. 발화마다 화자를 적고(화자 식별을 켠 동안), 화면이 바뀔 때마다 페이지 전환 설명 에이전트가 만든 AD 를 한 줄로 끼운다.
 // isSpeakerHidden 은 회의 요약 입력용이다 — 요약은 누가 말했는지 쓰지 않는다.
 function buildTranscriptScript({ snapshot, screenFillByMajorMap = null, isSpeakerHidden = false }) {
   const slideList = snapshot.slideList || [];

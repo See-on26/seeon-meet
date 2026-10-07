@@ -55,7 +55,10 @@ function buildSnapshotFromSession({ session }) {
   const utteranceList = [];
   for (const entry of session.asrEntryList || []) {
     for (const segment of flattenAsrSegmentList({ asrEntryList: [entry] })) {
-      utteranceList.push({ ts: segment.ts, text: segment.text, speakerHint: entry.speakerHint || null });
+      utteranceList.push({
+        ts: segment.ts, text: segment.text, speakerHint: entry.speakerHint || null,
+        isSpeakerTracked: entry.isSpeakerTracked !== false,
+      });
     }
   }
   return { startedAt: session.startedAt, slideList: [], transitionList: [], utteranceList };

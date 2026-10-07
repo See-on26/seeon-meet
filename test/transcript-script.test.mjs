@@ -77,3 +77,20 @@ test('발화도 전환도 없으면 안내 한 줄', () => {
 test('스크립트 파일 이름', () => {
   assert.equal(buildScriptFileName({ sessionId: 'session-1' }), 'session-1-script.txt');
 });
+
+test('화자 식별을 끈 동안의 발화는 화자를 구분하지 않고(화자 미상도 붙이지 않고) 발화만 적는다', () => {
+  const offSnapshot = {
+    ...snapshot,
+    utteranceList: [
+      { ts: 1000, text: '켜진 동안 알 수 없는 화자', speakerHint: null, isSpeakerTracked: true },
+      { ts: 2000, text: '끈 동안의 발화', speakerHint: null, isSpeakerTracked: false },
+      { ts: 3000, text: '다시 켠 뒤', speakerHint: '김지오', isSpeakerTracked: true },
+    ],
+    transitionList: [],
+  };
+  assert.equal(buildTranscriptScript({ snapshot: offSnapshot }), [
+    '[00:01] 화자 미상: 켜진 동안 알 수 없는 화자',
+    '[00:02] 끈 동안의 발화',
+    '[00:03] 김지오: 다시 켠 뒤',
+  ].join('\n'));
+});

@@ -786,7 +786,7 @@ function registerPipeline({ getViewerView, meetingArchive = null }) {
     return { isOk: result.status !== SILENCE_RESULT_MAP.failed, status: result.status };
   });
 
-  ipcMain.handle('pipeline-audio', async (_event, { startTs, endTs, buffer, speakerHint }) => {
+  ipcMain.handle('pipeline-audio', async (_event, { startTs, endTs, buffer, speakerHint, isSpeakerTracked = true }) => {
     const stage = PIPELINE_STAGE_MAP.asr;
     const startedAt = Date.now();
     pendingAsrCount += 1;
@@ -795,7 +795,7 @@ function registerPipeline({ getViewerView, meetingArchive = null }) {
       const textReadyAt = Date.now();
       await appendRecord({
         kind: RECORD_KIND_MAP.asr, ts: startTs,
-        text: result.text, segmentList: result.segmentList, speakerHint,
+        text: result.text, segmentList: result.segmentList, speakerHint, isSpeakerTracked: isSpeakerTracked !== false,
         language: result.requestedLanguage, detectedLanguage: result.language,
         languageProbability: result.languageProbability,
         ...(result.hallucinationText
