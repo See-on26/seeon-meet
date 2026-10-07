@@ -1,25 +1,28 @@
 import { TARGET_TYPE_LIST, TARGET_TYPE_CODE_MAP, TARGET_TYPE_LABEL_MAP, LANGUAGE_LIST } from './eval-types.mjs';
 import { ALL_TYPE_KEY, METRIC_KIND_MAP } from './detection-metrics.mjs';
 import { BYPASSED_STAGE_LIST } from './score-rows.mjs';
+import { KOREAN_TRIGGER_ANALYZER_MAP } from './production-trigger.mjs';
 
 const METRIC_TITLE_MAP = {
-  [METRIC_KIND_MAP.judge]: '판정기 성능 — 그 위치를 판정기에 넣었을 때 넘김 (트리거 차이와 무관)',
-  [METRIC_KIND_MAP.system]: '시스템 성능 — production 트리거가 잡음 + 판정기 넘김 + 생성 대상',
+  [METRIC_KIND_MAP.judge]: '판정기 성능 — 그 위치를 후보로 넣었을 때 판단 LLM 이 공백(O)으로 가림 (트리거 차이와 무관)',
+  [METRIC_KIND_MAP.system]: '시스템 성능 — production 트리거가 잡음 + 그 후보 목록으로 판단 LLM 이 O + 생성 대상',
 };
 
 const LANGUAGE_LABEL_MAP = { ko: '한국어', en: '영어' };
 
 // 측정만 하고 고치지 않는 production 차이. 시스템 성능의 trigger_miss 를 읽을 때 함께 본다.
 export const KNOWN_PRODUCTION_GAP_LIST = [
-  'production 트리거는 한국어 글자열만 본다. 영어 항목은 숫자+%를 빼면 시스템 성능에서 대부분 trigger_miss(트리거 누락)로 센다.',
-  'production 2-2 트리거는 색(+쪽·선·것 등)만 잡는다. 싼·어두운·큰 + 쪽·부분·곳은 trigger_miss 다.',
-  '3-3 추상적 척도는 production 트리거가 없고, 판정기가 넘겨도 기본 설정(SEEON_ROUTER_SCALE_ENABLED 없음)에서는 생성하지 않는다(scale_disabled).',
+  'production 트리거(main speech-trigger.js: 한국어는 Kiwi 품사, 영어는 규칙, 5유형)와 회의록 말주머니는 같은 목록이 아니다.'
+    + ' 말주머니에만 있는 위치는 시스템 성능에서 trigger_miss(트리거 누락)로 센다. 어느 목록을 기준으로 삼을지는 팀이 정한다.',
+  'production 은 판단 LLM 이 실패하거나 응답을 읽지 못하면 그 후보를 해설하지 않는다(X). 평가는 그런 호출을 경로 오류로 따로 센다.',
+  '3-3 추상적 척도는 기본으로 생성한다. SEEON_ROUTER_SCALE_ENABLED=false 일 때만 판정기가 넘겨도 생성하지 않는다(scale_disabled).',
 ];
 
 // 경로 오류 행을 지표에 넣는 규칙(detection-metrics.mjs resolveMetricRow)을 보고서에 그대로 적는다.
-const PATH_ERROR_RULE_TEXT = '판정기 호출이 실패한 위치다. 판정기 성능에서는 모두 뺀다.'
-  + ' 시스템 성능에서는 production 트리거가 잡지 않은 위치만 trigger_miss(놓침)로 넣는다 — production 은 그 위치에서 판정기를 부르지 않으므로 결과가 정해진다.'
-  + ' 트리거가 잡은 위치는 시스템 결과도 판정에 달려 있어 시스템 성능에서도 뺀다. 그래서 두 표의 후보 수가 다를 수 있다.';
+const PATH_ERROR_RULE_TEXT = '판정기 호출이 실패한 위치다. 판정기 성능에서는 판정 호출이 실패한 위치를 모두 뺀다.'
+  + ' 시스템 성능에서는 production 트리거가 잡지 않은 위치를 늘 trigger_miss(놓침)로 넣는다 — production 은 그 위치에서 판정기를 부르지 않으므로 결과가 정해진다.'
+  + ' 트리거가 잡은 위치는 production 후보만 넘긴 호출이 실패했으면 시스템 성능에서도 뺀다. 그래서 두 표의 후보 수가 다를 수 있다.'
+  + ' 말주머니에만 있는 라벨 위치가 있는 발화는 판정기 성능용 호출(그 위치를 더한 후보 목록)과 시스템 성능용 호출(production 후보만)을 따로 부른다.';
 
 const formatWindowMs = (ms) => (ms === null || ms === undefined ? '항목 전체' : `${ms / 1000}초`);
 const formatContextWindow = (contextWindow) => `앞 ${formatWindowMs(contextWindow.beforeMs)}·뒤 ${formatWindowMs(contextWindow.afterMs)}`;
@@ -143,16 +146,25 @@ function buildJudgeSourceLine(runInfo) {
   return [`- 판정 경로별 호출 ${countText}${isMixed ? ' — 주의: GPU 가 실패한 호출은 Bedrock 이 판정해 모델이 섞였다' : ''}`];
 }
 
+// production 트리거의 한국어 분석기. Kiwi 모델이 없으면 production 처럼 대체 규칙으로 잡으므로 결과가 실제 제품과 다르다.
+function buildProductionTriggerLine(runInfo) {
+  if (!runInfo.productionKoreanAnalyzer) return [];
+  return [runInfo.productionKoreanAnalyzer === KOREAN_TRIGGER_ANALYZER_MAP.rule
+    ? '- **주의: production 트리거가 한국어를 대체 규칙으로 잡았다**(Kiwi 모델 없음 — `npm run setup:kiwi`). 설치본 제품은 Kiwi 로 잡으므로 시스템 성능이 다를 수 있다'
+    : '- production 트리거(main speech-trigger.js) 한국어 Kiwi 형태소 분석 · 영어 규칙'];
+}
+
 export function buildDetectionReport({ runInfo, modeMetricsList }) {
   return [
     '# 3.1 탐지 평가 결과',
     '',
     `- 실행: ${runInfo.startedAt} · 입력 ${runInfo.inputPath}`,
     `- 채점 위치 ${runInfo.progress.scoredCount}개 · 라벨 안 붙은 위치(null) ${runInfo.progress.nullCount}개 · 라벨 파일에 없는 새 후보 ${runInfo.progress.newCandidateCount}개`,
-    `- 판정 모델 ${formatJudgeModel(runInfo)} · 라우터 경로 ${runInfo.routerMode} · 척도 생성 ${runInfo.isScaleEnabled ? '켜짐' : '꺼짐(기본)'}`,
+    `- 판정 모델 ${formatJudgeModel(runInfo)} · 라우터 경로 ${runInfo.routerMode} · 척도 생성 ${runInfo.isScaleEnabled ? '켜짐(기본)' : '꺼짐'}`,
     ...buildJudgeSourceLine(runInfo),
     `- 한국어 말주머니 매처 ${runInfo.matcherKind}${runInfo.matcherVersion ? ` ${runInfo.matcherVersion}` : ''}`
       + `${runInfo.isApproximate ? ' — 근사(어절 경계 정규식)' : ''} · 영어는 단어 경계 대조`,
+    ...buildProductionTriggerLine(runInfo),
     `- 모드 ${runInfo.modeList.join(', ')} · 반복 ${runInfo.repeatCount}회 · 동시 호출 ${runInfo.concurrency} · 캐시 ${runInfo.cacheDir || '끔'}`,
     `- 맥락 창(${runInfo.contextPreset}) ${runInfo.modeList.map((mode) => `${mode} ${formatContextWindow(runInfo.contextWindowMap[mode])}`).join(' / ')}`,
     ...(runInfo.contextPreset === 'production'
@@ -167,8 +179,9 @@ export function buildDetectionReport({ runInfo, modeMetricsList }) {
     '알려진 production 차이(측정만 한다):',
     ...KNOWN_PRODUCTION_GAP_LIST.map((gap) => `- ${gap}`),
     '',
-    '한계: production 은 1.5~2.5초 ASR 조각마다 트리거를 보지만 이 도구는 문장 단위다. 맥락 창은 같은 함수(TranscriptWindow)로 만들지만 조각 경계 효과는 재현하지 않는다.'
-      + ' 시각이 없는 전사는 어절(영어는 단어)당 0.45초로 추정한다. 판정 모델 temperature 를 고정하지 않으므로 --repeat 로 분산을 본다.',
+    '한계: production 은 1.5~2.5초 ASR 조각마다 트리거를 보고 4초 안에 다시 발동하지 않지만, 이 도구는 문장 단위로 트리거를 보고 문장마다 판단 LLM 을 부른다.'
+      + ' 맥락 창은 같은 함수(TranscriptWindow)로 만들지만 조각 경계 효과는 재현하지 않는다.'
+      + ' 시각이 없는 전사는 어절(영어는 단어)당 0.45초로 추정한다. 판정 모델은 temperature 0 으로 부르지만 같은 입력에도 답이 달라질 수 있어 --repeat 로 분산을 본다.',
     '',
     ...modeMetricsList.map((modeMetrics) => buildModeSection(modeMetrics)),
     '',

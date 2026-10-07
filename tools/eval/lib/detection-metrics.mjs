@@ -36,15 +36,17 @@ export function computeConfusion({ rowList, predictKey }) {
 }
 
 // 경로 오류 행(판정기 호출이 실패해 판정 결과를 모름)을 지표마다 어떻게 셀지 정한다.
-// 판정기 성능에서는 모두 뺀다. 시스템 성능에서는 production 트리거가 잡지 않은 위치만 넣는다 —
+// 판정기 성능은 판정 호출(pathError)이 실패한 행을 뺀다. 시스템 성능은 production 트리거가 잡지 않은 위치를 늘 넣는다 —
 // production 은 그 위치에서 판정기를 부르지 않으므로 판정과 상관없이 "놓침(trigger_miss)"으로 정해진다.
-// 트리거가 잡은 위치는 시스템 결과도 판정에 달려 있어 뺀다. 지표에 안 넣는 행이면 null.
+// 트리거가 잡은 위치는 시스템 호출(systemPathError, 없으면 pathError)이 실패했으면 뺀다. 지표에 안 넣는 행이면 null.
 function resolveMetricRow({ row, metricKind }) {
-  if (!row.pathError) return row;
-  if (metricKind === METRIC_KIND_MAP.system && row.isProductionTriggered === false) {
+  if (metricKind === METRIC_KIND_MAP.judge) return row.pathError ? null : row;
+  const systemPathError = row.systemPathError === undefined ? row.pathError : row.systemPathError;
+  if (!row.pathError && !systemPathError) return row;
+  if (row.isProductionTriggered === false) {
     return { ...row, isSystemPass: false, systemMissReason: SYSTEM_MISS_REASON_MAP.triggerMiss };
   }
-  return null;
+  return systemPathError ? null : row;
 }
 
 function listMetricRow({ rowList, metricKind }) {
@@ -65,12 +67,14 @@ export function buildMetricTable({ rowList, metricKind }) {
 const increase = (countMap, key) => { countMap[key] = (countMap[key] || 0) + 1; };
 
 // 종료 사유(max_tokens 등)를 같이 세야 응답이 잘려 파싱이 실패한 것인지 보인다.
+// 판정 호출과 시스템 호출 중 어느 하나라도 실패한 행을 한 번 센다(판정 호출의 오류를 앞세운다).
 export function countPathError({ rowList }) {
   const byKindMap = {};
   const byStopReasonMap = {};
   for (const row of rowList) {
-    if (!row.pathError) continue;
-    increase(byKindMap, row.pathError);
+    const pathError = row.pathError || row.systemPathError;
+    if (!pathError) continue;
+    increase(byKindMap, pathError);
     increase(byStopReasonMap, row.stopReason || '없음');
   }
   return { total: Object.values(byKindMap).reduce((sum, count) => sum + count, 0), byKindMap, byStopReasonMap };
@@ -86,7 +90,7 @@ export function summarizeMissReason({ rowList }) {
   for (const row of listMetricRow({ rowList, metricKind: METRIC_KIND_MAP.system })) {
     if (!row.truthIsGap || row.isSystemPass) continue;
     increase(systemReasonMap, row.systemMissReason === SYSTEM_MISS_REASON_MAP.judgeBlock
-      ? `${SYSTEM_MISS_REASON_MAP.judgeBlock}:${row.judgeReason || '사유 없음'}` : row.systemMissReason);
+      ? `${SYSTEM_MISS_REASON_MAP.judgeBlock}:${row.systemJudgeReason || row.judgeReason || '사유 없음'}` : row.systemMissReason);
   }
   return { judgeReasonMap, systemReasonMap };
 }
@@ -172,6 +176,7 @@ export function listErrorCase({ rowList }) {
         metric: metricKind, itemId: metricRow.itemId, language: metricRow.language, posId: metricRow.posId, type: metricRow.type,
         mode: metricRow.mode, repeatIndex: metricRow.repeatIndex,
         trigger: metricRow.trigger, truthIsGap: metricRow.truthIsGap, predicted, judgeReason: metricRow.judgeReason,
+        judgeRationale: metricRow.judgeRationale || '',
         systemMissReason: metricRow.systemMissReason, truthRationale: metricRow.truthRationale, context: metricRow.context,
         pathError: metricRow.pathError ?? null,
       });

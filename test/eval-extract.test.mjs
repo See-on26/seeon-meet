@@ -7,11 +7,15 @@ import path from 'node:path';
 import {
   mergeCandidateList, extractSilenceCandidateList, dropSilenceMarkerOverlap, isSpanOverlap, buildPosId,
 } from '../tools/eval/lib/candidate-merge.mjs';
-import { extractItemPositionList, buildLabelDraft, summarizeExtraction, listProductionFiredSpan } from '../tools/eval/lib/extract-items.mjs';
+import { extractItemPositionList, buildLabelDraft, summarizeExtraction } from '../tools/eval/lib/extract-items.mjs';
 import { REGEX_MATCHER } from '../tools/eval/lib/methodology-matcher.mjs';
+import { RULE_PRODUCTION_TRIGGER } from '../tools/eval/lib/production-trigger.mjs';
 import { runExtractCommand } from '../tools/eval/lib/extract-command.mjs';
 
 const regexMatcher = REGEX_MATCHER;
+// Kiwi 모델 유무와 상관없이 같은 결과가 나오게 production 트리거는 대체 규칙(Kiwi 를 못 띄운 production 과 같다)으로 돈다.
+const productionTrigger = RULE_PRODUCTION_TRIGGER;
+const createRuleTrigger = async () => RULE_PRODUCTION_TRIGGER;
 
 test('구간이 겹치면 같은 위치로 보고 맞닿기만 하면 다른 위치다', () => {
   assert.equal(isSpanOverlap({ start: 0, end: 4 }, { start: 3, end: 5 }), true);
@@ -25,7 +29,7 @@ test('같은 유형의 겹치는 후보를 합집합 구간 하나로 합치고 
     text,
     candidateList: [
       { type: 'demonstrative', start: 0, end: 4, source: 'production', kind: 'demonstrative' },
-      { type: 'demonstrative', start: 2, end: 4, source: 'production', kind: 'pointing' },
+      { type: 'demonstrative', start: 2, end: 4, source: 'production', kind: 'adjective_noun' },
       { type: 'demonstrative', start: 0, end: 1, source: 'methodology', isApproximate: true },
       { type: 'value', start: 0, end: 1, source: 'methodology' },
     ],
@@ -33,7 +37,7 @@ test('같은 유형의 겹치는 후보를 합집합 구간 하나로 합치고 
   assert.deepEqual(positionList, [
     {
       type: 'demonstrative', start: 0, end: 4, trigger: '이 부분', sourceList: ['production', 'methodology'],
-      productionKindList: ['demonstrative', 'pointing'], isApproximate: true,
+      productionKindList: ['demonstrative', 'adjective_noun'], isApproximate: true,
     },
     { type: 'value', start: 0, end: 1, trigger: '이', sourceList: ['methodology'], productionKindList: [], isApproximate: false },
   ]);
@@ -48,17 +52,21 @@ test('무발화 표시는 5초 이상만 두 출처 후보가 되고 표시 안 
   assert.deepEqual(kept, [{ type: 'demonstrative', start: 0, end: 2 }]);
 });
 
-test('production 트리거와 말주머니 후보의 합집합을 뽑는다', () => {
+const summarizePosition = (item) => extractItemPositionList({ item, matcher: regexMatcher, productionTrigger })
+  .map((position) => `${buildPosId(position)}:${position.sourceList.join('+')}`);
+
+test('production 트리거(main speech-trigger.js)와 말주머니 후보의 합집합을 뽑는다', () => {
   const item = { id: 'd-010', language: 'ko', targetType: 'scale', transcript: '음, 대기 시간이 꽤 길죠. 평균 40분인데 업계 평균은 10분이거든요.' };
-  const summaryList = extractItemPositionList({ item, matcher: regexMatcher })
-    .map((position) => `${buildPosId(position)}:${position.sourceList.join('+')}`);
-  assert.deepEqual(summaryList, [
-    'scale@12-14:methodology',
-    'change@16-18:production',
+  assert.deepEqual(summarizePosition(item), [
+    'scale@10-14:production+methodology',
     'value@19-22:methodology',
-    'change@28-30:production',
     'value@32-35:methodology',
-    'demonstrative@35-37:production',
+  ], '척도 "꽤 길죠" 는 production 도 잡고 겹치는 말주머니 "길죠" 와 한 위치로 합친다');
+});
+
+test('production 후보는 발화마다 뽑아 전사 원문 위치로 합친다', () => {
+  assert.deepEqual(summarizePosition({ id: 'g', language: 'ko', transcript: '이 부분입니다. 그리고 30% 올랐습니다.' }), [
+    'demonstrative@0-1:methodology', 'value@13-16:production+methodology', 'change@17-22:production+methodology',
   ]);
 });
 
@@ -67,21 +75,22 @@ test('목표 위치에만 정답을 미리 채우고 나머지는 null 로 둔�
     id: 'd-x', language: 'ko', targetType: 'demonstrative', transcript: '이 부분을 보시면 그리고 이 부분도 보시면 됩니다.',
     targetTrigger: '이 부분을', isTargetGap: true, targetRationale: '무엇인지 없음',
   };
-  const draft = buildLabelDraft({ item, positionList: extractItemPositionList({ item, matcher: regexMatcher }) });
-  assert.deepEqual(draft.positionList.map((position) => [position.posId, position.isGap, position.rationale, position.isProductionFired]), [
-    ['demonstrative@0-4', true, '무엇인지 없음', true],
-    ['demonstrative@14-18', null, '', false],
-  ], 'production 은 한 발화에서 첫 "이 부분" 만 발동한다');
-  const summary = summarizeExtraction({ draftList: [draft], matcher: regexMatcher });
+  const draft = buildLabelDraft({ item, positionList: extractItemPositionList({ item, matcher: regexMatcher, productionTrigger }) });
+  assert.deepEqual(draft.positionList.map((position) => [position.posId, position.isGap, position.rationale, position.sourceList]), [
+    ['demonstrative@0-4', true, '무엇인지 없음', ['production', 'methodology']],
+    ['demonstrative@14-18', null, '', ['production', 'methodology']],
+  ]);
+  const summary = summarizeExtraction({ draftList: [draft], matcher: regexMatcher, productionTrigger });
   assert.equal(summary.prefilledCount, 1);
   assert.equal(summary.isApproximate, true);
+  assert.equal(summary.productionKoreanAnalyzer, 'rule');
   assert.deepEqual(summary.missingTargetIdList, []);
   assert.deepEqual(summary.ambiguousTargetIdList, []);
 });
 
 const draftTarget = (item) => {
-  const draft = buildLabelDraft({ item, positionList: extractItemPositionList({ item, matcher: regexMatcher }) });
-  return { draft, summary: summarizeExtraction({ draftList: [draft], matcher: regexMatcher }) };
+  const draft = buildLabelDraft({ item, positionList: extractItemPositionList({ item, matcher: regexMatcher, productionTrigger }) });
+  return { draft, summary: summarizeExtraction({ draftList: [draft], matcher: regexMatcher, productionTrigger }) };
 };
 const listGap = (draft) => draft.positionList.map((position) => [position.posId, position.isGap]);
 
@@ -90,9 +99,9 @@ test('목표 트리거가 다른 낱말 안에도 나오면 낱말 경계에서 
     id: 'd-in-word', language: 'ko', targetType: 'demonstrative', transcript: '회의는 10분이거든요. 이거 보시면 됩니다.',
     targetTrigger: '이거', isTargetGap: true, targetRationale: '무엇인지 없음',
   });
-  assert.deepEqual(listGap(draft), [['value@4-7', null], ['demonstrative@7-9', null], ['demonstrative@13-15', true]],
+  assert.deepEqual(listGap(draft), [['value@4-7', null], ['demonstrative@13-15', true]],
     '"분이거든요" 안의 이거(7-9)가 아니라 낱말 이거(13-15)');
-  assert.equal(draft.positionList[2].rationale, '무엇인지 없음');
+  assert.equal(draft.positionList[1].rationale, '무엇인지 없음');
   assert.deepEqual(summary.ambiguousTargetIdList, []);
   assert.deepEqual(summary.missingTargetIdList, []);
 });
@@ -117,24 +126,17 @@ test('목표 트리거가 여러 번 나와 어느 자리인지 가를 수 없�
   assert.deepEqual(summary.missingTargetIdList, [], '후보는 뽑혔으므로 "뽑히지 않은 항목" 이 아니다');
 });
 
-test('영어 항목은 단어 경계로 대조하고 production 트리거는 숫자+% 만 잡는다', () => {
+test('영어 항목은 말주머니를 단어 경계로 대조하고 production 영어 규칙 후보와 합친다', () => {
   const item = { id: 'd-en', language: 'en', targetType: 'demonstrative', transcript: 'Okay, moving on. This part is 30% of errors.' };
-  assert.deepEqual(extractItemPositionList({ item, matcher: regexMatcher }).map((position) => `${buildPosId(position)}:${position.sourceList.join('+')}`), [
-    'demonstrative@17-21:methodology', 'value@30-33:production+methodology',
-  ]);
-});
-
-test('production 이 실제로 발동하는 1건은 발화마다 구한다', () => {
-  assert.deepEqual(listProductionFiredSpan({ item: { id: 'x', transcript: '이 부분입니다. 그리고 30% 올랐습니다.' } }), [
-    { type: 'demonstrative', kind: 'demonstrative', trigger: '이 부분', start: 0, end: 4 },
-    { type: 'value', kind: 'data', trigger: '30%', start: 13, end: 16 },
-  ]);
+  assert.deepEqual(summarizePosition(item), [
+    'demonstrative@17-26:production+methodology', 'value@30-33:production+methodology',
+  ], 'production 은 "This part" 를, 말주머니는 "This" 를 잡아 한 위치가 된다');
 });
 
 test('목표 트리거가 어느 후보에도 안 걸리면 요약에 항목 id 를 남긴다', () => {
   const item = { id: 'd-y', language: 'ko', targetType: 'scale', transcript: '처리 속도가 엄청 빠릅니다.', targetTrigger: '엄청', isTargetGap: true };
-  const draft = buildLabelDraft({ item, positionList: extractItemPositionList({ item, matcher: regexMatcher }) });
-  assert.deepEqual(summarizeExtraction({ draftList: [draft], matcher: regexMatcher }).missingTargetIdList, ['d-y']);
+  const draft = buildLabelDraft({ item, positionList: extractItemPositionList({ item, matcher: regexMatcher, productionTrigger }) });
+  assert.deepEqual(summarizeExtraction({ draftList: [draft], matcher: regexMatcher, productionTrigger }).missingTargetIdList, ['d-y']);
 });
 
 test('extract 명령은 샘플을 읽어 검사기를 통과하는 라벨 초안을 쓴다', () => {
@@ -146,6 +148,7 @@ test('extract 명령은 샘플을 읽어 검사기를 통과하는 라벨 초안
   assert.equal(result.status, 0, result.stderr);
   assert.match(result.stdout, /항목 16건\(ko 14 · en 2\)/);
   assert.match(result.stdout, /정답 미리 채움 16개/);
+  assert.match(result.stdout, /production 트리거\(main speech-trigger\.js\): 한국어 (Kiwi 형태소 분석|대체 규칙)/);
   const validatorPath = new URL('../tools/eval/validate.mjs', import.meta.url).pathname;
   const validated = spawnSync(process.execPath, [validatorPath, outFile, '--labeled'], { encoding: 'utf8' });
   assert.equal(validated.status, 0, validated.stdout);
@@ -160,7 +163,8 @@ test('extract 요약은 목표 트리거가 여러 번 나와 미리 채우지 �
   })}\n`);
   const logList = [];
   const code = await runExtractCommand({
-    argList: ['--in', inFile, '--out', path.join(dir, 'labeling.jsonl')], log: (line) => logList.push(line), createMatcher: async () => regexMatcher,
+    argList: ['--in', inFile, '--out', path.join(dir, 'labeling.jsonl')], log: (line) => logList.push(line),
+    createMatcher: async () => regexMatcher, createTrigger: createRuleTrigger,
   });
   assert.equal(code, 0);
   assert.match(logList.join('\n'), /목표 트리거가 여러 번 나와 미리 채우지 않음: d-twice/);
@@ -172,7 +176,7 @@ const twiceItem = {
   transcript: '이 부분을 보시면 그리고 이 부분도 보시면 됩니다.',
 };
 const labeledPosition = (patch) => ({
-  type: 'demonstrative', sourceList: ['production'], isProductionFired: false, isApproximate: false, ...patch,
+  type: 'demonstrative', sourceList: ['production'], isApproximate: false, ...patch,
 });
 
 function prepareLabeledOut() {
@@ -195,7 +199,9 @@ function prepareLabeledOut() {
 test('extract 는 --out 에 손으로 채운 라벨이 있으면 덮어쓰지 않고 2 로 끝난다(--in 과 같은 파일이어도)', async () => {
   const { inFile, outFile, labeledText } = prepareLabeledOut();
   const logList = [];
-  const run = (argList) => runExtractCommand({ argList, log: (line) => logList.push(line), createMatcher: async () => regexMatcher });
+  const run = (argList) => runExtractCommand({
+    argList, log: (line) => logList.push(line), createMatcher: async () => regexMatcher, createTrigger: createRuleTrigger,
+  });
   assert.equal(await run(['--in', inFile, '--out', outFile]), 2);
   assert.equal(fs.readFileSync(outFile, 'utf8'), labeledText, '라벨 파일은 그대로다');
   assert.match(logList.join('\n'), /손으로 채운 라벨 2개/);
@@ -207,7 +213,9 @@ test('extract 는 --out 에 손으로 채운 라벨이 있으면 덮어쓰지 �
 test('extract 는 --out 에 라벨이 없는 초안만 있으면 그대로 다시 쓴다', async () => {
   const { inFile, outFile } = prepareLabeledOut();
   fs.writeFileSync(outFile, `${JSON.stringify({ ...twiceItem, positionList: [labeledPosition({ posId: 'demonstrative@0-4', isGap: null, rationale: '' })] })}\n`);
-  const code = await runExtractCommand({ argList: ['--in', inFile, '--out', outFile], log: () => {}, createMatcher: async () => regexMatcher });
+  const code = await runExtractCommand({
+    argList: ['--in', inFile, '--out', outFile], log: () => {}, createMatcher: async () => regexMatcher, createTrigger: createRuleTrigger,
+  });
   assert.equal(code, 0);
   assert.equal(JSON.parse(fs.readFileSync(outFile, 'utf8')).positionList.length, 2);
 });
@@ -218,7 +226,7 @@ test('extract --force 는 기존 라벨을 같은 posId 위치로 옮겨 쓰고 
     const logList = [];
     const code = await runExtractCommand({
       argList: ['--in', isSameFile ? outFile : inFile, '--out', outFile, '--force'],
-      log: (line) => logList.push(line), createMatcher: async () => regexMatcher,
+      log: (line) => logList.push(line), createMatcher: async () => regexMatcher, createTrigger: createRuleTrigger,
     });
     assert.equal(code, 0, logList.join('\n'));
     const draft = JSON.parse(fs.readFileSync(outFile, 'utf8'));
@@ -244,7 +252,9 @@ function prepareTargetDraft() {
   const writeItem = (patch = {}) => fs.writeFileSync(inFile, `${JSON.stringify({ ...targetItem, ...patch })}\n`);
   const run = async (argList) => {
     const logList = [];
-    const code = await runExtractCommand({ argList, log: (line) => logList.push(line), createMatcher: async () => regexMatcher });
+    const code = await runExtractCommand({
+      argList, log: (line) => logList.push(line), createMatcher: async () => regexMatcher, createTrigger: createRuleTrigger,
+    });
     return { code, logText: logList.join('\n') };
   };
   const readPositionList = () => JSON.parse(fs.readFileSync(outFile, 'utf8')).positionList

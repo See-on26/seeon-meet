@@ -4,6 +4,7 @@ import { parseArgs } from 'node:util';
 import { validateDetectionItemList, formatIssueList, ISSUE_LEVEL_MAP } from './dataset-validate.mjs';
 import { createMethodologyMatcher, MATCHER_KIND_MAP } from './methodology-matcher.mjs';
 import { extractItemPositionList, buildLabelDraft, summarizeExtraction, resolveTargetPrefill } from './extract-items.mjs';
+import { createProductionTrigger, KOREAN_TRIGGER_ANALYZER_MAP } from './production-trigger.mjs';
 import { TARGET_TYPE_LIST, TARGET_TYPE_CODE_MAP, TARGET_TYPE_LABEL_MAP } from './eval-types.mjs';
 
 export const EXTRACT_USAGE = 'node tools/eval/detection-eval.mjs extract --in items.jsonl --out labeling.jsonl [--matcher auto|kiwi|regex] [--force]';
@@ -106,11 +107,17 @@ function formatCarrySummary({ carriedCount, conflictList, droppedList, brokenLin
   return lineList.join('\n');
 }
 
+// production 이 Kiwi 를 띄우지 못했을 때와 같은 대체 규칙으로 돌았으면 결과에 그렇게 적는다.
+export function formatKoreanAnalyzer(analyzer) {
+  return analyzer === KOREAN_TRIGGER_ANALYZER_MAP.rule ? '대체 규칙(Kiwi 모델 없음 — production 이 Kiwi 를 못 띄웠을 때와 같다)' : 'Kiwi 형태소 분석';
+}
+
 function formatSummary(summary) {
   const lineList = [
     `[extract] 항목 ${summary.itemCount}건(${Object.entries(summary.languageCountMap).map(([language, count]) => `${language} ${count}`).join(' · ')})`
       + ` · 후보 위치 ${summary.positionCount}개 · 정답 미리 채움 ${summary.prefilledCount}개`,
     `[extract] 한국어 말주머니 매처: ${summary.matcherKind}${summary.isApproximate ? ' (근사 — 품사 분석 없이 어절 경계로 대조)' : ''} · 영어는 단어 경계 대조`,
+    `[extract] production 트리거(main speech-trigger.js): 한국어 ${formatKoreanAnalyzer(summary.productionKoreanAnalyzer)} · 영어 규칙`,
   ];
   for (const type of TARGET_TYPE_LIST) {
     const typeSummary = summary.typeSummaryMap[type];
@@ -127,7 +134,9 @@ function formatSummary(summary) {
   return lineList.join('\n');
 }
 
-export async function runExtractCommand({ argList, log = console.log, createMatcher = createMethodologyMatcher }) {
+export async function runExtractCommand({
+  argList, log = console.log, createMatcher = createMethodologyMatcher, createTrigger = createProductionTrigger,
+}) {
   let values = null;
   try {
     ({ values } = parseArgs({
@@ -161,12 +170,15 @@ export async function runExtractCommand({ argList, log = console.log, createMatc
     return 1;
   }
   const matcher = await createMatcher({ kind: values.matcher });
-  const draftList = itemList.map((item) => buildLabelDraft({ item, positionList: extractItemPositionList({ item, matcher }) }));
+  const productionTrigger = await createTrigger();
+  const draftList = itemList.map((item) => buildLabelDraft({
+    item, positionList: extractItemPositionList({ item, matcher, productionTrigger }),
+  }));
   const carried = hasExistingLabel ? carryExistingLabel({ draftList, labelMap: existing.labelMap }) : null;
   const writtenDraftList = carried ? carried.draftList : draftList;
   fs.mkdirSync(path.dirname(path.resolve(values.out)), { recursive: true });
   fs.writeFileSync(values.out, `${writtenDraftList.map((draft) => JSON.stringify(draft)).join('\n')}\n`, 'utf8');
-  log(formatSummary(summarizeExtraction({ draftList, matcher })));
+  log(formatSummary(summarizeExtraction({ draftList, matcher, productionTrigger })));
   if (carried) log(formatCarrySummary({ ...carried, brokenLineCount: existing.brokenLineCount }));
   log(`[extract] 라벨 초안 → ${values.out} (isGap 이 null 인 위치에 true·false 를 채운다)`);
   return 0;

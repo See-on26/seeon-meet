@@ -66,7 +66,8 @@ test('맥락 창 프리셋: 기본 item 은 항목 전체, symmetric7 은 앞뒤
   assert.deepEqual(resolveContextWindow({ mode: 'delayed' }), { preset: 'item', beforeMs: null, afterMs: null, anchorTs: null });
   assert.deepEqual(resolveContextWindow({ mode: 'delayed', preset: 'symmetric7' }), { preset: 'symmetric7', beforeMs: 7000, afterMs: 7000, anchorTs: null });
   assert.deepEqual(resolveContextWindow({ mode: 'delayed', preset: 'production' }), { preset: 'production', beforeMs: 60000, afterMs: 7000, anchorTs: 0 });
-  assert.deepEqual(resolveContextWindow({ mode: 'realtime_mix', preset: 'production' }), { preset: 'production', beforeMs: 60000, afterMs: 2000, anchorTs: null });
+  assert.deepEqual(resolveContextWindow({ mode: 'realtime_mix', preset: 'production' }), { preset: 'production', beforeMs: 60000, afterMs: 2000, anchorTs: 0 },
+    'production 은 동시 모드도 앞 문맥을 화면 전환 시각에 고정한다');
   assert.deepEqual(resolveContextWindow({ mode: 'delayed', preset: 'production', beforeMs: 7000, afterMs: 5000 }), { preset: 'production', beforeMs: 7000, afterMs: 5000, anchorTs: 0 });
   assert.throws(() => resolveContextWindow({ mode: 'unknown' }), /알 수 없는 모드/);
   assert.throws(() => resolveContextWindow({ mode: 'delayed', preset: 'wide' }), /--context/);

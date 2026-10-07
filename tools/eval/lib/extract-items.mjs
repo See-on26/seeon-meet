@@ -1,34 +1,20 @@
-import { extractProductionCandidateList, detectProductionFiredTrigger } from './production-trigger.mjs';
-import { buildUtteranceList, PIECE_KIND_MAP } from './utterance-builder.mjs';
+import { extractProductionCandidateList } from './production-trigger.mjs';
 import {
   mergeCandidateList, extractSilenceCandidateList, dropSilenceMarkerOverlap, isSpanOverlap, buildPosId,
 } from './candidate-merge.mjs';
 import { TARGET_TYPE_LIST, CANDIDATE_SOURCE_MAP, LANGUAGE_LIST } from './eval-types.mjs';
 
-// production 은 조각마다 첫 일치 1건만 발동한다. 발화(문장)마다 그 1건의 구간을 구한다.
-export function listProductionFiredSpan({ item }) {
-  return buildUtteranceList({ item })
-    .filter((piece) => piece.kind === PIECE_KIND_MAP.speech)
-    .map((piece) => ({ piece, fired: detectProductionFiredTrigger({ text: piece.text }) }))
-    .filter(({ fired }) => fired && fired.start >= 0 && fired.type)
-    .map(({ piece, fired }) => ({
-      type: fired.type, kind: fired.kind, trigger: fired.trigger, start: piece.start + fired.start, end: piece.start + fired.end,
-    }));
-}
-
-// 후보 = production 트리거 ∪ 회의록 말주머니 ∪ [무발화 N초](N ≥ 5).
-// isProductionFired 는 그 위치가 production 이 실제로 발동하는 1건과 겹치는지다(보조 정보).
-export function extractItemPositionList({ item, matcher }) {
+// 후보 = production 트리거(main speech-trigger.js, 발화마다) ∪ 회의록 말주머니 ∪ [무발화 N초](N ≥ 5).
+// production 은 조각에서 뽑은 후보를 모두 판단 LLM 에 넘기므로 production 출처 위치는 모두 판단 대상이다.
+// productionCandidateList 를 주면(채점이 미리 뽑아 둔 것) 트리거를 다시 돌리지 않는다.
+export function extractItemPositionList({
+  item, matcher, productionTrigger, productionCandidateList = extractProductionCandidateList({ item, productionTrigger }),
+}) {
   const text = item.transcript;
   const lexicalList = dropSilenceMarkerOverlap({
-    text, candidateList: [...extractProductionCandidateList({ text }), ...matcher.match({ text, language: item.language })],
+    text, candidateList: [...productionCandidateList, ...matcher.match({ text, language: item.language })],
   });
-  const firedSpanList = listProductionFiredSpan({ item });
-  return mergeCandidateList({ text, candidateList: [...lexicalList, ...extractSilenceCandidateList({ text })] })
-    .map((position) => ({
-      ...position,
-      isProductionFired: firedSpanList.some((span) => span.type === position.type && isSpanOverlap(span, position)),
-    }));
+  return mergeCandidateList({ text, candidateList: [...lexicalList, ...extractSilenceCandidateList({ text })] });
 }
 
 const WORD_BOUNDARY_PATTERN = /[\s\p{P}]/u;
@@ -112,7 +98,6 @@ export function buildLabelDraft({ item, positionList }) {
         end: position.end,
         trigger: position.trigger,
         sourceList: position.sourceList,
-        isProductionFired: position.isProductionFired,
         isApproximate: position.isApproximate,
         isGap: isPrefilled ? prefill.isGap : null,
         rationale: isPrefilled ? prefill.rationale : '',
@@ -121,7 +106,7 @@ export function buildLabelDraft({ item, positionList }) {
   };
 }
 
-export function summarizeExtraction({ draftList, matcher }) {
+export function summarizeExtraction({ draftList, matcher, productionTrigger }) {
   const typeSummaryMap = Object.fromEntries(TARGET_TYPE_LIST.map((type) => [type, {
     count: 0, productionCount: 0, methodologyCount: 0, bothCount: 0,
   }]));
@@ -157,5 +142,6 @@ export function summarizeExtraction({ draftList, matcher }) {
     ambiguousTargetIdList,
     matcherKind: matcher.kind,
     isApproximate: matcher.isApproximate,
+    productionKoreanAnalyzer: productionTrigger?.koreanAnalyzer ?? null,
   };
 }

@@ -16,6 +16,7 @@ import { formatRunStamp } from './run-stamp.mjs';
 import { loadRepoEnv, assertBedrockToken, REPO_ROOT } from './bedrock-env.mjs';
 import { EVAL_MODE_LIST } from './eval-types.mjs';
 import { resolveContextWindow, CONTEXT_PRESET_MAP } from './router-context.mjs';
+import { createProductionTrigger } from './production-trigger.mjs';
 
 const require = createRequire(import.meta.url);
 const { readPipelineConfig } = require('../../../src/main/caption-pipeline/config.js');
@@ -114,6 +115,7 @@ export async function runScoreCommand({
   createRouter = createUnifiedRouter,
   createJudge = createSilenceJudge,
   createMatcher = createMethodologyMatcher,
+  createTrigger = createProductionTrigger,
   readGit = readGitInfo,
   now = () => new Date(),
 }) {
@@ -181,7 +183,8 @@ export async function runScoreCommand({
     routerModelId: buildJudgeModelLabel({ config }),
   });
   const matcher = await createMatcher({ kind: matcherKind });
-  const plan = buildScorePlan({ itemList, matcher });
+  const productionTrigger = await createTrigger();
+  const plan = buildScorePlan({ itemList, matcher, productionTrigger });
   const startedAt = now();
 
   const modeMetricsList = [];
@@ -217,6 +220,7 @@ export async function runScoreCommand({
     matcherKind: matcher.kind,
     matcherVersion: matcher.version,
     isApproximate: matcher.isApproximate,
+    productionKoreanAnalyzer: productionTrigger.koreanAnalyzer,
     modeList,
     contextPreset: values.context,
     contextWindowMap,

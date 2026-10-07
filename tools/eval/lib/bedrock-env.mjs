@@ -13,9 +13,10 @@ export function loadRepoEnv({ envFilePath = path.join(REPO_ROOT, '.env'), loadEn
   }
 }
 
-// 라우터는 토큰이 없으면 모두 통과로 처리한다. 그대로 돌리면 지표가 의미 없으므로 시작할 때 멈춘다.
+// 토큰이 없으면 3.1 은 GPU 판정이 실패한 호출을 Bedrock 이 대신 판정하지 못해 "판정 실패(해설 안 함)"로 떨어지고,
+// 3.2 는 답변 모델을 부르지 못한다. 그대로 돌리면 지표가 의미 없으므로 시작할 때 멈춘다.
 export function assertBedrockToken({ env = process.env } = {}) {
   if (!env.AWS_BEARER_TOKEN_BEDROCK) {
-    throw new Error('AWS_BEARER_TOKEN_BEDROCK 이 없다 — 판정기가 모두 통과·차단으로 떨어지므로 평가를 멈춘다 (.env 확인)');
+    throw new Error('AWS_BEARER_TOKEN_BEDROCK 이 없다 — Bedrock 을 부를 수 없어 평가를 멈춘다 (.env 확인)');
   }
 }

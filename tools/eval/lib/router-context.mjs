@@ -43,7 +43,7 @@ function resolveMsOption({ value, fallback, optionName }) {
 }
 
 // item: 항목 전체(평가 셋은 트리거 문장 앞뒤 약 7초 분량으로 만든다). symmetric7: 앞뒤 7초.
-// production: 모드 정책 그대로(균형이면 앞 60초를 전환 시각에 고정·뒤 7초). beforeMs·afterMs 를 주면 프리셋보다 앞선다.
+// production: 모드 정책 그대로(모든 모드가 앞 60초를 화면 전환 시각에 고정하고, 뒤는 균형 7초·동시 2초·품질 30초). beforeMs·afterMs 를 주면 프리셋보다 앞선다.
 // 길이 null 은 자르지 않는다는 뜻이다.
 export function resolveContextWindow({ mode, preset = CONTEXT_PRESET_MAP.item, beforeMs = null, afterMs = null }) {
   const policy = getModePolicy({ mode });

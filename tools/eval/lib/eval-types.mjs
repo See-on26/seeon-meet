@@ -1,9 +1,7 @@
 import { createRequire } from 'node:module';
 
 const require = createRequire(import.meta.url);
-const {
-  NARRATION_TYPE_MAP, INTERPRETATION_KIND_MAP, VISUAL_DESCRIPTION_KIND_MAP,
-} = require('../../../src/main/caption-pipeline/contracts/narration-types.js');
+const { TRIGGER_TYPE_MAP } = require('../../../src/main/caption-pipeline/trigger/speech-trigger.js');
 
 // 3.1 탐지 평가의 유형 6개. 값은 데이터셋의 targetType·positionList[].type 에 쓰는 글자 그대로다.
 export const TARGET_TYPE_MAP = {
@@ -50,20 +48,19 @@ export const CANDIDATE_SOURCE_MAP = {
 
 export const CANDIDATE_SOURCE_LIST = Object.values(CANDIDATE_SOURCE_MAP);
 
-// 어휘 유형이 "넘김"이 되려면 라우터가 내야 하는 후보. 무발화는 라우터가 아니라 무발화 판정기가 정한다.
-export const ROUTER_EXPECTATION_MAP = {
-  [TARGET_TYPE_MAP.demonstrative]: { type: NARRATION_TYPE_MAP.deixis, subKind: null },
-  [TARGET_TYPE_MAP.adjectiveNoun]: { type: NARRATION_TYPE_MAP.deixis, subKind: null },
-  [TARGET_TYPE_MAP.value]: {
-    type: NARRATION_TYPE_MAP.interpretation, subKind: INTERPRETATION_KIND_MAP.valueToMeaning,
-  },
-  [TARGET_TYPE_MAP.change]: {
-    type: NARRATION_TYPE_MAP.interpretation, subKind: INTERPRETATION_KIND_MAP.claimToValue,
-  },
-  [TARGET_TYPE_MAP.scale]: {
-    type: NARRATION_TYPE_MAP.visualDescription, subKind: VISUAL_DESCRIPTION_KIND_MAP.scale,
-  },
+// 평가 유형 ↔ production 트리거 유형(main speech-trigger.js). 이름이 다른 것은 3-1 단순 수치(value ↔ number) 하나다.
+// 무발화는 트리거 유형이 없다 — 라우터가 아니라 무발화 판정기가 정한다.
+export const TRIGGER_TYPE_BY_TARGET_TYPE_MAP = {
+  [TARGET_TYPE_MAP.demonstrative]: TRIGGER_TYPE_MAP.demonstrative,
+  [TARGET_TYPE_MAP.adjectiveNoun]: TRIGGER_TYPE_MAP.adjectiveNoun,
+  [TARGET_TYPE_MAP.value]: TRIGGER_TYPE_MAP.number,
+  [TARGET_TYPE_MAP.change]: TRIGGER_TYPE_MAP.change,
+  [TARGET_TYPE_MAP.scale]: TRIGGER_TYPE_MAP.scale,
 };
+
+export const TARGET_TYPE_BY_TRIGGER_TYPE_MAP = Object.fromEntries(
+  Object.entries(TRIGGER_TYPE_BY_TARGET_TYPE_MAP).map(([targetType, triggerType]) => [triggerType, targetType]),
+);
 
 // --mode 로 고를 수 있는 모드. 평가 기본은 균형(delayed)이고, 성능(realtime_sic)은 맥락 창이 동시와 같아 따로 두지 않는다.
 export const EVAL_MODE_LIST = ['delayed', 'realtime_mix', 'listening'];

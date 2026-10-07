@@ -10,6 +10,7 @@ import { buildDetectionReport } from '../tools/eval/lib/detection-report.mjs';
 import { runScoreCommand } from '../tools/eval/lib/score-command.mjs';
 import { formatRunStamp } from '../tools/eval/lib/run-stamp.mjs';
 import { REGEX_MATCHER } from '../tools/eval/lib/methodology-matcher.mjs';
+import { RULE_PRODUCTION_TRIGGER } from '../tools/eval/lib/production-trigger.mjs';
 import { createRequire } from 'node:module';
 
 const require = createRequire(import.meta.url);
@@ -134,9 +135,31 @@ test('보고서에 두 지표 표·언어별 표·FN 나누기·우회 단계·�
   assert.match(report, /#### 한국어/);
   assert.match(report, /#### 영어/);
   assert.match(report, /영어 시스템 성능의 FN\n- trigger_miss: 1/);
-  assert.match(report, /production 트리거는 한국어 글자열만 본다/);
+  assert.match(report, /production 트리거\(main speech-trigger\.js: 한국어는 Kiwi 품사, 영어는 규칙, 5유형\)와 회의록 말주머니는 같은 목록이 아니다/);
+  assert.match(report, /척도 생성 꺼짐/);
   assert.match(report, /맥락 창\(production\) delayed 앞 60초·뒤 7초/);
   assert.match(report, /약 5초 분량/);
+});
+
+test('보고서 머리에 production 트리거의 한국어 분석기를 적고 대체 규칙이면 주의를 붙인다', () => {
+  const modeMetrics = buildModeMetrics({ mode: 'delayed', rowListByRepeat: [[row({})]] });
+  const ruleReport = buildDetectionReport({ runInfo: buildRunInfo({ productionKoreanAnalyzer: 'rule', isScaleEnabled: true }), modeMetricsList: [modeMetrics] });
+  assert.match(ruleReport, /주의: production 트리거가 한국어를 대체 규칙으로 잡았다/);
+  assert.match(ruleReport, /척도 생성 켜짐\(기본\)/);
+  const kiwiReport = buildDetectionReport({ runInfo: buildRunInfo({ productionKoreanAnalyzer: 'kiwi' }), modeMetricsList: [modeMetrics] });
+  assert.match(kiwiReport, /production 트리거\(main speech-trigger\.js\) 한국어 Kiwi 형태소 분석/);
+  assert.doesNotMatch(kiwiReport, /대체 규칙으로 잡았다/);
+});
+
+test('판정 호출이 실패해도 production 후보만 넘긴 시스템 호출이 성공했으면 시스템 성능에는 넣는다', () => {
+  const rowList = [
+    row({ pathError: 'parse', systemPathError: null, isProductionTriggered: true, isJudgePass: null, isSystemPass: true }),
+    row({ posId: 's', pathError: null, systemPathError: 'http', isProductionTriggered: true, isSystemPass: false }),
+  ];
+  assert.equal(buildMetricTable({ rowList, metricKind: METRIC_KIND_MAP.judge }).all.count, 1);
+  assert.equal(buildMetricTable({ rowList, metricKind: METRIC_KIND_MAP.system }).all.tp, 1);
+  assert.equal(buildMetricTable({ rowList, metricKind: METRIC_KIND_MAP.system }).all.count, 1);
+  assert.deepEqual(countPathError({ rowList }).byKindMap, { parse: 1, http: 1 });
 });
 
 test('production 트리거가 잡은 위치의 경로 오류는 두 지표의 비율·FN·틀린 사례에서 빠지고 종류·종료 사유별로 따로 센다', () => {
@@ -203,7 +226,7 @@ test('반복마다 분모가 달라 값이 있는 반복이 적은 칸은 (n=k) 
   assert.match(report, /\| 2-1 지시대명사 \| 1 \| 100\.0% \| 1 \| 0 \| 0 \| 0 \| 100\.0% ± 0\.0 \| 100\.0% ± 0\.0 \|/);
   assert.match(report, /후보·공백 비율·TP·FP·FN·TN 은 반복 1 기준/);
   assert.match(report, /경로 오류로 반복마다 분모가 달라질 수 있어/);
-  assert.match(report, /시스템 성능에서는 production 트리거가 잡지 않은 위치만 trigger_miss/);
+  assert.match(report, /시스템 성능에서는 production 트리거가 잡지 않은 위치를 늘 trigger_miss/);
 });
 
 test('결과 폴더 시각 표기는 로컬 YYYYMMDD-HHmmss 다', () => {
@@ -265,6 +288,15 @@ test('토큰이 없으면 판정기를 부르지 않고 바로 멈춘다', async
   assert.match(logList.join('\n'), /AWS_BEARER_TOKEN_BEDROCK/);
 });
 
+const NO_GAP_TEXT = '{"judgeList":[{"id":1,"gap":"X","reason":"앞 발화가 가리킨다"}]}';
+// production 라우터가 후보 하나를 X 로 가렸을 때 돌려주는 꼴.
+const buildNoGapRouted = ({ candidateList }) => ({
+  candidateList: [],
+  judgeList: candidateList.map((candidate, index) => ({ ...candidate, id: index + 1, isGap: false, reason: '앞 발화가 가리킨다' })),
+  blockedReason: 'no_gap',
+  source: 'bedrock',
+});
+
 test('score 는 판정을 돌려 report·metrics·errors·raw 를 쓴다', async () => {
   const { dir, inFile } = prepareInput();
   const outDir = path.join(dir, 'out');
@@ -273,16 +305,17 @@ test('score 는 판정을 돌려 report·metrics·errors·raw 를 쓴다', async
     argList: ['--in', inFile, '--mode', 'all', '--no-cache', '--matcher', 'regex', '--out-dir', outDir],
     env: { AWS_BEARER_TOKEN_BEDROCK: 'token-for-test' },
     log: () => {},
-    baseFetch: async () => new Response(JSON.stringify({ output: { message: { content: [{ text: '{"candidateList":[],"blockedReason":"spoken"}' }] } }, stopReason: 'end_turn' })),
+    baseFetch: async () => new Response(JSON.stringify({ output: { message: { content: [{ text: NO_GAP_TEXT }] } }, stopReason: 'end_turn' })),
     installFetch: (fetchImpl) => { installedFetch = fetchImpl; },
     createRouter: () => ({
-      route: async () => {
+      route: async (input) => {
         await installedFetch('https://bedrock.example/router', {});
-        return { candidateList: [], blockedReason: 'spoken', source: 'bedrock' };
+        return buildNoGapRouted(input);
       },
     }),
     createJudge: () => ({ judge: async () => ({ hasCue: false, reason: null, source: 'bedrock' }) }),
     createMatcher: async () => REGEX_MATCHER,
+    createTrigger: async () => RULE_PRODUCTION_TRIGGER,
     readGit: async () => ({ head: 'abc', productionMergeBase: 'def' }),
   });
   assert.equal(code, 0);
@@ -290,9 +323,12 @@ test('score 는 판정을 돌려 report·metrics·errors·raw 를 쓴다', async
   const metrics = JSON.parse(fs.readFileSync(path.join(outDir, 'metrics.json'), 'utf8'));
   assert.deepEqual(metrics.modeMetricsList.map((modeMetrics) => modeMetrics.mode), ['delayed', 'realtime_mix', 'listening']);
   assert.equal(metrics.modeMetricsList[0].repeatList[0].judge.demonstrative.fn, 1);
+  assert.equal(metrics.runInfo.productionKoreanAnalyzer, 'rule');
   const rawList = fs.readFileSync(path.join(outDir, 'raw.jsonl'), 'utf8').trim().split('\n').map((line) => JSON.parse(line));
   assert.equal(rawList.length, 3);
-  assert.equal(rawList[0].capture.rawText, '{"candidateList":[],"blockedReason":"spoken"}');
+  assert.equal(rawList[0].capture.rawText, NO_GAP_TEXT);
+  assert.deepEqual(rawList[0].input.candidateList, [{ type: 'demonstrative', phrase: '이 부분', start: 0, end: 4 }],
+    'production 트리거 후보를 발화 글 기준 위치로 넘긴다');
   assert.doesNotMatch(fs.readFileSync(path.join(outDir, 'raw.jsonl'), 'utf8'), /token-for-test/);
   const errorList = fs.readFileSync(path.join(outDir, 'errors.jsonl'), 'utf8').trim().split('\n');
   assert.equal(errorList.length, 6, '모드 3개 × 지표 2개');
@@ -313,11 +349,12 @@ test('판정기 호출이 Bedrock 에 닿지 못하면(http·no_token) 결과는
       createRouter: () => ({
         route: async () => {
           if (source === 'error') await installedFetch('https://bedrock.example/router', {});
-          return { candidateList: [], blockedReason: null, source };
+          return { candidateList: [], judgeList: [], blockedReason: source === 'error' ? 'judge_error' : 'judge_unavailable', source };
         },
       }),
       createJudge: () => ({ judge: async () => ({ hasCue: false, reason: null, source: 'bedrock' }) }),
       createMatcher: async () => REGEX_MATCHER,
+      createTrigger: async () => RULE_PRODUCTION_TRIGGER,
       readGit: async () => ({ head: 'abc', productionMergeBase: 'def' }),
     });
     assert.equal(code, 1, kind);
@@ -342,17 +379,18 @@ test('score 는 기본으로 균형(delayed) 모드·항목 전체 맥락으로 
     argList: ['--in', inFile, '--no-cache', '--matcher', 'regex', '--after-ms', '5000', '--out-dir', outDir],
     env: { AWS_BEARER_TOKEN_BEDROCK: 'token-for-test' },
     log: () => {},
-    baseFetch: async () => new Response(JSON.stringify({ output: { message: { content: [{ text: '{"candidateList":[{"type":"deixis","subKind":"simple"}]}' }] } } })),
+    baseFetch: async () => new Response(JSON.stringify({ output: { message: { content: [{ text: NO_GAP_TEXT }] } } })),
     installFetch: (fetchImpl) => { installedFetch = fetchImpl; },
     createRouter: () => ({
       route: async (input) => {
         routeInputList.push(input);
         await installedFetch('https://bedrock.example/router', {});
-        return { candidateList: [{ type: 'deixis', subKind: 'simple', reference: null, anchor: '' }], blockedReason: null, source: 'bedrock' };
+        return buildNoGapRouted(input);
       },
     }),
     createJudge: () => ({ judge: async () => ({ hasCue: false, reason: null, source: 'bedrock' }) }),
     createMatcher: async () => REGEX_MATCHER,
+    createTrigger: async () => RULE_PRODUCTION_TRIGGER,
     readGit: async () => ({ head: 'abc', productionMergeBase: 'def' }),
   });
   assert.equal(code, 0);

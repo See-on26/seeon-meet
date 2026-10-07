@@ -1,115 +1,88 @@
-import { test } from 'node:test';
+import { test, before } from 'node:test';
 import assert from 'node:assert/strict';
+import fs from 'node:fs';
+import path from 'node:path';
+import { createRequire } from 'node:module';
 import {
-  extractProductionCandidateList, detectProductionFiredTrigger, classifyDataTrigger, MASK_CHAR,
+  createProductionTrigger, extractProductionCandidateList, detectPieceCandidateList, RULE_PRODUCTION_TRIGGER, KOREAN_TRIGGER_ANALYZER_MAP,
 } from '../tools/eval/lib/production-trigger.mjs';
-import { detectDeixis } from '../src/renderer/core/trigger/deixis-detector.js';
 
-const spanList = (candidateList) => candidateList.map(({ type, kind, trigger, start, end }) => [type, kind, trigger, start, end]);
+const require = createRequire(import.meta.url);
+const { DEV_KIWI_MODEL_DIR, KIWI_MODEL_FILE_LIST } = require('../src/main/caption-pipeline/trigger/kiwi-model.js');
 
-test('가림 문자는 한글·영문·숫자·공백이 아니다', () => {
-  assert.doesNotMatch(MASK_CHAR, /[가-힣A-Za-z0-9\s]/);
+// production 과 같은 Kiwi 모델(npm run setup:kiwi)이 있어야 품사 규칙 결과를 잰다. 없으면 그 시험만 건너뛴다.
+const hasKiwiModel = KIWI_MODEL_FILE_LIST.every((name) => fs.existsSync(path.join(DEV_KIWI_MODEL_DIR, name)));
+let kiwiTrigger = null;
+
+before(async () => {
+  if (hasKiwiModel) kiwiTrigger = await createProductionTrigger();
 });
 
-test('같은 트리거가 여러 번 나오면 가림 반복으로 모든 위치를 뽑는다', () => {
-  const text = '이 부분을 보시면 그리고 이 부분도 보시면 됩니다.';
-  assert.deepEqual(spanList(extractProductionCandidateList({ text })), [
-    ['demonstrative', 'demonstrative', '이 부분', 0, 4],
-    ['demonstrative', 'pointing', '부분', 2, 4],
-    ['demonstrative', 'demonstrative', '이 부분', 14, 18],
-    ['demonstrative', 'pointing', '부분', 16, 18],
-  ]);
-  assert.deepEqual(detectDeixis(text), { isDeixis: true, trigger: '이 부분', kind: 'demonstrative' }, 'production 은 첫 1건만 준다');
+const spanList = (candidateList) => candidateList.map(({ type, triggerType, trigger, start, end, utteranceIndex }) => [
+  type, triggerType, trigger, start, end, utteranceIndex,
+]);
+
+test('production 트리거 유형을 평가 유형으로 옮기고 위치는 전사 원문 기준이다(단순 수치 number → value)', () => {
+  const item = { id: 'x', transcript: '여러분, 이 사진을 보시죠. [무발화 7초] 보시는 것처럼 30%예요.' };
+  assert.deepEqual(spanList(extractProductionCandidateList({ item, productionTrigger: RULE_PRODUCTION_TRIGGER })), [
+    ['demonstrative', 'demonstrative', '이 사진', 5, 9, 0],
+    ['value', 'number', '30%', 33, 36, 2],
+  ], '무발화 표시 안의 "7초" 는 발화가 아니라 보지 않는다');
 });
 
-test('data 트리거는 숫자·% 면 3-1, 변화·통계 단서면 3-2 다', () => {
-  assert.equal(classifyDataTrigger('30%'), 'value');
-  assert.equal(classifyDataTrigger('3 명'), 'value');
-  assert.equal(classifyDataTrigger('십 명'), 'value');
-  assert.equal(classifyDataTrigger('올랐'), 'change');
-  assert.equal(classifyDataTrigger('평균'), 'change');
-  assert.deepEqual(spanList(extractProductionCandidateList({ text: '보시는 것처럼 30%예요. 생각보다 높죠?' })), [
-    ['value', 'data', '30%', 8, 11],
-  ]);
-  assert.deepEqual(spanList(extractProductionCandidateList({ text: '작년이랑 비교해 보면 많이 올랐습니다.' })), [
-    ['change', 'data', '올랐', 15, 17],
-  ]);
-});
-
-test('production 색 트리거는 2-2(형용사+지시 명사)로 보고 그 밖의 형용사는 잡지 못한다', () => {
-  assert.deepEqual(spanList(extractProductionCandidateList({ text: '그래프에 선이 두 개 있는데요. 빨간 쪽이 저희 회사입니다.' })), [
-    ['adjective_noun', 'color', '빨간 쪽', 18, 22],
-  ]);
-  assert.deepEqual(extractProductionCandidateList({ text: '두 안 중에 싼 쪽으로 가죠.' }), []);
-  assert.deepEqual(spanList(extractProductionCandidateList({ text: 'Okay, moving on. This part is where most errors happen. It was 30%.' })), [
-    ['value', 'data', '30%', 63, 66],
-  ], '영어는 숫자+% 만 잡는다');
-});
-
-test('글자열 오탐도 production 그대로 후보가 된다', () => {
-  assert.deepEqual(spanList(extractProductionCandidateList({ text: '저기요 보여서 좋네요 이점이 큽니다' })), [
-    ['demonstrative', 'demonstrative', '저기', 0, 2],
-    ['demonstrative', 'demonstrative', '여서', 5, 7],
-    ['demonstrative', 'demonstrative', '이점', 12, 14],
+test('같은 표현이 한 발화에 두 번 나오면 둘 다 후보다(production 은 조각의 후보를 모두 판단 LLM 에 넘긴다)', () => {
+  const item = { id: 'x', transcript: '이 부분을 보시면 그리고 이 부분도 보시면 됩니다.' };
+  assert.deepEqual(spanList(extractProductionCandidateList({ item, productionTrigger: RULE_PRODUCTION_TRIGGER })), [
+    ['demonstrative', 'demonstrative', '이 부분', 0, 4, 0],
+    ['demonstrative', 'demonstrative', '이 부분', 14, 18, 0],
   ]);
 });
 
-test('추상적 척도는 production 트리거가 없다', () => {
-  assert.deepEqual(extractProductionCandidateList({ text: '음, 대기 시간이 꽤 길죠. 그래서 개선이 필요합니다.' }), []);
+test('영어 발화는 production 영어 규칙으로 지시·수치·변화를 잡는다', () => {
+  const item = { id: 'x', language: 'en', transcript: 'Okay, moving on. This part is 30% of errors.' };
+  assert.deepEqual(spanList(extractProductionCandidateList({ item, productionTrigger: RULE_PRODUCTION_TRIGGER })), [
+    ['demonstrative', 'demonstrative', 'This part', 17, 26, 1],
+    ['value', 'number', '30%', 30, 33, 1],
+  ]);
 });
 
-test('(^|\\s) 로 시작하는 일치는 앞 낱말 속 같은 글자열이 아니라 실제 자리를 쓴다', () => {
-  const differenceText = '숫자가 많이 차이가 나는데 이 차이가 중요합니다';
-  assert.deepEqual(spanList(extractProductionCandidateList({ text: differenceText })), [
-    ['change', 'data', '차이가', 7, 10],
-    ['demonstrative', 'demonstrative', '이 차이가', 15, 20],
-    ['change', 'data', '차이가', 17, 20],
-  ]);
-  assert.equal(detectProductionFiredTrigger({ text: differenceText }).start, 15);
-
-  const fileText = '로그 파일을 보면 그 파일을 열어야 해요';
-  const fileCandidateList = extractProductionCandidateList({ text: fileText });
+test('판단 LLM 에 넘길 위치(pieceStart·pieceEnd)는 발화 글 기준이고 앞 공백을 뗀 만큼 옮긴다', () => {
+  const piece = { index: 3, start: 40, text: '  이 부분에서 오류가 납니다.' };
+  const [candidate] = detectPieceCandidateList({ piece, productionTrigger: RULE_PRODUCTION_TRIGGER });
   assert.deepEqual(
-    spanList(fileCandidateList.filter(({ kind }) => kind === 'demonstrative')),
-    [['demonstrative', 'demonstrative', '그 파일을', 10, 15]],
+    [candidate.phrase, candidate.pieceStart, candidate.pieceEnd, candidate.start, candidate.end, candidate.utteranceIndex],
+    ['이 부분', 2, 6, 42, 46, 3],
   );
-  assert.deepEqual(spanList(fileCandidateList), [
-    ['demonstrative', 'demonstrative', '그 파일을', 10, 15],
-    ['demonstrative', 'pointing', '열', 16, 17],
-  ], '"열어야"의 열은 production 가리킴 명사 글자열 오탐 그대로다');
-  assert.deepEqual(detectProductionFiredTrigger({ text: fileText }), {
-    kind: 'demonstrative', trigger: '그 파일을', type: 'demonstrative', start: 10, end: 15,
+  assert.equal(piece.text.slice(candidate.pieceStart, candidate.pieceEnd), '이 부분');
+});
+
+test('Kiwi 를 띄우지 못하면 production 처럼 경고하고 한국어는 대체 규칙으로 잡는다', async () => {
+  const warnList = [];
+  const failing = await createProductionTrigger({
+    createTokenizer: () => ({ load: async () => { throw new Error('모델 없음'); }, isReady: () => false, tokenize: () => null }),
+    onWarn: (message) => warnList.push(message),
   });
+  assert.equal(failing.koreanAnalyzer, KOREAN_TRIGGER_ANALYZER_MAP.rule);
+  assert.match(warnList.join('\n'), /대체 규칙.*모델 없음/);
+  assert.equal(failing.detect({ text: '이 부분에서 30%가 늘었습니다.' }).analyzer, 'rule');
 
-  const directionText = '마감을 금요일로 옮기고 일로 오세요';
-  assert.deepEqual(spanList(extractProductionCandidateList({ text: directionText })), [
-    ['demonstrative', 'demonstrative', '일로', 13, 15],
-  ]);
-  assert.equal(detectProductionFiredTrigger({ text: directionText }).start, 13);
-});
-
-test('글자열 포함으로 잡는 트리거는 낱말 속 첫 자리도 그대로 후보다', () => {
-  assert.deepEqual(spanList(extractProductionCandidateList({ text: '보여서 좋고 여서 가자' })), [
-    ['demonstrative', 'demonstrative', '여서', 1, 3],
-    ['demonstrative', 'demonstrative', '여서', 7, 9],
-  ]);
-});
-
-test('첫 지시 관형사 뒤가 때·정도 같은 비지시 명사여도 뒤의 지시 관형사+명사를 뽑는다', () => {
-  const nonReferentText = '그 때 이 사람이 왔고 저 사람이 갔다';
-  assert.deepEqual(spanList(extractProductionCandidateList({ text: nonReferentText })), [
-    ['demonstrative', 'demonstrative', '이 사람이', 4, 9],
-    ['demonstrative', 'demonstrative', '저 사람이', 13, 18],
-  ]);
-  assert.deepEqual(spanList(extractProductionCandidateList({ text: '이 정도면 됩니다. 그 방식으로 가죠' })), [
-    ['demonstrative', 'demonstrative', '그 방식으로', 11, 17],
-  ]);
-  assert.equal(detectProductionFiredTrigger({ text: nonReferentText }), null, '실제 발동은 production 첫 일치 그대로라 발동하지 않는다');
-});
-
-test('실제로 발동하는 1건은 제품의 활성 종류 기준이다', () => {
-  assert.deepEqual(detectProductionFiredTrigger({ text: '음, 대기 시간이 꽤 길죠. 평균 40분인데 업계 평균은 10분이거든요.' }), {
-    kind: 'demonstrative', trigger: '이거', type: 'demonstrative', start: 35, end: 37,
+  const ready = await createProductionTrigger({
+    createTokenizer: () => ({ load: async () => ({ elapsedMs: 1 }), isReady: () => true, tokenize: () => [] }),
+    onWarn: (message) => warnList.push(message),
   });
-  assert.equal(detectProductionFiredTrigger({ text: '잠시 판서하겠습니다.' }), null);
+  assert.equal(ready.koreanAnalyzer, KOREAN_TRIGGER_ANALYZER_MAP.kiwi);
+  assert.equal(warnList.length, 1);
+});
+
+test('Kiwi 모델이 있으면 production 과 같은 품사 규칙으로 잡는다', { skip: !hasKiwiModel }, () => {
+  assert.equal(kiwiTrigger.koreanAnalyzer, KOREAN_TRIGGER_ANALYZER_MAP.kiwi);
+  const detect = (transcript) => spanList(extractProductionCandidateList({ item: { id: 'x', transcript }, productionTrigger: kiwiTrigger }));
+  assert.deepEqual(detect('두 안 중에 싼 쪽으로 가죠.'), [['adjective_noun', 'adjective_noun', '싼 쪽', 7, 10, 0]]);
+  assert.deepEqual(detect('저기요, 잠깐만요. 저기 보이는 숫자가 중요합니다.'), [['demonstrative', 'demonstrative', '저기', 11, 13, 1]],
+    '감탄사 "저기요" 는 잡지 않는다');
+  assert.deepEqual(detect('음, 대기 시간이 꽤 길죠. 평균 40분인데 업계 평균은 10분이거든요.'), [
+    ['scale', 'scale', '꽤 길죠', 10, 14, 0],
+    ['value', 'number', '40분', 19, 22, 1],
+    ['value', 'number', '10분', 32, 35, 1],
+  ]);
 });

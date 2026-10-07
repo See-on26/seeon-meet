@@ -8,13 +8,28 @@ import { createFetchRecorder, summarizeConverseCapture } from '../tools/eval/lib
 import { createCacheStore, hashInput } from '../tools/eval/lib/cache-store.mjs';
 import { mapWithConcurrency } from '../tools/eval/lib/concurrency.mjs';
 import {
-  createJudgeRunner, resolveLexicalVerdict, classifyRouterPathError, classifySilencePathError,
-  isRouterTextWellFormed, PATH_ERROR_MAP,
+  createJudgeRunner, resolveCandidateVerdict, classifyRouterPathError, classifySilencePathError,
+  isRouterTextWellFormed, countJudgeableCandidate, PATH_ERROR_MAP, JUDGE_BLOCK_REASON_MAP,
   hashProductionSource, PRODUCTION_SOURCE_FILE_LIST_MAP, PRODUCTION_SOURCE_HASH_MAP, buildJudgeModelLabel, countJudgeSource,
 } from '../tools/eval/lib/judge-runner.mjs';
-import { buildScorePlan, evaluateScorePlan, SYSTEM_MISS_REASON_MAP } from '../tools/eval/lib/score-rows.mjs';
+import { buildScorePlan, evaluateScorePlan, SYSTEM_MISS_REASON_MAP, ROUTER_CALL_ROLE_MAP } from '../tools/eval/lib/score-rows.mjs';
 import { REGEX_MATCHER } from '../tools/eval/lib/methodology-matcher.mjs';
+import { RULE_PRODUCTION_TRIGGER } from '../tools/eval/lib/production-trigger.mjs';
 import { resolveContextWindow } from '../tools/eval/lib/router-context.mjs';
+
+const require = createRequire(import.meta.url);
+const { parseJudgeText, toNarrationCandidateList } = require('../src/main/caption-pipeline/router/unified-router.js');
+
+// production 라우터가 판단 JSON 을 읽어 돌려주는 꼴을 그대로 만든다. verdictMap: 후보 id → 'O'·'X'.
+function buildRouted({ candidateList, verdictMap, source = 'gpu' }) {
+  const numberedList = candidateList.map((candidate, index) => ({ ...candidate, id: index + 1 }));
+  const text = JSON.stringify({
+    judgeList: numberedList.map((candidate) => ({ id: candidate.id, gap: verdictMap[candidate.id] || 'X', reason: `판단 ${candidate.id}` })),
+  });
+  const judgeList = parseJudgeText({ text, candidateList: numberedList });
+  const narrationList = toNarrationCandidateList(judgeList);
+  return { text, routed: { candidateList: narrationList, judgeList, source, blockedReason: narrationList.length ? null : 'no_gap' } };
+}
 
 const converseBody = (text) => JSON.stringify({
   output: { message: { content: [{ text }] } }, stopReason: 'end_turn', usage: { inputTokens: 10, outputTokens: 5 },
@@ -37,15 +52,22 @@ test('fetch 기록기는 감싼 호출의 원문 응답만 모으고 헤더는 �
   assert.equal(captureList.length, 1, 'capture 밖 호출은 기록하지 않는다');
 });
 
-test('라우터 파싱 실패는 production 이 통과로 처리해도 경로 오류로 센다', () => {
-  const routed = { candidateList: [{ type: 'deixis', subKind: null, reference: null, anchor: '' }], blockedReason: null, source: 'bedrock' };
-  assert.equal(classifyRouterPathError({ routed, capture: { rawText: '판단하기 어렵습니다' } }), PATH_ERROR_MAP.parse);
-  assert.equal(classifyRouterPathError({ routed, capture: { rawText: '' } }), PATH_ERROR_MAP.emptyText);
-  assert.equal(classifyRouterPathError({ routed: { ...routed, source: 'error' }, capture: { rawText: '' } }), PATH_ERROR_MAP.http);
-  assert.equal(classifyRouterPathError({ routed: { ...routed, source: 'fallback' }, capture: { rawText: null } }), PATH_ERROR_MAP.noToken);
-  assert.equal(classifyRouterPathError({ routed, capture: { rawText: '{"candidateList":[{"type":"deixis","subKind":"simple"}]}' } }), null);
-  assert.equal(isRouterTextWellFormed('{"candidateList":[],"blockedReason":"spoken"}'), true);
-  assert.equal(isRouterTextWellFormed('{"candidateList":[]}'), false);
+test('판단 응답을 읽지 못하면 production 이 X(해설 안 함)로 처리해도 경로 오류로 센다', () => {
+  const candidateList = [{ type: 'demonstrative', phrase: '이 부분', start: 0, end: 4 }];
+  const { routed } = buildRouted({ candidateList, verdictMap: {} });
+  const classify = (patch, rawText) => classifyRouterPathError({ routed: { ...routed, ...patch }, capture: { rawText }, candidateList });
+  assert.equal(classify({}, '판단하기 어렵습니다'), PATH_ERROR_MAP.parse);
+  assert.equal(classify({}, ''), PATH_ERROR_MAP.emptyText);
+  assert.equal(classify({ source: 'error' }, ''), PATH_ERROR_MAP.http);
+  assert.equal(classify({ source: 'fallback' }, null), PATH_ERROR_MAP.noToken);
+  assert.equal(classify({}, '{"judgeList":[{"id":1,"gap":"X","reason":"앞에서 밝힘"}]}'), null);
+  assert.equal(classify({}, '{"judgeList":[]}'), PATH_ERROR_MAP.parse, '판단이 빠진 후보는 production 이 "판단 없음" X 로 채운다');
+  assert.equal(isRouterTextWellFormed({ text: '```json\n{"judgeList":[{"id":1,"gap":"o"},{"id":2,"gap":"X"}]}\n```', candidateCount: 2 }), true);
+  assert.equal(isRouterTextWellFormed({ text: '{"judgeList":[{"id":1,"gap":"모름"}]}', candidateCount: 1 }), false);
+  assert.equal(isRouterTextWellFormed({ text: '{"candidateList":[]}', candidateCount: 0 }), false, '옛 라우터 꼴은 읽지 않는다');
+  assert.equal(countJudgeableCandidate([
+    { type: 'demonstrative', phrase: '이 부분' }, { type: 'number', phrase: '' }, { type: 'pointing', phrase: '여기' },
+  ]), 1, 'production 은 구가 없거나 모르는 유형인 후보를 넘기지 않는다');
 });
 
 test('무발화 판정기는 HTTP 오류와 cue 없는 응답을 경로 오류로 센다', () => {
@@ -55,29 +77,31 @@ test('무발화 판정기는 HTTP 오류와 cue 없는 응답을 경로 오류�
   assert.equal(classifySilencePathError({ judged: { source: 'empty' }, capture: null }), null);
 });
 
-test('유형에 맞는 라우터 후보가 있으면 넘김이고 척도는 기본 설정에서 생성 대상이 아니다', () => {
-  const routed = {
+test('위치마다 같은 유형·겹치는 후보의 O/X 를 읽고, 생성 대상·중재 선택은 production 후보 선택기로 본다', () => {
+  const { routed } = buildRouted({
     candidateList: [
-      { type: 'deixis', subKind: 'simple', anchor: '이 부분' },
-      { type: 'visual_description', subKind: 'scale', anchor: '길죠' },
+      { type: 'demonstrative', phrase: '이 부분', start: 0, end: 4 },
+      { type: 'scale', phrase: '꽤 길죠', start: 11, end: 15 },
+      { type: 'number', phrase: '30%', start: 20, end: 23 },
     ],
-    blockedReason: null,
-  };
-  const demonstrative = resolveLexicalVerdict({ type: 'demonstrative', routed, isScaleEnabled: false });
-  assert.equal(demonstrative.isJudgePass, true);
-  assert.equal(demonstrative.isGeneratable, true);
-  assert.equal(demonstrative.isArbiterSelected, true);
-  assert.deepEqual(demonstrative.anchorList, ['이 부분']);
-  const scale = resolveLexicalVerdict({ type: 'scale', routed, isScaleEnabled: false });
-  assert.equal(scale.isJudgePass, true);
-  assert.equal(scale.isGeneratable, false);
-  assert.equal(resolveLexicalVerdict({ type: 'scale', routed, isScaleEnabled: true }).isGeneratable, true);
-  const value = resolveLexicalVerdict({ type: 'value', routed: { candidateList: [{ type: 'interpretation', subKind: 'claim_to_value' }] }, isScaleEnabled: false });
-  assert.equal(value.isJudgePass, false);
-  assert.equal(value.isTypeOnlyMatch, true);
-  assert.equal(value.blockReason, 'type_mismatch:interpretation/claim_to_value');
-  const blocked = resolveLexicalVerdict({ type: 'adjective_noun', routed: { candidateList: [], blockedReason: 'spoken' }, isScaleEnabled: false });
-  assert.equal(blocked.blockReason, 'spoken');
+    verdictMap: { 1: 'O', 2: 'O', 3: 'X' },
+  });
+  const pieceStart = 100;
+  const verdict = (position, isScaleEnabled = true) => resolveCandidateVerdict({ position, pieceStart, routed, isScaleEnabled });
+  const demonstrative = { type: 'demonstrative', start: 100, end: 104 };
+  const scale = { type: 'scale', start: 113, end: 115 };
+  assert.deepEqual(
+    [verdict(demonstrative).isJudgePass, verdict(demonstrative).isGeneratable, verdict(demonstrative).isArbiterSelected],
+    [true, true, false], '척도가 켜져 있으면 중재가 지시를 척도에 합쳐 척도를 고른다',
+  );
+  assert.deepEqual([verdict(scale).isJudgePass, verdict(scale).isGeneratable, verdict(scale).isArbiterSelected], [true, true, true]);
+  assert.deepEqual([verdict(scale, false).isJudgePass, verdict(scale, false).isGeneratable], [true, false], '척도를 끄면 생성 대상이 아니다');
+  assert.equal(verdict(demonstrative, false).isArbiterSelected, true);
+  const value = verdict({ type: 'value', start: 120, end: 123 });
+  assert.deepEqual([value.isJudgePass, value.blockReason, value.rationale], [false, JUDGE_BLOCK_REASON_MAP.noGap, '판단 3']);
+  assert.equal(verdict({ type: 'change', start: 104, end: 108 }).blockReason, JUDGE_BLOCK_REASON_MAP.notJudged, '넘긴 후보에 없던 위치');
+  assert.equal(verdict({ type: 'value', start: 100, end: 104 }).blockReason, JUDGE_BLOCK_REASON_MAP.notJudged, '유형이 다르면 겹쳐도 그 위치의 판단이 아니다');
+  assert.match(verdict(demonstrative).judgeText, /지시대명사:"이 부분"=O\(판단 1\) · 추상적 척도:"꽤 길죠"=O\(판단 2\) · 단순 수치:"30%"=X\(판단 3\)/);
 });
 
 test('동시 호출 수를 넘지 않고 결과 순서를 지킨다', async () => {
@@ -121,15 +145,15 @@ function createFakeRunner({ routeImpl, judgeImpl }) {
 }
 
 test('판정 결과는 입력 해시로 캐시하고 경로 오류는 캐시하지 않는다', async () => {
-  const goodText = '{"candidateList":[{"type":"deixis","subKind":"simple","anchor":"이 부분"}]}';
   let isBroken = true;
   const { runner, callLog } = createFakeRunner({
-    routeImpl: () => (isBroken
-      ? { text: '음', routed: { candidateList: [{ type: 'deixis' }], blockedReason: null, source: 'bedrock' } }
-      : { text: goodText, routed: { candidateList: [{ type: 'deixis', subKind: 'simple', anchor: '이 부분' }], blockedReason: null, source: 'bedrock' } }),
+    routeImpl: (input) => {
+      const good = buildRouted({ candidateList: input.candidateList, verdictMap: { 1: 'O' } });
+      return isBroken ? { text: '음', routed: buildRouted({ candidateList: input.candidateList, verdictMap: {} }).routed } : good;
+    },
     judgeImpl: () => ({ text: '{}', judged: { hasCue: false, reason: null, source: 'bedrock' } }),
   });
-  const input = { utterance: '이 부분이요', before: '', after: '' };
+  const input = { utterance: '이 부분이요', before: '', after: '', candidateList: [{ type: 'demonstrative', phrase: '이 부분', start: 0, end: 4 }] };
   assert.equal((await runner.runRouter({ input, repeatIndex: 0 })).pathError, PATH_ERROR_MAP.parse);
   isBroken = false;
   const fresh = await runner.runRouter({ input, repeatIndex: 0 });
@@ -151,10 +175,11 @@ test('무발화 전제 조건이 안 맞으면 판정기를 부르지 않는다'
 const labeledItemList = [
   {
     id: 'd-1', language: 'ko', targetType: 'demonstrative',
-    transcript: '이 부분에서 오류가 꽤 길죠.',
+    transcript: '이 부분은 평균 40분이에요. 대기 시간이 꽤 길죠.',
     positionList: [
       { posId: 'demonstrative@0-4', type: 'demonstrative', start: 0, end: 4, trigger: '이 부분', sourceList: ['production', 'methodology'], isGap: true, rationale: '대상 없음' },
-      { posId: 'scale@14-16', type: 'scale', start: 14, end: 16, trigger: '길죠', sourceList: ['methodology'], isGap: true, rationale: '정도 없음' },
+      { posId: 'value@9-12', type: 'value', start: 9, end: 12, trigger: '40분', sourceList: ['methodology'], isGap: true, rationale: '무엇의 값인지 없음' },
+      { posId: 'scale@26-28', type: 'scale', start: 26, end: 28, trigger: '길죠', sourceList: ['methodology'], isGap: true, rationale: '정도 없음' },
     ],
   },
   {
@@ -167,48 +192,85 @@ const labeledItemList = [
   },
 ];
 
-test('라벨 위치를 지금 후보와 대조해 출처를 다시 정하고 null 라벨은 진행률로만 센다', () => {
-  const plan = buildScorePlan({ itemList: labeledItemList, matcher: REGEX_MATCHER });
-  assert.deepEqual(plan.positionList.map((position) => [position.posId, position.sourceList, position.utteranceIndex]), [
-    ['demonstrative@0-4', ['production', 'methodology'], 0],
-    ['scale@14-16', ['methodology'], 0],
-    ['silence@16-24', ['production', 'methodology'], 1],
-  ]);
+const buildRulePlan = () => buildScorePlan({ itemList: labeledItemList, matcher: REGEX_MATCHER, productionTrigger: RULE_PRODUCTION_TRIGGER });
+
+test('라벨 위치를 지금 후보와 대조해 출처·트리거 포함 여부를 다시 정하고 null 라벨은 진행률로만 센다', () => {
+  const plan = buildRulePlan();
+  assert.deepEqual(plan.positionList.map((position) => [position.posId, position.sourceList, position.isProductionTriggered, position.utteranceIndex]), [
+    ['demonstrative@0-4', ['production', 'methodology'], true, 0],
+    ['value@9-12', ['methodology'], false, 0],
+    ['scale@26-28', ['production', 'methodology'], true, 1],
+    ['silence@16-24', ['production', 'methodology'], true, 1],
+  ], '척도 "길죠" 는 지금 production 트리거가 잡는 "꽤 길죠" 와 겹친다');
   assert.equal(plan.progress.nullCount, 1);
+  assert.deepEqual(plan.productionCandidateListMap.get('d-1#0').map((candidate) => [candidate.triggerType, candidate.phrase, candidate.pieceStart]), [
+    ['demonstrative', '이 부분', 0],
+  ]);
 });
 
-test('같은 발화의 후보는 라우터 호출 1번을 나눠 쓰고 놓친 이유를 나눈다', async () => {
-  const plan = buildScorePlan({ itemList: labeledItemList, matcher: REGEX_MATCHER });
+test('production 후보만 넘긴 호출로 시스템 성능을, 말주머니에만 있는 라벨 위치를 더한 호출로 판정기 성능을 낸다', async () => {
+  const plan = buildRulePlan();
+  const routeInputList = [];
   const { runner, callLog } = createFakeRunner({
-    routeImpl: () => ({
-      text: '{"candidateList":[{"type":"deixis","subKind":"simple","anchor":"이 부분"},{"type":"visual_description","subKind":"scale","anchor":"길죠"}]}',
-      routed: {
-        candidateList: [{ type: 'deixis', subKind: 'simple', anchor: '이 부분' }, { type: 'visual_description', subKind: 'scale', anchor: '길죠' }],
-        blockedReason: null, source: 'bedrock',
-      },
-    }),
+    routeImpl: (input) => {
+      routeInputList.push(input);
+      return buildRouted({ candidateList: input.candidateList, verdictMap: { 1: 'O', 2: 'O' } });
+    },
     judgeImpl: () => ({ text: '{"cue":true,"reason":"보라고 함"}', judged: { hasCue: true, reason: '보라고 함', source: 'bedrock' } }),
   });
   const { rowList, rawList } = await evaluateScorePlan({
     plan, mode: 'delayed', contextWindow: resolveContextWindow({ mode: 'delayed' }), repeatIndex: 0, runner, concurrency: 2, isScaleEnabled: false,
   });
-  assert.equal(callLog.route, 1);
-  assert.equal(callLog.judge, 1);
-  assert.equal(rawList.length, 2);
+  assert.deepEqual(callLog, { route: 3, judge: 1 });
+  assert.deepEqual(rawList.map((raw) => [raw.kind, raw.role, raw.utteranceIndex]), [
+    ['router', ROUTER_CALL_ROLE_MAP.system, 0], ['router', ROUTER_CALL_ROLE_MAP.judge, 0], ['router', ROUTER_CALL_ROLE_MAP.both, 1], ['silence', null, 1],
+  ]);
+  const phraseListOf = (role) => rawList.find((raw) => raw.role === role).input.candidateList.map((candidate) => `${candidate.type}:${candidate.phrase}`);
+  assert.deepEqual(phraseListOf(ROUTER_CALL_ROLE_MAP.system), ['demonstrative:이 부분'], 'production 이 넘기는 후보 그대로');
+  assert.deepEqual(phraseListOf(ROUTER_CALL_ROLE_MAP.judge), ['demonstrative:이 부분', 'number:40분'], '말주머니 위치는 트리거 유형 이름으로 넘긴다');
+  assert.equal(routeInputList.find((input) => input.candidateList.length === 2).utterance, '이 부분은 평균 40분이에요.');
   const rowMap = new Map(rowList.map((row) => [row.posId, row]));
-  assert.equal(rowMap.get('demonstrative@0-4').isSystemPass, true);
-  assert.equal(rowMap.get('demonstrative@0-4').isAnchorOverlap, true);
-  assert.equal(rowMap.get('scale@14-16').isJudgePass, true);
-  assert.equal(rowMap.get('scale@14-16').isSystemPass, false);
-  assert.equal(rowMap.get('scale@14-16').systemMissReason, SYSTEM_MISS_REASON_MAP.triggerMiss);
+  assert.deepEqual([rowMap.get('demonstrative@0-4').isJudgePass, rowMap.get('demonstrative@0-4').isSystemPass], [true, true]);
+  assert.deepEqual(
+    [rowMap.get('value@9-12').isJudgePass, rowMap.get('value@9-12').isSystemPass, rowMap.get('value@9-12').systemMissReason],
+    [true, false, SYSTEM_MISS_REASON_MAP.triggerMiss],
+  );
+  assert.deepEqual(
+    [rowMap.get('scale@26-28').isJudgePass, rowMap.get('scale@26-28').isSystemPass, rowMap.get('scale@26-28').systemMissReason],
+    [true, false, SYSTEM_MISS_REASON_MAP.scaleDisabled],
+  );
+  assert.match(rowMap.get('value@9-12').context.candidateText, /단순 수치:"40분"=O/);
   assert.equal(rowMap.get('silence@16-24').isSystemPass, true);
   assert.equal(rowMap.get('silence@16-24').context.transcript, '여러분, 이 사진을 보시죠.');
   assert.ok(rowList.every((row) => row.language === 'ko'));
 });
 
-test('production 라우터·무발화 판정기가 실패를 통과·차단으로 덮어도 기록한 원문으로 경로 오류를 가른다', async (t) => {
+test('시스템 호출과 판정 호출의 O/X 가 다르면 지표마다 제 호출을 쓰고, 시스템 호출만 실패하면 판정기 성능에는 남는다', async () => {
+  const plan = buildRulePlan();
+  const runRoute = async ({ routeImpl }) => {
+    const { runner } = createFakeRunner({
+      routeImpl, judgeImpl: () => ({ text: '{"cue":false,"reason":"end"}', judged: { hasCue: false, reason: 'end', source: 'bedrock' } }),
+    });
+    const { rowList } = await evaluateScorePlan({
+      plan, mode: 'delayed', contextWindow: resolveContextWindow({ mode: 'delayed' }), repeatIndex: 0, runner, concurrency: 1, isScaleEnabled: true,
+    });
+    return rowList.find((row) => row.posId === 'demonstrative@0-4');
+  };
+  const disagreed = await runRoute({
+    routeImpl: (input) => buildRouted({ candidateList: input.candidateList, verdictMap: input.candidateList.length === 1 ? { 1: 'X' } : { 1: 'O', 2: 'O' } }),
+  });
+  assert.deepEqual([disagreed.isJudgePass, disagreed.isSystemPass, disagreed.systemMissReason, disagreed.systemJudgeReason],
+    [true, false, SYSTEM_MISS_REASON_MAP.judgeBlock, JUDGE_BLOCK_REASON_MAP.noGap]);
+  const systemBroken = await runRoute({
+    routeImpl: (input) => (input.candidateList.length === 1
+      ? { text: '음', routed: buildRouted({ candidateList: input.candidateList, verdictMap: {} }).routed }
+      : buildRouted({ candidateList: input.candidateList, verdictMap: { 1: 'O' } })),
+  });
+  assert.deepEqual([systemBroken.pathError, systemBroken.systemPathError, systemBroken.isJudgePass], [null, PATH_ERROR_MAP.parse, true]);
+});
+
+test('production 라우터·무발화 판정기가 실패를 해설 안 함·차단으로 덮어도 기록한 원문으로 경로 오류를 가른다', async (t) => {
   t.mock.method(console, 'error', () => {});
-  const require = createRequire(import.meta.url);
   const { createUnifiedRouter } = require('../src/main/caption-pipeline/router/unified-router.js');
   const { createSilenceJudge } = require('../src/main/caption-pipeline/router/silence-judge.js');
   const textBody = (content, stopReason = 'end_turn') => JSON.stringify({ output: { message: { content } }, stopReason, usage: null });
@@ -217,8 +279,8 @@ test('production 라우터·무발화 판정기가 실패를 통과·차단으�
     network: () => { throw new TypeError('fetch failed'); },
     unparsable: () => new Response(textBody([{ text: '판단하기 어렵습니다' }]), { status: 200 }),
     maxTokensEmpty: () => new Response(textBody([{ reasoningContent: { reasoningText: { text: '...' } } }], 'max_tokens'), { status: 200 }),
-    maxTokensCut: () => new Response(textBody([{ text: '{"candidateList":[{"type":"deixis","subKind":"sim' }], 'max_tokens'), { status: 200 }),
-    routerOk: () => new Response(textBody([{ text: '{"candidateList":[{"type":"deixis","subKind":"simple","anchor":"이 부분"}]}' }]), { status: 200 }),
+    maxTokensCut: () => new Response(textBody([{ text: '{"judgeList":[{"id":1,"gap":"O","rea' }], 'max_tokens'), { status: 200 }),
+    routerOk: () => new Response(textBody([{ text: '{"judgeList":[{"id":1,"gap":"O","reason":"대상 없음"}]}' }]), { status: 200 }),
     silenceOk: () => new Response(textBody([{ text: '{"cue":false,"reason":"end"}' }]), { status: 200 }),
   };
   let responseKey = null;
@@ -234,13 +296,16 @@ test('production 라우터·무발화 판정기가 실패를 통과·차단으�
     cache: createCacheStore(),
     routerModelId: runnerConfig.judgeModelId,
   });
-  const routerInput = { utterance: '이 부분이요', before: '', after: '' };
+  const routerInput = {
+    utterance: '이 부분이요', before: '', after: '', candidateList: [{ type: 'demonstrative', phrase: '이 부분', start: 0, end: 4 }],
+  };
   const silenceInput = { transcript: '이 사진을 보시죠.', silenceMs: 5000, precondition: { isReady: true, reason: null } };
+  const isAllX = (routed) => routed.candidateList.length === 0 && routed.judgeList.every((entry) => !entry.isGap);
 
   const noTokenRunner = createRunner({ ...config, bedrockApiKey: '' });
   const noTokenRouted = await noTokenRunner.runRouter({ input: routerInput, repeatIndex: 0 });
   assert.equal(noTokenRouted.pathError, PATH_ERROR_MAP.noToken);
-  assert.equal(noTokenRouted.routed.candidateList[0].type, 'deixis', 'production 은 토큰이 없어도 지시 통과로 돌려준다');
+  assert.equal(isAllX(noTokenRouted.routed), true, 'production 은 판정할 수 없으면 해설하지 않는다(X)');
   assert.equal((await noTokenRunner.runSilence({ input: silenceInput, repeatIndex: 0 })).pathError, PATH_ERROR_MAP.noToken);
 
   const runner = createRunner(config);
@@ -256,13 +321,15 @@ test('production 라우터·무발화 판정기가 실패를 통과·차단으�
     const output = await runner.runRouter({ input: routerInput, repeatIndex: 0 });
     assert.equal(output.pathError, expectedError, `라우터 ${key}`);
     assert.equal(output.routed.source, expectedSource, `라우터 ${key} source`);
-    assert.deepEqual(output.routed.candidateList.map((candidate) => candidate.type), ['deixis'], `라우터 ${key} 는 지시 통과로 덮인다`);
+    assert.equal(isAllX(output.routed), true, `라우터 ${key} 는 해설 안 함(X)으로 덮인다`);
     assert.doesNotMatch(JSON.stringify(output), /tok-secret/);
   }
   responseKey = 'maxTokensCut';
   assert.equal((await runner.runRouter({ input: routerInput, repeatIndex: 0 })).capture.stopReason, 'max_tokens');
   responseKey = 'routerOk';
-  assert.equal((await runner.runRouter({ input: routerInput, repeatIndex: 0 })).pathError, null);
+  const okOutput = await runner.runRouter({ input: routerInput, repeatIndex: 0 });
+  assert.equal(okOutput.pathError, null);
+  assert.deepEqual(okOutput.routed.judgeList.map((entry) => [entry.phrase, entry.isGap, entry.reason]), [['이 부분', true, '대상 없음']]);
 
   const silenceCaseList = [
     ['http', PATH_ERROR_MAP.http],
@@ -307,7 +374,7 @@ test('판정 결과를 만드는 production 코드가 바뀌면 캐시 키가 �
   for (const filePath of [
     'src/main/caption-pipeline/router/unified-router.js', 'src/main/caption-pipeline/router/silence-judge.js',
     'src/main/caption-pipeline/agents/shared/bedrock-converse.js', 'src/main/caption-pipeline/prompts/unified-router.js',
-    'src/main/caption-pipeline/prompts/silence-judge.js',
+    'src/main/caption-pipeline/prompts/silence-judge.js', 'src/main/caption-pipeline/trigger/speech-trigger.js',
   ]) {
     assert.ok(fileList.includes(filePath), `${filePath} 가 캐시 키에 든다`);
   }
@@ -316,10 +383,14 @@ test('판정 결과를 만드는 production 코드가 바뀌면 캐시 키가 �
 
   const cacheDir = fs.mkdtempSync(path.join(os.tmpdir(), 'eval-cache-'));
   const callLog = { route: 0, judge: 0 };
+  const routerInput = {
+    utterance: '이 부분이요', before: '', after: '', candidateList: [{ type: 'demonstrative', phrase: '이 부분', start: 0, end: 4 }],
+  };
+  const okRouted = buildRouted({ candidateList: routerInput.candidateList, verdictMap: { 1: 'O' } });
   const createRunner = (sourceHashMap) => createJudgeRunner({
     route: async () => {
       callLog.route += 1;
-      return { candidateList: [{ type: 'deixis', subKind: 'simple', anchor: '이 부분' }], blockedReason: null, source: 'bedrock' };
+      return okRouted.routed;
     },
     judgeSilence: async () => {
       callLog.judge += 1;
@@ -327,15 +398,13 @@ test('판정 결과를 만드는 production 코드가 바뀌면 캐시 키가 �
     },
     capture: async (run) => {
       const result = await run();
-      const text = result.candidateList
-        ? '{"candidateList":[{"type":"deixis","subKind":"simple","anchor":"이 부분"}]}' : '{"cue":false,"reason":"end"}';
+      const text = result.judgeList ? okRouted.text : '{"cue":false,"reason":"end"}';
       return { result, captureList: [{ status: 200, bodyText: converseBody(text), elapsedMs: 1, errorMessage: null }] };
     },
     cache: createCacheStore({ cacheDir }),
     routerModelId: 'model-x',
     sourceHashMap,
   });
-  const routerInput = { utterance: '이 부분이요', before: '', after: '' };
   const silenceInput = { transcript: '이 사진을 보시죠.', silenceMs: 5000, precondition: { isReady: true, reason: null } };
   const mergedRunner = createRunner(PRODUCTION_SOURCE_HASH_MAP);
   assert.equal((await mergedRunner.runRouter({ input: routerInput, repeatIndex: 0 })).isCacheHit, false);
