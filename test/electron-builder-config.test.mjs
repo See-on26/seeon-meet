@@ -114,6 +114,11 @@ test('앱에는 src·package.json 만 넣고, 맥 전용 네이티브 빌드는 
   assert.deepEqual(includeList, ['src/**/*', 'package.json']);
 });
 
+test('터널이 쓰지 않는 ssh2 의 Pageant 실행 파일(pagent.exe)은 설치본에 넣지 않는다', () => {
+  const { config } = buildWith({ env: {} });
+  assert.ok(config.files.includes('!node_modules/ssh2/util/pagent.exe'));
+});
+
 test('electron-builder 가 부르는 기본 내보내기는 process.env 로 설정을 만든다', () => {
   const savedEnv = { envFile: process.env.SEEON_BUILD_ENV_FILE, tunnelKey: process.env.SEEON_BUILD_TUNNEL_KEY };
   delete process.env.SEEON_BUILD_ENV_FILE;
