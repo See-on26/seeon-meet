@@ -305,7 +305,8 @@ function readTriggerPhraseList(detail) {
   return [...candidateText.matchAll(/:"([^"]*)"/g)].map((match) => match[1]).filter(Boolean);
 }
 
-// 트리거 후보 기록을 그 후보 구를 판단 LLM 에 넘긴 결정 흐름에 붙인다. 쿨다운 등으로 결정에 이르지 않은 후보는 세션 기록이다.
+// 트리거 후보 기록을 그 후보 구를 판단 LLM 에 넘긴 결정 흐름에 붙인다. 바로 뒤 조각의 후보도 앞 결정에 합쳐졌으면 그 흐름에 붙는다.
+// 결정에 이르지 않은 후보(화면을 못 찍음·예산 드롭 등)는 세션 기록이다.
 function attachTriggerCandidateList({ triggerList, groupList, sessionList }) {
   const routeGroupList = groupList.filter(isUtteranceRouteGroup).sort((groupA, groupB) => groupA.keyTs - groupB.keyTs);
   for (const entry of triggerList) {

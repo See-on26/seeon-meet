@@ -20,7 +20,6 @@ export const ROUTER_CALL_ROLE_MAP = { system: 'system', judge: 'judge', both: 's
 // 판정 뒤 단계는 생성·전달 단계의 걸러냄이라 평가에서 우회한다. 보고서에 그대로 적는다.
 export const BYPASSED_STAGE_LIST = [
   '무발화 게이트(슬라이드당·분당 1회)',
-  '지시 쿨다운(4초)',
   '간격·중복 억제',
   'VLM 의 NONE(특정 불가·이미 설명함)',
   '값 존재 검사',
