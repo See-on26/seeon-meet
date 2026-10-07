@@ -3,7 +3,7 @@ import assert from 'node:assert/strict';
 import { createRequire } from 'node:module';
 import {
   NarrationQueue, NARRATION_QUEUE_TTL_MS, QUEUE_DROP_REASON_MAP, NARRATION_PRIORITY_MAP, readNarrationPriority,
-  shouldInterrupt,
+  shouldInterrupt, SAME_PRIORITY_ORDER_MAP,
 } from '../src/renderer/core/audio-renderer/narration-queue.js';
 
 const require = createRequire(import.meta.url);
@@ -31,11 +31,17 @@ test('겹친 자동 해설은 페이지 전환·화자 > 무발화 > 발화 > �
   assert.deepEqual(takeTextList(queue), ['전환', '화자', '무발화', '발화', '지시']);
 });
 
-test('페이지 전환과 화자 식별은 같은 순위라 먼저 들어온 쪽부터 꺼낸다', () => {
+test('페이지 전환과 화자 식별은 같은 순위지만, 함께 기다리면 화자가 먼저 들어와도 전환을 먼저 꺼낸다', () => {
   const queue = new NarrationQueue({ now: createClock().now });
   queue.push({ text: '화자', narrationClass: 'speaker_identity' });
   queue.push({ text: '전환', narrationClass: 'page_transition' });
-  assert.deepEqual(takeTextList(queue), ['화자', '전환']);
+  assert.deepEqual(takeTextList(queue), ['전환', '화자']);
+  assert.equal(readNarrationPriority({ narrationClass: 'speaker_identity' }),
+    readNarrationPriority({ narrationClass: 'page_transition' }));
+});
+
+test('같은 순위 안의 순서는 페이지 전환 → 화자 식별이다', () => {
+  assert.ok(SAME_PRIORITY_ORDER_MAP.page_transition < SAME_PRIORITY_ORDER_MAP.speaker_identity);
 });
 
 test('질문 답은 어떤 자동 해설보다 먼저 꺼낸다', () => {

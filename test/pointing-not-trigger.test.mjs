@@ -46,7 +46,9 @@ test('이미 영역이 있는 후보는 덮어쓰지 않는다', () => {
 });
 
 test('발화 트리거는 화면 의존으로 통과한다', () => {
-  const verdict = judgeScreenDependency({ source: CANDIDATE_SOURCE_MAP.speech, utterance: '여기를 보시면' });
+  const verdict = judgeScreenDependency({
+    source: CANDIDATE_SOURCE_MAP.speech, candidateList: [{ type: 'demonstrative', phrase: '여기', start: 0, end: 2 }],
+  });
   assert.equal(verdict.isScreenDependent, true);
   assert.equal(verdict.reason, SCREEN_DEPENDENCY_REASON_MAP.speechTrigger);
   assert.equal(verdict.trigger, '여기');

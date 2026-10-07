@@ -25,7 +25,8 @@ import { StreamDelaySource } from '../core/audio-renderer/stream-delay-source.js
 import { NarrationScheduler } from '../core/audio-renderer/narration-scheduler.js';
 import { GapCandidateStore, resolveGapSearchFromMs } from '../core/audio-renderer/gap-candidate-store.js';
 import { isImmediateCaption, isAnchoredCaption, NarrationHoldGate } from '../core/audio-renderer/narration-entry.js';
-import { QUEUE_DROP_LABEL_MAP } from '../core/audio-renderer/narration-queue.js';
+import { QUEUE_DROP_LABEL_MAP, QUEUE_DROP_REASON_MAP } from '../core/audio-renderer/narration-queue.js';
+import { NarrationAudioPrefetcher } from '../core/audio-renderer/narration-audio-prefetcher.js';
 import { QuestionRecorder } from '../core/command/question-recorder.js';
 import { MeetMicGuard } from '../core/command/meet-mic-guard.js';
 import { MicQuestionController, MIC_PHASE_MAP } from '../core/command/mic-question-controller.js';
@@ -33,10 +34,12 @@ import { CaptionNarrator } from '../core/audio-renderer/caption-narrator.js';
 import { NarrationMixer } from '../core/audio-renderer/narration-mixer.js';
 import {
   TransitionOrderGate, LEADER_STATUS_MAP, resolveFollowerInsertMs,
+  PendingTransitionTracker, resolveAfterTransitionInsertMs,
 } from '../core/audio-renderer/transition-order-gate.js';
 
 import { AudioMeter } from '../core/trigger/audio-meter.js';
 import { AsrSegmenter } from '../core/trigger/asr-segmenter.js';
+import { SpeakerTimeline } from '../core/trigger/speaker-timeline.js';
 import {
   UtteranceBoundaryDetector, classifyUtteranceEnding, buildSegmentBoundaryList,
 } from '../core/trigger/utterance-boundary-detector.js';
@@ -67,6 +70,7 @@ const $ = (id) => document.getElementById(id);
 const captureSource = new MeetCaptureSession();
 
 const roiStore = new RoiStore({ isFullFrameFallback: false, isStabilized: true });
+const speakerTimeline = new SpeakerTimeline();
 
 const ROI_CHANGE_SUPPRESS_MS = 1500;
 const FRAME_ASPECT_TOLERANCE = 0.02;
@@ -114,7 +118,20 @@ function reportNarrationPlayStart(info) {
   });
 }
 
+// Orchestrator → TTS → 전달 Layer: TTS 는 Orchestrator 를 통과한 해설만 만든다. 재생 차례가 가까운 2개는 미리 만들어
+// 차례가 오면 바로 들리게 하고(NarrationAudioPrefetcher), 그보다 뒤는 앞 해설이 재생·버려질 때 차례로 만든다.
+async function synthesizeEntryAudio(entry) {
+  const result = await window.seeon.synthesizeNarration({ ts: entry.ts, text: entry.text, source: entry.source })
+    .catch(() => null);
+  const wavData = result?.isOk ? result.wavData : null;
+  if (!wavData) return null;
+  return wavData.buffer.slice(wavData.byteOffset, wavData.byteOffset + wavData.byteLength);
+}
+
+const narrationAudio = new NarrationAudioPrefetcher({ synthesize: synthesizeEntryAudio });
+
 const narrator = new CaptionNarrator({
+  prepareAudio: (entry) => narrationAudio.take(entry),
   getLiveVideo: getPlaybackVideo,
   onStatus: handleNarrationStatus,
   onDrop: handleNarrationDrop,
@@ -259,6 +276,7 @@ function startNarrationPlayer({ stream }) {
     narrationMixer = new NarrationMixer({
       onStatus: handleNarrationStatus, onDrop: handleNarrationDrop, isEntryEnabled: isNarrationEntryEnabled,
       onPlayStart: reportNarrationPlayStart,
+      prepareAudio: (entry) => narrationAudio.take(entry),
     });
     narrationMixer.start(stream);
 
@@ -383,8 +401,9 @@ function setPrepOverlay({ isVisible, remainingSec = 0 }) {
 
 function stopDelayBuffer() {
   stopDriftMonitor();
-  narrationScheduler?.reset();
+  const unplayedList = narrationScheduler?.reset() || [];
   narrationScheduler = null;
+  for (const item of unplayedList) reportUnplayedNarration({ entry: item.entry, reason: QUEUE_DROP_REASON_MAP.stopped });
   $('stBuffer').textContent = '–';
   setPrepOverlay({ isVisible: false });
   if (!delayBuffer) return;
@@ -509,6 +528,8 @@ window.seeon.onRoiUpdate((payload) => {
   latestMeetUrl = payload.url || '';
   latestMeetTileCount = payload.roiList.length;
   roiStore.submitViewportRoiList(payload);
+  // 화자 안내를 끄면 화자 판별을 하지 않는다. 꺼진 구간은 이름 없음으로 남겨 켠 뒤에 앞 화자가 이어 붙지 않게 한다.
+  speakerTimeline.record({ wallTs: Date.now(), name: isSpeakerTrackingOn() ? roiStore.getCurrentSpeakerName() : null });
   syncToggleAvailability();
 });
 buildModeButtons();
@@ -537,7 +558,11 @@ const slideRegistry = new SlideEmbeddingRegistry({});
 // 슬라이드 전환을 확정한 영상 시각. 체류 판정 후 생성하는 모드에서도 원 사건 시각을 잃지 않게 보관한다.
 const slideEventVideoTimeMap = new Map();
 const slideTransitionWallTsMap = new Map();
+// 선판정 모드는 체류 확정 전에 고지를 요청한다. 체류 미달로 취소되면 이 요청 시각으로 main 의 스크립트에서 그 전환을 뺀다.
+const slideTransitionRequestTsMap = new Map();
 const transitionOrderGate = new TransitionOrderGate();
+// 전환을 확정한 뒤 고지가 정해지기 전에 도착한 화자 안내는 그 고지 뒤에 들려준다(공동 2순위: 전환 → 화자).
+const pendingTransitions = new PendingTransitionTracker();
 
 const slideDwellGate = new SlideDwellGate({
   onSatisfied: ({ label, isRevisit }) => {
@@ -552,6 +577,13 @@ const slideDwellGate = new SlideDwellGate({
     if (!isSpeculativeMode()) requestPageTransitionNarration({ label, isRevisit });
   },
   onCancelled: ({ label, isRevisit }) => {
+    pendingTransitions.settle({ slideLabel: label, status: LEADER_STATUS_MAP.cancelled });
+    window.seeon.reportTransitionCancelled({
+      slideLabel: label,
+      requestTs: slideTransitionRequestTsMap.get(label) ?? null,
+      transitionTs: slideTransitionWallTsMap.get(label) ?? null,
+    });
+    slideTransitionRequestTsMap.delete(label);
     console.log(`[slide] 체류 미달 — 고지 취소 ${label}`);
     markDebug({
       stage: DEBUG_STAGE_MAP.slide, verdict: DEBUG_VERDICT_MAP.skip,
@@ -706,6 +738,7 @@ async function confirmSlideCandidate({ isFirst, imageData }) {
   }
 
   lastScreenTransitionAt = performance.now();
+  pendingTransitions.open({ slideLabel: decision.label });
   slideEventVideoTimeMap.set(decision.label, captureSource.videoTimeMs);
   slideTransitionWallTsMap.set(decision.label, Date.now());
   console.log(`[slide] ${isRevisit ? '재방문' : (isFirst ? '첫' : '새')} 슬라이드 ${decision.label} (거리=${distance} src=${source}) → 체류 ${DWELL_MS}ms 판정`);
@@ -721,10 +754,19 @@ async function confirmSlideCandidate({ isFirst, imageData }) {
   if (isSpeculativeMode()) requestPageTransitionNarration({ label: decision.label, isRevisit });
 }
 
+// 고지를 내지 않고 끝난 전환은 기다리는 화자 안내를 바로 풀어 준다.
+function releasePendingTransition({ slideLabel }) {
+  pendingTransitions.settle({ slideLabel, status: LEADER_STATUS_MAP.unscheduled });
+}
+
 async function requestPageTransitionNarration(decision) {
   const buffer = await captureFrameJpeg();
-  if (!buffer) return;
+  if (!buffer) {
+    releasePendingTransition({ slideLabel: decision.label });
+    return;
+  }
   const ts = Date.now();
+  slideTransitionRequestTsMap.set(decision.label, ts);
   showNotice(decision.isRevisit
     ? `이전 슬라이드 ${decision.label}로 복귀 — 고지 생성 중…`
     : `슬라이드 ${decision.label} 전환 — 화면 고지 생성 중…`);
@@ -745,12 +787,15 @@ async function requestPageTransitionNarration(decision) {
       reason: '어절 예산이 유형 하한 미달 → 드롭',
       detail: `슬라이드 ${decision.label} 모드=${getCurrentMode()} 하한=${wordBudget.minWordCount}어절`,
     });
+    releasePendingTransition({ slideLabel: decision.label });
     return;
   }
   const result = await window.seeon.sendPipelineFrame({
     ts, buffer, slideLabel: decision.label, wordBudget, isRevisit: Boolean(decision.isRevisit),
     eventVideoTimeMs: slideEventVideoTimeMap.get(decision.label) ?? captureSource.videoTimeMs,
   }).catch(() => null);
+  // 고지를 내보냈으면 캡션 도착(applyCaption)이 삽입 시각을 정하며 풀어 준다.
+  if (!result?.isEmitted) releasePendingTransition({ slideLabel: decision.label });
 }
 
 const SPEAKER_POLL_MS = 2500;
@@ -838,12 +883,23 @@ async function pollSpeakerIdentity() {
   }
 }
 
+// 화자 식별 기능(C15)이 켜져 있을 때만 화자를 판별한다(안내·스크립트 모두).
+function isSpeakerTrackingOn() {
+  return featureToggleStore.isOn(FEATURE_KEY_MAP.speakerIdentity);
+}
+
 function getSpeakerHint() {
-  if (!featureToggleStore.isOn(FEATURE_KEY_MAP.speakerIdentity)) return null;
+  if (!isSpeakerTrackingOn()) return null;
   const domName = roiStore.getCurrentSpeakerName();
   if (domName) return domName;
   const isFresh = performance.now() - lastResolvedSpeakerAt <= SPEAKER_HINT_TTL_MS;
   return lastResolvedSpeakerName && isFresh ? lastResolvedSpeakerName : null;
+}
+
+// 회의 스크립트는 발화마다 화자를 적는다. 조각 구간에 Meet 표시로 가장 오래 말한 사람, 없으면 지금 화자 힌트를 쓴다.
+function resolveSegmentSpeaker({ startTs, endTs }) {
+  if (!isSpeakerTrackingOn()) return null;
+  return speakerTimeline.resolveDominant({ startTs, endTs }) || getSpeakerHint();
 }
 
 const asrSegmenter = new AsrSegmenter({
@@ -851,7 +907,8 @@ const asrSegmenter = new AsrSegmenter({
     if (!isPipelineEnabled()) return;
 
     window.seeon.sendPipelineAudio({
-      startTs, endTs, buffer, speakerHint: getSpeakerHint(),
+      startTs, endTs, buffer, speakerHint: resolveSegmentSpeaker({ startTs, endTs }),
+      isSpeakerTracked: isSpeakerTrackingOn(),
     }).catch(() => {});
   },
   onError: (error) => console.warn('[pipeline] ASR 세그먼트 오류', error),
@@ -882,13 +939,13 @@ let lastDeixisDecidedAt = -Infinity;
 
 const candidateScheduler = new DeixisCandidateScheduler({ onDecide: runDeixisDecision, getLastSpeechWallTs });
 const deixisDetector = new DeixisDetector({
-  onDeixis: ({ text, trigger, captureTs, eventWallTs }) => {
+  onDeixis: ({ text, trigger, candidateList, captureTs, eventWallTs }) => {
     const { region, pointingOrderHint } = getPointingSequence();
     console.log(`[deixis] 🗣 발화 지시 "${trigger}" → look-ahead 대기`);
     const nowVideoTimeMs = captureSource.videoTimeMs;
     const nowTs = performance.now();
     candidateScheduler.submit({
-      source: CANDIDATE_SOURCE_MAP.speech, utterance: text, trigger, region, pointingOrderHint,
+      source: CANDIDATE_SOURCE_MAP.speech, utterance: text, trigger, candidateList, region, pointingOrderHint,
       captureTs: nowTs, videoTimeMs: nowVideoTimeMs,
       eventVideoTimeMs: wallToVideoTimeMs({ wallTs: eventWallTs, nowVideoTimeMs }) ?? nowVideoTimeMs,
       leadText: transcriptWindow.getOpenSentenceLead({ nowTs, sinceTs: lastDeixisDecidedAt }),
@@ -955,7 +1012,7 @@ const SCREEN_DEPENDENCY_LABEL_MAP = {
   [SCREEN_DEPENDENCY_REASON_MAP.unsupportedSource]: '발화가 아닌 출처 — 트리거로 쓰지 않는다',
 };
 
-async function runDeixisDecision({ source, utterance, triggerList, region, pointingOrderHint,
+async function runDeixisDecision({ source, utterance, triggerList, candidateList = [], region, pointingOrderHint,
   captureTs, videoTimeMs, eventVideoTimeMs = null,
   triggerUtterance = utterance, leadText = '', followText = '', isSentenceWaited = false }) {
   lastDeixisDecidedAt = performance.now();
@@ -993,7 +1050,7 @@ async function runDeixisDecision({ source, utterance, triggerList, region, point
       detail: `버린 발화 ${droppedCount}건 · 남은 맥락 ${tokenCount}토큰 (예산 ${CONTEXT_TOKEN_BUDGET})`,
     });
   }
-  const screenVerdict = judgeScreenDependency({ source, utterance: triggerUtterance });
+  const screenVerdict = judgeScreenDependency({ source, candidateList });
   if (!screenVerdict.isScreenDependent) {
     console.log(`[deixis] 화면 의존성 없음 → 스킵 label="${label}" (${screenVerdict.reason})`);
     markDebug({
@@ -1034,7 +1091,7 @@ async function runDeixisDecision({ source, utterance, triggerList, region, point
   const result = await window.seeon.sendPipelineDeixis({
     ts, buffer, utterance, recentTranscript, beforeTranscript: before, afterTranscript: after,
     hasPointingRegion: Boolean(region), pointingOrderHint, slideLabel: slideRegistry.currentLabel(),
-    wordBudgetMap, eventVideoTimeMs,
+    wordBudgetMap, eventVideoTimeMs, triggerCandidateList: candidateList,
   }).catch(() => null);
 
   const isNarrated = Boolean(result?.isOk && result.isGrounded);
@@ -1063,7 +1120,7 @@ function collectGapCandidateList({ segmentList, chunkStartTs, chunkEndTs }) {
   return boundaryList.length;
 }
 
-function handleAsrTranscript({ text, ts, endTs, segmentList = [] }) {
+function handleAsrTranscript({ text, ts, endTs, segmentList = [], triggerCandidateList = [] }) {
   const trimmed = (text || '').trim();
   if (trimmed) {
     markDebug({
@@ -1077,7 +1134,7 @@ function handleAsrTranscript({ text, ts, endTs, segmentList = [] }) {
     const { isDecided } = candidateScheduler.appendTranscript({ text: trimmed, endTs });
     if (!isDecided) {
       deixisDetector.handleTranscript({
-        text: trimmed, captureTs: endTs,
+        text: trimmed, candidateList: triggerCandidateList, captureTs: endTs,
         resolveEventWallTs: ({ trigger }) => resolveSpeechEndWallTs({
           chunkStartTs: ts, chunkEndTs: endTs, segmentList, trigger,
         }),
@@ -1466,39 +1523,49 @@ function isTransitionFollower(payload) {
     && Boolean(payload.slideLabel);
 }
 
+function isSpeakerCaption(payload) {
+  return payload.narrationClass === NARRATION_CLASS_MAP.speakerIdentity;
+}
+
 async function emitCaption(payload, { leaderHandle = null } = {}) {
   const isFollower = isTransitionFollower(payload);
+  const isSpeaker = isSpeakerCaption(payload);
+  if (isSpeaker && pendingTransitions.hasPending) {
+    markDebug({
+      stage: DEBUG_STAGE_MAP.queue, verdict: DEBUG_VERDICT_MAP.info,
+      narrationType: NARRATION_TYPE_MAP.speakerIdentity,
+      reason: '진행 중인 화면 전환 고지 뒤로 화자 안내를 미룸',
+      detail: `"${payload.text}"`,
+    });
+  }
+  const transitionLeaderList = isSpeaker ? await pendingTransitions.waitAll() : [];
   const leader = isFollower ? await transitionOrderGate.waitLeader({ slideLabel: payload.slideLabel }) : null;
   if (isFollower && leader.status === LEADER_STATUS_MAP.cancelled) {
-    markDebug({
-      stage: DEBUG_STAGE_MAP.slide, verdict: DEBUG_VERDICT_MAP.skip,
-      narrationType: NARRATION_TYPE_MAP.visualDescription,
-      reason: '전환 고지 취소 — 딸린 사진 묘사도 버림',
-      detail: `슬라이드 ${payload.slideLabel} "${payload.text}"`,
-    });
+    reportUnplayedNarration({ entry: toNarrationEntry(payload), reason: QUEUE_DROP_REASON_MAP.leaderCancelled });
     return;
   }
   const captionCaptureMs = handleCaption(payload);
-  if (!payload.wavData) {
-    leaderHandle?.settle({ status: LEADER_STATUS_MAP.unscheduled });
-    return;
-  }
+  // 소리는 아직 없다. 재생 차례가 가까우면 미리 만들고, 아니면 대기 줄이 고를 때 만든다(narrationAudio).
   const entry = {
-    wavArrayBuffer: payload.wavData.buffer.slice(
-      payload.wavData.byteOffset, payload.wavData.byteOffset + payload.wavData.byteLength),
-    narrationClass: payload.narrationClass, slideLabel: payload.slideLabel ?? null,
-    source: payload.source, text: payload.text, ts: payload.ts, eventTimeMs: captionCaptureMs,
+    ...toNarrationEntry(payload), eventTimeMs: captionCaptureMs,
   };
+  narrationAudio.register(entry);
   if (isImmediateCaption(payload)) {
     leaderHandle?.settle({ status: LEADER_STATUS_MAP.unscheduled });
     getNarrationPlayer()?.queueCaption({ ...entry, dueAt: performance.now() });
     return;
   }
-  const insertVideoTimeMs = isFollower
+  const ownInsertVideoTimeMs = isFollower
     ? resolveFollowerInsertMs({ eventVideoTimeMs: captionCaptureMs, leader })
     : isAnchoredCaption(payload) ? captionCaptureMs : await resolveInsertionTimeMs({ payload, captionCaptureMs });
+  const insertVideoTimeMs = isSpeaker
+    ? resolveAfterTransitionInsertMs({ insertVideoTimeMs: ownInsertVideoTimeMs, leaderList: transitionLeaderList })
+    : ownInsertVideoTimeMs;
   leaderHandle?.settle({ status: LEADER_STATUS_MAP.scheduled, insertVideoTimeMs });
-  if (insertVideoTimeMs === null) return;
+  if (insertVideoTimeMs === null) {
+    reportUnplayedNarration({ entry, reason: QUEUE_DROP_REASON_MAP.leaderCancelled });
+    return;
+  }
   scheduleNarration({ entry, captionCaptureMs: insertVideoTimeMs });
 }
 
@@ -1506,13 +1573,20 @@ function emitCaptionSafely(payload, { leaderHandle = null } = {}) {
   emitCaption(payload, { leaderHandle }).catch((error) => {
     leaderHandle?.settle({ status: LEADER_STATUS_MAP.unscheduled });
     console.warn('[caption] 발행 실패(무시):', error.message);
+    reportUnplayedNarration({ entry: toNarrationEntry(payload), reason: QUEUE_DROP_REASON_MAP.emitFailed });
   });
 }
 
 function applyCaption(payload) {
   const isTransition = payload.source === CAPTION_SOURCE_TRANSITION;
   if (!isTransition || !payload.slideLabel) { emitCaptionSafely(payload); return; }
-  const leaderHandle = transitionOrderGate.registerLeader({ slideLabel: payload.slideLabel });
+  const orderHandle = transitionOrderGate.registerLeader({ slideLabel: payload.slideLabel });
+  const leaderHandle = {
+    settle: (result) => {
+      orderHandle.settle(result);
+      pendingTransitions.settle({ slideLabel: payload.slideLabel, ...result });
+    },
+  };
   const state = slideDwellGate.getState({ label: payload.slideLabel });
   if (state === DWELL_STATE_MAP.waiting) {
     console.log(`[slide] 고지 보류 — 슬라이드 ${payload.slideLabel} 체류 판정 대기 중`);
@@ -1522,12 +1596,7 @@ function applyCaption(payload) {
     callback: (isSatisfied) => {
       if (isSatisfied) { emitCaptionSafely(payload, { leaderHandle }); return; }
       leaderHandle.settle({ status: LEADER_STATUS_MAP.cancelled });
-      markDebug({
-        stage: DEBUG_STAGE_MAP.slide, verdict: DEBUG_VERDICT_MAP.skip,
-        narrationType: NARRATION_TYPE_MAP.pageTransition,
-        reason: '체류 미달 — 재생 전 취소(선판정 후취소)',
-        detail: `슬라이드 ${payload.slideLabel} "${payload.text}"`,
-      });
+      reportUnplayedNarration({ entry: toNarrationEntry(payload), reason: QUEUE_DROP_REASON_MAP.dwellCancelled });
     },
   });
 }
@@ -1552,11 +1621,9 @@ function scheduleNarration({ entry, captionCaptureMs }) {
     const excessMs = delayBuffer.getExcessMs();
     if (isCaptionDroppable({ excessMs, dropThresholdMs: EXCESS_DROP_MS })) {
       console.log(`[delay] 캡션 드롭 — 누적 지연 ${Math.round(excessMs)}ms (상한 ${EXCESS_DROP_MS}ms)`);
-      markDebug({
-        stage: DEBUG_STAGE_MAP.session, verdict: DEBUG_VERDICT_MAP.skip,
-        reason: '누적 지연 상한 초과 — 캡션 드롭',
-        detail: `초과 ${Math.round(excessMs)}ms / 상한 ${EXCESS_DROP_MS}ms`
-          + ` · 모드=${getCurrentMode()} · 회수되면 다시 받는다`,
+      reportUnplayedNarration({
+        entry, reason: QUEUE_DROP_REASON_MAP.delayExceeded,
+        detailSuffix: ` · 초과 ${Math.round(excessMs)}ms / 상한 ${EXCESS_DROP_MS}ms · 모드=${getCurrentMode()}`,
       });
       return;
     }
@@ -1572,22 +1639,36 @@ function scheduleNarration({ entry, captionCaptureMs }) {
   narrationScheduler.schedule({ entry, captionCaptureMs });
 }
 
-// 재생 대기 줄에서 버려지거나 질문 답에 끊긴 해설. main 이 중복 억제·재설명 금지 기록을 되돌리게 알린다.
-function handleNarrationDrop({ entry, reason, waitedMs = null }) {
+function toNarrationEntry(payload) {
+  return {
+    narrationClass: payload.narrationClass, slideLabel: payload.slideLabel ?? null,
+    source: payload.source, text: payload.text, ts: payload.ts,
+  };
+}
+
+// 사용자가 듣지 못한 해설. main 은 해설을 내보낼 때 이미 "말했음"(간격 억제·중복·재설명 금지·맥락 저장소)으로 적어 두므로,
+// 재생하지 못하고 버리는 모든 경로는 여기로 알려 그 기록을 되돌린다. 미리 만들던 소리 자리도 다음 해설에 넘긴다.
+function reportUnplayedNarration({ entry, reason, waitedMs = null, detailSuffix = '' }) {
+  narrationAudio.discard(entry);
   window.seeon.reportNarrationDropped({
     ts: entry.ts, text: entry.text, slideLabel: entry.slideLabel, source: entry.source,
     narrationClass: entry.narrationClass, reason,
   });
   const label = QUEUE_DROP_LABEL_MAP[reason] || reason;
   const waitedText = Number.isFinite(waitedMs) ? ` · 대기 ${(waitedMs / 1000).toFixed(1)}초` : '';
-  console.log(`[queue] ${label} [${entry.narrationClass}] "${entry.text}"${waitedText}`);
+  console.log(`[queue] ${label} [${entry.narrationClass}] "${entry.text}"${waitedText}${detailSuffix}`);
   markDebug({
     stage: DEBUG_STAGE_MAP.queue, verdict: DEBUG_VERDICT_MAP.skip,
     narrationType: entry.source || null,
     reason: label,
     detail: `"${entry.text}" · 분류=${entry.narrationClass}`
-      + `${entry.slideLabel !== null ? ` · 슬라이드 ${entry.slideLabel}` : ''}${waitedText}`,
+      + `${entry.slideLabel !== null && entry.slideLabel !== undefined ? ` · 슬라이드 ${entry.slideLabel}` : ''}${waitedText}${detailSuffix}`,
   });
+}
+
+// 재생 대기 줄에서 버려지거나 질문 답에 끊긴 해설.
+function handleNarrationDrop({ entry, reason, waitedMs = null }) {
+  reportUnplayedNarration({ entry, reason, waitedMs });
 }
 
 function isNarrationEchoWindow() {
@@ -1761,7 +1842,9 @@ async function attemptStartExperiment() {
     slideRegistry.reset();
     slideEventVideoTimeMap.clear();
     slideTransitionWallTsMap.clear();
+    slideTransitionRequestTsMap.clear();
     transitionOrderGate.reset();
+    pendingTransitions.reset();
     slideDwellGate.reset();
     isConfirmingSlide = false;
     hasWarnedLocalEmbedding = false;
@@ -1815,7 +1898,10 @@ function stopExperiment() {
     ['지시 탐지기', () => deixisDetector.reset()],
     ['후보 스케줄러', () => candidateScheduler.reset()],
     ['마이크 질문', () => micQuestionController.cancel()],
-    ['해설 보류 게이트', () => narrationGate.clear()],
+    ['해설 보류 게이트', () => {
+      for (const entry of narrationGate.clear()) reportUnplayedNarration({ entry, reason: QUEUE_DROP_REASON_MAP.stopped });
+      narrationAudio.reset();
+    }],
     ['인접 발화 창', () => transcriptWindow.reset()],
     ['삽입 후보 틈', () => gapCandidateStore.reset()],
     ['프레임 샘플러', () => {
@@ -1828,10 +1914,11 @@ function stopExperiment() {
     ['슬라이드 히스토그램 게이트', () => histogramGate.reset()],
     ['슬라이드 레지스트리', () => {
       slideRegistry.reset(); slideEventVideoTimeMap.clear(); slideTransitionWallTsMap.clear(); transitionOrderGate.reset();
+      slideTransitionRequestTsMap.clear(); pendingTransitions.reset();
     }],
     ['전환 체류 게이트', () => slideDwellGate.reset()],
     ['ROI 스토어', () => roiStore.reset()],
-    ['발화자 힌트', () => { lastResolvedSpeakerName = ''; lastResolvedSpeakerAt = 0; }],
+    ['발화자 힌트', () => { lastResolvedSpeakerName = ''; lastResolvedSpeakerAt = 0; speakerTimeline.reset(); }],
     ['지연 버퍼', () => stopDelayBuffer()],
     ['캡처 세션', () => captureSource.stop()],
     ['PiP', () => { if (document.pictureInPictureElement) document.exitPictureInPicture().catch(() => {}); }],

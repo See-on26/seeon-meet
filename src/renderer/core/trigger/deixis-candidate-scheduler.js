@@ -38,15 +38,16 @@ export class DeixisCandidateScheduler {
 
   // leadText 는 트리거 조각 앞에서 문장이 안 끝난 채 이어지던 조각이다.
   // chunkEndWallTs 는 트리거 조각 녹음이 끝난 벽시계 시각이다.
-  submit({ source, utterance = '', trigger = '', region = null, pointingOrderHint = '',
+  // candidateList 는 main 트리거가 뽑은 후보 구다. 대기 중에 들어온 조각의 후보도 모아 한 번에 판단을 받는다.
+  submit({ source, utterance = '', trigger = '', candidateList = [], region = null, pointingOrderHint = '',
     captureTs, videoTimeMs, eventVideoTimeMs = null, leadText = '', chunkEndWallTs = null }) {
     if (this.pending) {
-      this.absorb({ utterance, trigger, region, pointingOrderHint });
+      this.absorb({ utterance, trigger, candidateList, region, pointingOrderHint });
       return;
     }
     if (captureTs - this.lastDecidedAt < this.cooldownMs) return;
     this.pending = {
-      source, utterance, triggerList: trigger ? [trigger] : [],
+      source, utterance, triggerList: trigger ? [trigger] : [], candidateList: [...candidateList],
       region, pointingOrderHint, captureTs, videoTimeMs, eventVideoTimeMs,
       leadText, chunkEndWallTs, followList: [], isSentenceWaited: false,
     };
@@ -95,9 +96,13 @@ export class DeixisCandidateScheduler {
     this.timerHandle = this.setTimer(() => this.fire(), this.sentenceWaitMs);
   }
 
-  absorb({ utterance, trigger, region, pointingOrderHint }) {
+  absorb({ utterance, trigger, candidateList = [], region, pointingOrderHint }) {
     if (!this.pending.utterance && utterance) this.pending.utterance = utterance;
     if (trigger && !this.pending.triggerList.includes(trigger)) this.pending.triggerList.push(trigger);
+    for (const candidate of candidateList) {
+      const isKnown = this.pending.candidateList.some((known) => known.type === candidate.type && known.phrase === candidate.phrase);
+      if (!isKnown) this.pending.candidateList.push(candidate);
+    }
     if (!this.pending.region && region) this.pending.region = region;
     if (!this.pending.pointingOrderHint && pointingOrderHint) this.pending.pointingOrderHint = pointingOrderHint;
   }

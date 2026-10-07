@@ -1,0 +1,22 @@
+[Unit]
+Description=seeon JUDGE (vLLM Qwen3.5-9B, 탐지 판정 경량 LLM)
+After=network-online.target seeon-vlm.service
+Wants=network-online.target
+
+[Service]
+User=@GPU_USER@
+Environment=HOME=/home/@GPU_USER@
+Environment=HF_HOME=/data/hf-cache
+Environment=CUDA_HOME=/data/venv-vllm-35/lib/python3.12/site-packages/nvidia/cu13
+Environment=PATH=/data/venv-vllm-35/lib/python3.12/site-packages/nvidia/cu13/bin:/data/venv-vllm-35/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin
+Environment=VLLM_USE_FLASHINFER_SAMPLER=0
+WorkingDirectory=/home/@GPU_USER@/gpu-server
+# 두 vLLM 이 동시에 메모리를 재면 서로의 예약을 못 봐 기동이 실패한다. VLM(8801)이 뜬 뒤에 올린다(최대 10분 대기).
+ExecStartPre=/bin/bash -c 'for i in $(seq 1 120); do curl -sf http://127.0.0.1:8801/v1/models >/dev/null && exit 0; sleep 5; done; exit 0'
+TimeoutStartSec=900
+ExecStart=/data/venv-vllm-35/bin/vllm serve Qwen/Qwen3.5-9B --served-model-name qwen3.5-9b --host 127.0.0.1 --port 8805 --max-model-len 8192 --max-num-batched-tokens 2096 --limit-mm-per-prompt '{"image":0,"video":0}' --gpu-memory-utilization 0.30 --reasoning-parser qwen3
+Restart=always
+RestartSec=5
+
+[Install]
+WantedBy=multi-user.target

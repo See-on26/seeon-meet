@@ -1,5 +1,5 @@
 import { SIC_CATCHUP_MIN_RATE, SIC_CATCHUP_MAX_RATE, SIC_CATCHUP_RATE_PER_SEC } from '../constants.js';
-import { NarrationQueue, shouldInterrupt, QUEUE_DROP_REASON_MAP } from './narration-queue.js';
+import { NarrationQueue, shouldInterrupt, QUEUE_DROP_REASON_MAP, readEntryAudio } from './narration-queue.js';
 import { isImmediateCaption } from './narration-entry.js';
 import {
   computeGainFromDecibel, createSidePanner, DEFAULT_DUCK_DB, NARRATION_PAN_X, buildPlayStartInfo,
@@ -14,8 +14,9 @@ export function computeCatchupRate({ pausedSec, minRate, maxRate, ratePerSec }) 
 export class CaptionNarrator {
   constructor({ getLiveVideo, onStatus = null, onDrop = null, onPlayStart = null, getRateRange = null, isCatchupDelegated = null,
     createAudioContext = () => new AudioContext(), now = () => performance.now(), wallNow = () => Date.now(),
-    isEntryEnabled = () => true }) {
+    isEntryEnabled = () => true, prepareAudio = readEntryAudio }) {
     this.getLiveVideo = getLiveVideo;
+    this.prepareAudio = prepareAudio;
     this.onStatus = onStatus || (() => {});
     this.onDrop = onDrop || (() => {});
     this.onPlayStart = onPlayStart || (() => {});
@@ -70,10 +71,14 @@ export class CaptionNarrator {
   stop() {
     this._cancelCatchup();
     this.playToken += 1;
+    // 소리가 나기 전(합성 중)에 멈춘 해설과 대기 줄에 남은 해설은 사용자가 듣지 못했다.
+    const unplayedList = [
+      ...(this.currentEntry && !this.currentSource ? [this.currentEntry] : []), ...this.queue.drain(),
+    ];
     try { this.currentSource?.stop(); } catch {  }
     this.currentSource = null;
     this.currentEntry = null;
-    this.queue.clear();
+    for (const entry of unplayedList) this.onDrop({ entry, reason: QUEUE_DROP_REASON_MAP.stopped });
     this._closePause();
     this.isInserting = false;
     this.isOverlaying = false;
@@ -97,7 +102,11 @@ export class CaptionNarrator {
 
   // 여러 해설을 한꺼번에 넣은 뒤 한 번만 꺼낸다. 하나씩 넣으면 첫 항목이 순위 비교 없이 바로 재생된다.
   queueCaptionList(entryList) {
-    if (!this.audioContext || !entryList.length) return;
+    if (!entryList.length) return;
+    if (!this.audioContext) {
+      for (const entry of entryList) this.onDrop({ entry, reason: QUEUE_DROP_REASON_MAP.stopped });
+      return;
+    }
     for (const entry of entryList) this.queue.push(entry);
     // 꺼진 분류의 질문 답은 어차피 버려지므로 재생 중인 해설을 끊지 않는다.
     const isInterrupting = entryList.some((entry) => this.queue.isEntryEnabled(entry)
@@ -127,7 +136,16 @@ export class CaptionNarrator {
     this.currentEntry = entry;
     try {
       if (this.audioContext.state === 'suspended') await this.audioContext.resume();
-      const audioBuffer = await this.audioContext.decodeAudioData(entry.wavArrayBuffer);
+      // 교차 모드는 이미 회의를 멈춘 뒤라 합성하는 동안 회의가 해설 자리를 지나가지 않는다.
+      const wavArrayBuffer = await this.prepareAudio(entry);
+      if (token !== this.playToken) return;
+      if (!wavArrayBuffer) {
+        this.onDrop({ entry, reason: QUEUE_DROP_REASON_MAP.ttsFailed });
+        this.currentNarrationSec = 0;
+        this._onNarrationEnded();
+        return;
+      }
+      const audioBuffer = await this.audioContext.decodeAudioData(wavArrayBuffer);
       if (token !== this.playToken) return;
       this.currentNarrationSec = audioBuffer.duration || 0;
       const source = this.audioContext.createBufferSource();

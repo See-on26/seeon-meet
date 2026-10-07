@@ -79,3 +79,18 @@ test('reset 이전에 받은 표로 반납하면 무시한다', () => {
   gate.release({ ticket: current.ticket, slideLabel: '2', isEmitted: false });
   assert.equal(gate.tryAcquire({ slideLabel: '1' }).isAllowed, true);
 });
+
+test('듣지 못한 무발화 해설은 되돌려 그 슬라이드에서 다시 낼 수 있다(분당 상한도 앞 기록 기준으로)', () => {
+  let nowMs = 0;
+  const gate = createSilenceNarrationGate({ now: () => nowMs });
+  const first = gate.tryAcquire({ slideLabel: '1' });
+  gate.release({ ticket: first.ticket, slideLabel: '1', isEmitted: true });
+  nowMs = 70000;
+  const second = gate.tryAcquire({ slideLabel: '2' });
+  gate.release({ ticket: second.ticket, slideLabel: '2', isEmitted: true });
+  nowMs = 80000;
+  assert.equal(gate.tryAcquire({ slideLabel: '2' }).isAllowed, false);
+  assert.equal(gate.revert({ slideLabel: '2' }), true);
+  assert.equal(gate.revert({ slideLabel: '9' }), false);
+  assert.equal(gate.tryAcquire({ slideLabel: '2' }).isAllowed, true);
+});

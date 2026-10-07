@@ -2,15 +2,22 @@ import { test, afterEach, mock } from 'node:test';
 import assert from 'node:assert/strict';
 import { createRequire } from 'node:module';
 import path from 'node:path';
+import fs from 'node:fs';
 
 const require = createRequire(import.meta.url);
 const loadBuilderConfig = require('../electron-builder.config.js');
 const { createBuilderConfig, BUILD_ENV_FILE_KEY, BUILD_TUNNEL_KEY_KEY } = loadBuilderConfig;
 const { PACKAGED_ENV_FILE_NAME } = require('../src/main/env.js');
 const { PACKAGED_KEY_FILE_NAME } = require('../src/main/gpu-tunnel/tunnel-config.js');
+const {
+  KIWI_MODEL_FILE_LIST, PACKAGED_KIWI_MODEL_DIR_NAME, DEV_KIWI_MODEL_DIR,
+} = require('../src/main/caption-pipeline/trigger/kiwi-model.js');
 
 const ENV_FILE_PATH = '/secure/seeon/.env';
 const TUNNEL_KEY_PATH = '/secure/keystore/seeon-app-tunnel';
+const KIWI_MODEL_DIR = '/build/vendor/kiwi-model';
+const KIWI_MODEL_PATH_LIST = KIWI_MODEL_FILE_LIST.map((name) => path.join(KIWI_MODEL_DIR, name));
+const KIWI_RESOURCE = { from: KIWI_MODEL_DIR, to: PACKAGED_KIWI_MODEL_DIR_NAME, filter: KIWI_MODEL_FILE_LIST };
 
 afterEach(() => { mock.restoreAll(); });
 
@@ -25,7 +32,10 @@ function makeWarnRecorder() {
 
 function buildWith({ env, existingPathList = [ENV_FILE_PATH, TUNNEL_KEY_PATH] }) {
   const recorder = makeWarnRecorder();
-  const config = createBuilderConfig({ env, fileExists: fileExistsAmong(existingPathList), warn: recorder.warn });
+  const config = createBuilderConfig({
+    env, fileExists: fileExistsAmong([...existingPathList, ...KIWI_MODEL_PATH_LIST]), warn: recorder.warn,
+    kiwiModelDir: KIWI_MODEL_DIR,
+  });
   return { config, warnMessageList: recorder.messageList };
 }
 
@@ -41,13 +51,14 @@ test('두 env 가 있으면 .env 와 터널 키를 앱이 찾는 resources 이�
   assert.deepEqual(config.extraResources, [
     { from: ENV_FILE_PATH, to: PACKAGED_ENV_FILE_NAME },
     { from: TUNNEL_KEY_PATH, to: PACKAGED_KEY_FILE_NAME },
+    KIWI_RESOURCE,
   ]);
   assert.deepEqual(warnMessageList, []);
 });
 
 test('env 가 없으면 그 파일을 빼고 만들며, 무엇이 빠지는지 경고한다', () => {
   const { config, warnMessageList } = buildWith({ env: {} });
-  assert.deepEqual(config.extraResources, []);
+  assert.deepEqual(config.extraResources, [KIWI_RESOURCE]);
   assert.equal(warnMessageList.length, 2);
   assert.match(warnMessageList[0], /SEEON_BUILD_ENV_FILE/);
   assert.match(warnMessageList[1], /SEEON_BUILD_TUNNEL_KEY/);
@@ -55,7 +66,7 @@ test('env 가 없으면 그 파일을 빼고 만들며, 무엇이 빠지는지 �
 
 test('env 하나만 있으면 그 파일만 넣고 나머지 하나만 경고한다', () => {
   const { config, warnMessageList } = buildWith({ env: { SEEON_BUILD_TUNNEL_KEY: TUNNEL_KEY_PATH } });
-  assert.deepEqual(config.extraResources, [{ from: TUNNEL_KEY_PATH, to: PACKAGED_KEY_FILE_NAME }]);
+  assert.deepEqual(config.extraResources, [{ from: TUNNEL_KEY_PATH, to: PACKAGED_KEY_FILE_NAME }, KIWI_RESOURCE]);
   assert.equal(warnMessageList.length, 1);
   assert.match(warnMessageList[0], /SEEON_BUILD_ENV_FILE/);
 });
@@ -63,7 +74,7 @@ test('env 하나만 있으면 그 파일만 넣고 나머지 하나만 경고한
 test('env 가 상대 경로면 빌드를 실행한 폴더 기준 절대 경로로 넣는다', () => {
   const absolutePath = path.resolve('keys/app-key');
   const { config } = buildWith({ env: { SEEON_BUILD_TUNNEL_KEY: 'keys/app-key' }, existingPathList: [absolutePath] });
-  assert.deepEqual(config.extraResources, [{ from: absolutePath, to: PACKAGED_KEY_FILE_NAME }]);
+  assert.deepEqual(config.extraResources, [{ from: absolutePath, to: PACKAGED_KEY_FILE_NAME }, KIWI_RESOURCE]);
 });
 
 test('env 에 적은 파일이 없으면 비밀이 빠진 설치 파일을 만들지 않고 멈춘다', () => {
@@ -108,12 +119,26 @@ test('electron-builder 가 부르는 기본 내보내기는 process.env 로 설�
   delete process.env.SEEON_BUILD_ENV_FILE;
   delete process.env.SEEON_BUILD_TUNNEL_KEY;
   const warn = mock.method(console, 'warn', () => {});
+  const originalExistsSync = fs.existsSync;
+  mock.method(fs, 'existsSync', (filePath) => String(filePath).startsWith(DEV_KIWI_MODEL_DIR) || originalExistsSync(filePath));
   try {
     const config = loadBuilderConfig({ packageKey: 'build', configFilename: 'electron-builder', projectDir: '.' });
-    assert.deepEqual(config.extraResources, []);
+    assert.deepEqual(config.extraResources, [{ from: DEV_KIWI_MODEL_DIR, to: PACKAGED_KIWI_MODEL_DIR_NAME, filter: KIWI_MODEL_FILE_LIST }]);
     assert.equal(warn.mock.callCount(), 2);
   } finally {
     if (savedEnv.envFile !== undefined) process.env.SEEON_BUILD_ENV_FILE = savedEnv.envFile;
     if (savedEnv.tunnelKey !== undefined) process.env.SEEON_BUILD_TUNNEL_KEY = savedEnv.tunnelKey;
   }
+});
+
+test('Kiwi 모델이 없으면 한국어 트리거가 대체 규칙으로 떨어진 설치 파일을 만들지 않고 멈춘다', () => {
+  assert.throws(
+    () => createBuilderConfig({ env: {}, fileExists: () => false, warn: () => {}, kiwiModelDir: KIWI_MODEL_DIR }),
+    /setup:kiwi/,
+  );
+});
+
+test('Kiwi wasm 은 asar 밖에 풀어 둔다', () => {
+  const { config } = buildWith({ env: {} });
+  assert.deepEqual(config.asarUnpack, ['node_modules/kiwi-nlp/dist/*.wasm']);
 });

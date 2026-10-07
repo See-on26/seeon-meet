@@ -113,13 +113,14 @@ test('키 경로: ~/ 로 시작하면 홈 디렉터리로 바꾼다', () => {
   assert.equal(config.keyPath, '/Users/tester/keystore/app-key');
 });
 
-test('전달 포트: 기본 파이프라인 설정이면 8801·8802·8803·8804 (TTS 두 주소는 하나로)', () => {
+test('전달 포트: 기본 파이프라인 설정이면 8801·8802·8803·8804·8805 (TTS 두 주소는 하나로)', () => {
   const forwardList = buildForwardList({ pipelineConfig: readPipelineConfig({}) });
   assert.deepEqual(forwardList, [
     { localPort: 8801, remotePort: 8801 },
     { localPort: 8802, remotePort: 8802 },
     { localPort: 8803, remotePort: 8803 },
     { localPort: 8804, remotePort: 8804 },
+    { localPort: 8805, remotePort: 8805 },
   ]);
 });
 

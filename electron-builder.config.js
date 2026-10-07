@@ -2,6 +2,9 @@ const fs = require('fs');
 const path = require('path');
 const { PACKAGED_ENV_FILE_NAME } = require('./src/main/env');
 const { PACKAGED_KEY_FILE_NAME } = require('./src/main/gpu-tunnel/tunnel-config');
+const {
+  KIWI_MODEL_FILE_LIST, PACKAGED_KIWI_MODEL_DIR_NAME, DEV_KIWI_MODEL_DIR,
+} = require('./src/main/caption-pipeline/trigger/kiwi-model');
 
 const PRODUCT_NAME = 'SEEON';
 
@@ -20,6 +23,15 @@ const NATIVE_BINARY_EXCLUDE_LIST = [
   '!node_modules/ssh2/lib/protocol/crypto/build/**',
 ];
 
+// 한국어 트리거의 Kiwi 모델. npm run setup:kiwi(dist 전에 자동)가 받는다. 없으면 한국어 트리거가 대체 규칙으로 떨어지므로 만들지 않고 멈춘다.
+function buildKiwiModelResource({ fileExists, modelDir = DEV_KIWI_MODEL_DIR }) {
+  const missingList = KIWI_MODEL_FILE_LIST.filter((name) => !fileExists(path.join(modelDir, name)));
+  if (missingList.length) {
+    throw new Error(`[dist] Kiwi 모델이 없습니다(${missingList.join(', ')}) — npm run setup:kiwi 를 먼저 실행하세요`);
+  }
+  return { from: modelDir, to: PACKAGED_KIWI_MODEL_DIR_NAME, filter: KIWI_MODEL_FILE_LIST };
+}
+
 // 비밀 파일 내용과 경로는 로그에 남기지 않는다. env 를 적었는데 파일이 없으면 비밀 빠진 설치 파일을 만들지 않고 멈춘다.
 function buildSecretResourceList({ env, fileExists, warn }) {
   const resourceList = [];
@@ -35,7 +47,9 @@ function buildSecretResourceList({ env, fileExists, warn }) {
   return resourceList;
 }
 
-function createBuilderConfig({ env = process.env, fileExists = fs.existsSync, warn = console.warn } = {}) {
+function createBuilderConfig({
+  env = process.env, fileExists = fs.existsSync, warn = console.warn, kiwiModelDir = DEV_KIWI_MODEL_DIR,
+} = {}) {
   return {
     appId: 'kr.seeon.meet',
     productName: PRODUCT_NAME,
@@ -45,7 +59,12 @@ function createBuilderConfig({ env = process.env, fileExists = fs.existsSync, wa
     directories: { output: 'dist', buildResources: 'build' },
     files: ['src/**/*', 'package.json', ...NATIVE_BINARY_EXCLUDE_LIST],
     npmRebuild: false,
-    extraResources: buildSecretResourceList({ env, fileExists, warn }),
+    // Kiwi wasm 은 asar 밖에 풀어 두고 읽는다(src/main/caption-pipeline/trigger/kiwi-tokenizer.js).
+    asarUnpack: ['node_modules/kiwi-nlp/dist/*.wasm'],
+    extraResources: [
+      ...buildSecretResourceList({ env, fileExists, warn }),
+      buildKiwiModelResource({ fileExists, modelDir: kiwiModelDir }),
+    ],
     win: {
       target: [{ target: 'nsis', arch: ['x64'] }],
       icon: 'build/icon.png',

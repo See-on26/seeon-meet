@@ -21,6 +21,11 @@ const SLIDE_TEXT_PROMPT_MARKER = '그대로 옮겨 적어라';
 const MOCK_SLIDE_TEXT = '2분기 매출 요약\n2분기 매출 | 120억 원\n전년 동기 대비 | 15% 성장';
 
 const SLIDE_RECAPTION_PROMPT_MARKER = '요약본의 재료';
+// 탐지 판단 LLM(통합 라우터). 목 서버는 후보를 모두 공백(O)으로 판단해 해설 생성 경로를 끝까지 태운다.
+const ROUTER_JUDGE_PROMPT_MARKER = '판단(JSON 한 줄)';
+const MOCK_ROUTER_JUDGE = {
+  judgeList: [1, 2, 3, 4, 5].map((id) => ({ id, gap: 'O', reason: '목 서버 판단' })),
+};
 const MOCK_SLIDE_RECAPTION = {
   title: '2분기 매출 요약',
   bodyText: '분기별 매출 추이를 담은 표가 있다. 2분기 매출은 120억 원이고 전년 동기 대비 15% 성장했다.',
@@ -74,20 +79,26 @@ function computeMockEmbedding(jpegBuffer) {
   return histogram.map((value) => value / norm);
 }
 
-async function startMockServerList({ vlmPort = 8801, asrPort = 8802, ttsPort = 8803, embedPort = 8804 } = {}) {
-  const vlmServer = http.createServer(async (request, response) => {
+async function startMockServerList({
+  vlmPort = 8801, asrPort = 8802, ttsPort = 8803, embedPort = 8804, judgePort = 8805,
+} = {}) {
+  // 판정 LLM(8805)은 VLM 과 같은 처리기로 흉내 낸다. 판정 답을 못 읽으면 앱은 판정 실패로 처리한다.
+  const handleChatCompletion = async (request, response) => {
     const body = await collectBody(request);
 
     let content;
 
-    if (body.includes(SLIDE_RECAPTION_PROMPT_MARKER)) content = JSON.stringify(MOCK_SLIDE_RECAPTION);
+    if (body.includes(ROUTER_JUDGE_PROMPT_MARKER)) content = JSON.stringify(MOCK_ROUTER_JUDGE);
+    else if (body.includes(SLIDE_RECAPTION_PROMPT_MARKER)) content = JSON.stringify(MOCK_SLIDE_RECAPTION);
     else if (body.includes(SLIDE_TEXT_PROMPT_MARKER)) content = MOCK_SLIDE_TEXT;
     else if (body.includes(GROUNDING_PROMPT_MARKER)) content = MOCK_GROUNDING_CAPTION;
     else if (body.includes(PAGE_TRANSITION_PROMPT_MARKER)) content = JSON.stringify(MOCK_PAGE_TRANSITION);
     else content = JSON.stringify(MOCK_FACT_SHEET);
     response.writeHead(200, { 'content-type': 'application/json' });
     response.end(JSON.stringify({ choices: [{ message: { content } }] }));
-  });
+  };
+  const vlmServer = http.createServer(handleChatCompletion);
+  const judgeServer = http.createServer(handleChatCompletion);
   const asrServer = http.createServer(async (request, response) => {
     await collectBody(request);
     const text = MOCK_TRANSCRIPT_LIST[mockTranscriptIndex % MOCK_TRANSCRIPT_LIST.length];
@@ -119,6 +130,7 @@ async function startMockServerList({ vlmPort = 8801, asrPort = 8802, ttsPort = 8
 
   const serverList = [
     [vlmServer, vlmPort], [asrServer, asrPort], [ttsServer, ttsPort], [embedServer, embedPort],
+    [judgeServer, judgePort],
   ];
   await Promise.all(serverList.map(([server, port]) =>
     new Promise((resolve) => server.listen(port, '127.0.0.1', resolve))));
@@ -133,6 +145,6 @@ module.exports = { startMockServerList, createBeepWav };
 
 if (require.main === module) {
   startMockServerList({}).then(() => {
-    console.log('[mock] vlm:8801 asr:8802 tts:8803 embed:8804 대기 중');
+    console.log('[mock] vlm:8801 asr:8802 tts:8803 embed:8804 judge:8805 대기 중');
   });
 }

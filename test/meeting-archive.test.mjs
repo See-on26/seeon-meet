@@ -106,3 +106,20 @@ test('회의 제목은 앞쪽 슬라이드 제목(라벨 제목, 없으면 화�
   assert.equal(pickMeetingTitle({ snapshot: { slideList: [] } }), '');
   assert.equal(pickMeetingTitle({ snapshot: null }), '');
 });
+
+test('회의 후 처리에서 스크립트만 바꿔 쓰고 회의 정보는 그대로 둔다', async () => {
+  const { rootDir, archive } = await makeArchive();
+  const meetingDir = await archive.saveScript({
+    sessionId: 's1', startedAt, endedAt: startedAt + 60_000, title: '분기 매출', slideCount: 2, utteranceCount: 3,
+    scriptText: '[00:01] 화자 미상: 안녕하세요',
+  });
+  const replacedDir = await archive.replaceScript({
+    sessionId: 's1', startedAt, scriptText: '[00:00] ── 표지 ──\n[00:01] 화자 미상: 안녕하세요',
+  });
+  assert.equal(replacedDir, meetingDir);
+  assert.equal(await readFile(path.join(meetingDir, ARCHIVE_FILE_NAME_MAP.script), 'utf8'),
+    '[00:00] ── 표지 ──\n[00:01] 화자 미상: 안녕하세요');
+  const meta = JSON.parse(await readFile(path.join(meetingDir, ARCHIVE_FILE_NAME_MAP.meta), 'utf8'));
+  assert.equal(meta.title, '분기 매출');
+  await rm(rootDir, { recursive: true, force: true });
+});
