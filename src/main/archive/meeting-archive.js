@@ -99,6 +99,13 @@ function createMeetingArchive({ rootDir }) {
     return meetingDir;
   }
 
+  // 회의 후 처리에서 화면 줄을 채운 스크립트로 바꿔 쓴다. 메타는 회의 종료 때 쓴 것을 그대로 둔다.
+  async function replaceScript({ sessionId, startedAt, scriptText }) {
+    const meetingDir = await ensureMeetingDir({ sessionId, startedAt });
+    await fs.promises.writeFile(path.join(meetingDir, ARCHIVE_FILE_NAME_MAP.script), scriptText, 'utf8');
+    return meetingDir;
+  }
+
   async function saveSummary({ sessionId, startedAt, summaryText, audioFilePath = null }) {
     const meetingDir = await ensureMeetingDir({ sessionId, startedAt });
     await fs.promises.writeFile(path.join(meetingDir, ARCHIVE_FILE_NAME_MAP.summary), summaryText, 'utf8');
@@ -142,7 +149,7 @@ function createMeetingArchive({ rootDir }) {
     };
   }
 
-  return { rootDir, saveScript, saveSummary, list, read };
+  return { rootDir, saveScript, replaceScript, saveSummary, list, read };
 }
 
 module.exports = {

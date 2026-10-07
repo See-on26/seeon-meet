@@ -11,20 +11,20 @@ const scale = { type: 'visual_description', subKind: 'scale', anchor: '훨씬 �
 const deixis = { type: 'deixis', subKind: 'simple', anchor: '이거', ts: 1 };
 const valueToMeaning = { type: 'interpretation', subKind: 'value_to_meaning', anchor: '30%', ts: 1 };
 
-test('척도 보류(기본)면 척도 후보를 빼고, 지시 후보가 흡수되지 않고 남는다', () => {
-  const { selected, excludedList } = selectGeneratableCandidate({ candidateList: [scale, deixis] });
+test('척도를 끄면 척도 후보를 빼고, 지시 후보가 흡수되지 않고 남는다', () => {
+  const { selected, excludedList } = selectGeneratableCandidate({ candidateList: [scale, deixis], isScaleEnabled: false });
   assert.equal(selected.type, 'deixis');
   assert.deepEqual(excludedList, [scale]);
 });
 
-test('척도만 있으면 아무것도 고르지 않는다', () => {
-  const { selected, excludedList } = selectGeneratableCandidate({ candidateList: [scale] });
+test('척도를 끈 채 척도만 있으면 아무것도 고르지 않는다', () => {
+  const { selected, excludedList } = selectGeneratableCandidate({ candidateList: [scale], isScaleEnabled: false });
   assert.equal(selected, null);
   assert.equal(excludedList.length, 1);
 });
 
-test('척도 플래그를 켜면 기존 동작(척도가 지시를 흡수)', () => {
-  const { selected, excludedList } = selectGeneratableCandidate({ candidateList: [scale, deixis], isScaleEnabled: true });
+test('척도는 기본으로 켜져 있어 척도가 지시를 흡수한다', () => {
+  const { selected, excludedList } = selectGeneratableCandidate({ candidateList: [scale, deixis] });
   assert.equal(selected.type, 'visual_description');
   assert.deepEqual(selected.mergedAnchorList, ['이거']);
   assert.equal(excludedList.length, 0);
@@ -41,9 +41,10 @@ test('생성 대상이 아닌 유형은 무시한다', () => {
   assert.equal(selected, null);
 });
 
-test('설정: 척도 플래그 기본 꺼짐, "true" 일 때만 켜짐', () => {
-  assert.equal(readPipelineConfig({}).isScaleEnabled, false);
+test('설정: 척도 플래그 기본 켜짐, "false" 일 때만 꺼짐', () => {
+  assert.equal(readPipelineConfig({}).isScaleEnabled, true);
   assert.equal(readPipelineConfig({ SEEON_ROUTER_SCALE_ENABLED: 'true' }).isScaleEnabled, true);
+  assert.equal(readPipelineConfig({ SEEON_ROUTER_SCALE_ENABLED: 'false' }).isScaleEnabled, false);
 });
 
 test('최근 해설 목록은 기본 4건', () => {

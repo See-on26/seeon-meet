@@ -10,6 +10,9 @@ const { buildSpeakerIdentityFromDom } = require('./agents/speaker-identity-agent
 const { DEBUG_STAGE_MAP, DEBUG_VERDICT_MAP } = require('./contracts/debug-events');
 const { createAgentFieldMap } = require('./agents');
 const { createUnifiedRouter, ROUTER_MODE_MAP } = require('./router/unified-router');
+const { createSpeechTrigger, TRIGGER_TYPE_LABEL_MAP } = require('./trigger/speech-trigger');
+const { createKiwiTokenizer } = require('./trigger/kiwi-tokenizer');
+const { resolveKiwiModelDir } = require('./trigger/kiwi-model');
 const { createDeixisJudgeClient } = require('./router/deixis-judge');
 const { createSilenceJudge } = require('./router/silence-judge');
 const { createSilenceNarrationGate, SILENCE_GATE_LABEL_MAP } = require('./orchestrator/silence-gate');
@@ -67,6 +70,18 @@ function truncateForLog(text, maxLength = 60) {
   return text.length > maxLength ? `${text.slice(0, maxLength)}…` : text;
 }
 
+function readElectronApp() {
+  try {
+    return require('electron').app;
+  } catch {
+    return undefined;
+  }
+}
+
+function formatTriggerCandidateList(candidateList = []) {
+  return candidateList.map((candidate) => `${TRIGGER_TYPE_LABEL_MAP[candidate.type] || candidate.type}:"${candidate.phrase}"`).join(', ');
+}
+
 function registerPipeline({ getViewerView, meetingArchive = null }) {
   const config = readPipelineConfig();
   const recordStore = createRecordStore({ outDir: OUT_DIR });
@@ -83,6 +98,17 @@ function registerPipeline({ getViewerView, meetingArchive = null }) {
   const judgeClient = createDeixisJudgeClient({ config });
   const routerClient = createUnifiedRouter({ config });
   const isRouterMode = config.routerMode === ROUTER_MODE_MAP.unified;
+  // 탐지 Layer 트리거: 한국어는 Kiwi 형태소 분석으로 맞춘다. 모델을 읽는 1초 남짓 이 스레드가 멈추므로 앱이 뜬 뒤 한 번만 만든다.
+  const electronApp = readElectronApp();
+  const kiwiTokenizer = createKiwiTokenizer({
+    modelDir: resolveKiwiModelDir({ isPackaged: Boolean(electronApp?.isPackaged), resourcesPath: process.resourcesPath }),
+  });
+  const speechTrigger = createSpeechTrigger({ tokenizer: kiwiTokenizer });
+  setImmediate(() => {
+    kiwiTokenizer.load()
+      .then(({ elapsedMs }) => console.log(`[pipeline] 트리거 형태소 분석기(Kiwi) 준비 (${elapsedMs}ms)`))
+      .catch((error) => console.warn(`[pipeline] Kiwi 를 띄우지 못해 한국어 트리거를 대체 규칙으로 잡는다: ${error.message}`));
+  });
   const describedStore = createDescribedStore();
   const captionDescribed = createCaptionDescribedRegistry({ describedStore });
   const screenRegistry = createScreenRegistry();
@@ -280,33 +306,40 @@ function registerPipeline({ getViewerView, meetingArchive = null }) {
       return { isEmitted: false };
     }
     narrationHistory.remember({ text, source, ts, slotMap, slideLabel, narrationClass: resolvedClass });
-    let wavData = null;
-    try {
-      wavData = await ttsClient.synthesize({ text });
-      await appendRecord({ kind: RECORD_KIND_MAP.tts, ts, byteLength: wavData.byteLength });
-      markDebug({
-        stage: DEBUG_STAGE_MAP.tts, verdict: DEBUG_VERDICT_MAP.pass, narrationType: source, ts,
-        reason: '합성 완료', detail: `${Math.round(wavData.byteLength / 1024)}KB · "${text}"`,
-      });
-    } catch (ttsError) {
-      console.warn(`[pipeline]   TTS 실패(텍스트만 전송) [${source}]: ${ttsError.message}`);
-      markDebug({
-        stage: DEBUG_STAGE_MAP.tts, verdict: DEBUG_VERDICT_MAP.fail, narrationType: source, ts,
-        reason: 'TTS 실패(텍스트만)', detail: ttsError.message,
-      });
-    }
+    // Orchestrator 의 main 단계는 여기까지다(기능 끄기 → 차단 규칙 → 중복). 렌더러의 우선순위 대기 줄이 재생할 해설을 고르면
+    // 그때 pipeline-tts 로 합성한다(Orchestrator → TTS → 전달 Layer). 대기 줄에서 버려지는 해설은 합성하지 않는다.
     await appendRecord({
       kind: RECORD_KIND_MAP.narration, ts, source, text, slideLabel, isEmitted: true,
-      hasAudio: Boolean(wavData), narrationClass: resolvedClass,
+      narrationClass: resolvedClass,
       eventVideoTimeMs: Number.isFinite(eventVideoTimeMs) ? eventVideoTimeMs : null,
     });
     getViewerView()?.webContents.send('pipeline-event', {
-      type: 'caption', ts, text, source, slideLabel, wavData, rationale,
+      type: 'caption', ts, text, source, slideLabel, rationale,
       narrationClass: resolvedClass,
       eventVideoTimeMs: Number.isFinite(eventVideoTimeMs) ? eventVideoTimeMs : null,
     });
     return { isEmitted: true };
   }
+
+  // 전달 Layer 앞의 TTS. 렌더러 대기 줄이 이번에 재생할 해설로 고른 것만 합성한다.
+  ipcMain.handle('pipeline-tts', async (_event, { ts = Date.now(), text = '', source = null } = {}) => {
+    try {
+      const wavData = await ttsClient.synthesize({ text });
+      await appendRecord({ kind: RECORD_KIND_MAP.tts, ts, byteLength: wavData.byteLength });
+      markDebug({
+        stage: DEBUG_STAGE_MAP.tts, verdict: DEBUG_VERDICT_MAP.pass, narrationType: source, ts,
+        reason: '합성 완료', detail: `${Math.round(wavData.byteLength / 1024)}KB · "${text}"`,
+      });
+      return { isOk: true, wavData };
+    } catch (ttsError) {
+      console.warn(`[pipeline]   TTS 실패(소리 없이 넘어감) [${source}]: ${ttsError.message}`);
+      markDebug({
+        stage: DEBUG_STAGE_MAP.tts, verdict: DEBUG_VERDICT_MAP.fail, narrationType: source, ts,
+        reason: 'TTS 실패(소리 없이 넘어감)', detail: ttsError.message,
+      });
+      return { isOk: false, message: ttsError.message };
+    }
+  });
 
   ipcMain.handle('pipeline-session-start', async (_event, { mode = '', asrLanguage } = {}) => {
     describedStore.reset();
@@ -666,14 +699,23 @@ function registerPipeline({ getViewerView, meetingArchive = null }) {
   } = {}) => {
     const isForgotten = narrationHistory.forget({ ts, text });
     const described = captionDescribed.revert({ ts, text });
+    const isContextForgotten = contextStore.forgetNarration({ ts, text });
     // 듣지 못한 화자 안내면 같은 화자를 다음 폴링에서 다시 안내하게 한다.
     if (narrationClass === NARRATION_CLASS_MAP.speakerIdentity) speakerRegistry.reset();
+    // 듣지 못한 무발화 해설이면 그 슬라이드의 "이미 냄" 기록을 지운다(슬라이드당 1회·분당 1회).
+    if (narrationClass === NARRATION_CLASS_MAP.silenceBased) silenceGate.revert({ slideLabel });
     markDebug({
       stage: DEBUG_STAGE_MAP.queue, verdict: DEBUG_VERDICT_MAP.info, ts,
       reason: '재생 안 된 해설을 중복·재설명 기록에서 지움',
       detail: `"${text}" · 사유=${reason} · 슬라이드 ${slideLabel ?? '-'}`
-        + ` · 중복 기록 ${isForgotten ? '지움' : '없음'} · 재설명 금지 ${described ? `${described.elementList.length}개 뺌` : '없음'}`,
+        + ` · 중복 기록 ${isForgotten ? '지움' : '없음'} · 재설명 금지 ${described ? `${described.elementList.length}개 뺌` : '없음'}`
+        + ` · 해설 목록 ${isContextForgotten ? '뺌' : '없음'}`,
     });
+  });
+
+  // 체류 3초를 못 채운 화면. 회의 스크립트에서 그 전환 AD 줄과 방문을 뺀다.
+  ipcMain.on('pipeline-transition-cancelled', (_event, { slideLabel = null, requestTs = null, transitionTs = null } = {}) => {
+    contextStore.cancelTransition({ slideLabel, requestTs, transitionTs });
   });
 
   ipcMain.handle('pipeline-feature-toggles', async (_event, { disabledClassList = [] } = {}) => {
@@ -748,7 +790,7 @@ function registerPipeline({ getViewerView, meetingArchive = null }) {
     return { isOk: result.status !== SILENCE_RESULT_MAP.failed, status: result.status };
   });
 
-  ipcMain.handle('pipeline-audio', async (_event, { startTs, endTs, buffer, speakerHint }) => {
+  ipcMain.handle('pipeline-audio', async (_event, { startTs, endTs, buffer, speakerHint, isSpeakerTracked = true }) => {
     const stage = PIPELINE_STAGE_MAP.asr;
     const startedAt = Date.now();
     pendingAsrCount += 1;
@@ -757,7 +799,7 @@ function registerPipeline({ getViewerView, meetingArchive = null }) {
       const textReadyAt = Date.now();
       await appendRecord({
         kind: RECORD_KIND_MAP.asr, ts: startTs,
-        text: result.text, segmentList: result.segmentList, speakerHint,
+        text: result.text, segmentList: result.segmentList, speakerHint, isSpeakerTracked: isSpeakerTracked !== false,
         language: result.requestedLanguage, detectedLanguage: result.language,
         languageProbability: result.languageProbability,
         ...(result.hallucinationText
@@ -768,8 +810,17 @@ function registerPipeline({ getViewerView, meetingArchive = null }) {
       }
 
       if (result.text) {
+        const trigger = speechTrigger.detect({ text: result.text });
+        if (trigger.candidateList.length) {
+          markDebug({
+            stage: DEBUG_STAGE_MAP.router, verdict: DEBUG_VERDICT_MAP.info, ts: startTs,
+            reason: `트리거 후보 ${trigger.candidateList.length}개 (${trigger.analyzer})`,
+            detail: `${formatTriggerCandidateList(trigger.candidateList)} · 전사="${truncateForLog(result.text, 80)}"`,
+          });
+        }
         getViewerView()?.webContents.send('pipeline-event', {
           type: 'asr', ts: startTs, endTs, text: result.text, segmentList: result.segmentList,
+          triggerCandidateList: trigger.candidateList,
         });
       }
 
@@ -795,7 +846,7 @@ function registerPipeline({ getViewerView, meetingArchive = null }) {
     }
   });
 
-  ipcMain.handle('pipeline-deixis', async (_event, { ts, buffer, utterance, recentTranscript, beforeTranscript, afterTranscript, hasPointingRegion, pointingOrderHint, slideLabel, wordBudgetMap, eventVideoTimeMs = null }) => {
+  ipcMain.handle('pipeline-deixis', async (_event, { ts, buffer, utterance, recentTranscript, beforeTranscript, afterTranscript, hasPointingRegion, pointingOrderHint, slideLabel, wordBudgetMap, eventVideoTimeMs = null, triggerCandidateList = [] }) => {
     let stage = PIPELINE_STAGE_MAP.judge;
     const startedAt = Date.now();
     const hasAnySpeech = [utterance, beforeTranscript, afterTranscript, recentTranscript]
@@ -806,7 +857,7 @@ function registerPipeline({ getViewerView, meetingArchive = null }) {
         slideLabel, skipReason: 'no-speech-at-all',
       });
       markDebug({
-        stage: DEBUG_STAGE_MAP.judge, verdict: DEBUG_VERDICT_MAP.skip, ts,
+        stage: DEBUG_STAGE_MAP.router, verdict: DEBUG_VERDICT_MAP.skip, ts,
         narrationType: NARRATION_TYPE_MAP.deixis,
         reason: '트리거 발화도 인접 맥락도 없다 — 모사할 말이 없다',
         detail: '2-2는 상황 슬롯을 발화 모사로 채우는 형식이라, 말이 하나도 없으면 상투구밖에 나오지 않는다',
@@ -839,8 +890,19 @@ function registerPipeline({ getViewerView, meetingArchive = null }) {
       let selectedCandidate = null;
       if (utterance && utterance.trim()) {
         if (isRouterMode) {
-          const routed = await routerClient.route({ utterance, before: beforeText, after: afterText });
+          // 트리거가 뽑은 후보 구마다 판단 LLM 이 앞뒤 발화로 공백(O)인지 가린다.
+          const routed = await routerClient.route({
+            utterance, before: beforeText, after: afterText, candidateList: triggerCandidateList,
+          });
           judgeReason = routed.blockedReason;
+          markDebug({
+            stage: DEBUG_STAGE_MAP.router, ts,
+            verdict: routed.candidateList.length ? DEBUG_VERDICT_MAP.pass : DEBUG_VERDICT_MAP.skip,
+            reason: `판단 LLM ${routed.judgeList.filter((entry) => entry.isGap).length}/${routed.judgeList.length} 공백`,
+            detail: routed.judgeList
+              .map((entry) => `${TRIGGER_TYPE_LABEL_MAP[entry.type] || entry.type}:"${entry.phrase}"=${entry.isGap ? 'O' : 'X'}(${entry.reason || '-'})`)
+              .join(' · ') || '후보 없음',
+          });
           const { selected, excludedList } = selectGeneratableCandidate({
             candidateList: routed.candidateList, isScaleEnabled: config.isScaleEnabled,
           });
@@ -849,7 +911,7 @@ function registerPipeline({ getViewerView, meetingArchive = null }) {
             markDebug({
               stage: DEBUG_STAGE_MAP.router, verdict: DEBUG_VERDICT_MAP.skip, ts,
               narrationType: NARRATION_TYPE_MAP.visualDescription,
-              reason: '척도 보류 — 척도 후보 제외',
+              reason: '척도 꺼짐 — 척도 후보 제외',
               detail: `제외=[${excludedList.map((c) => `${c.type}/${c.subKind || '-'}`).join(', ')}] 발화="${utterance}"`,
             });
           }

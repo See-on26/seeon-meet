@@ -48,8 +48,11 @@ export class NarrationHoldGate {
     return heldList.length;
   }
 
+  // 모아 두던 해설을 돌려준다. 호출부가 재생 못 한 해설로 알린다.
   clear() {
+    const heldList = this.heldList;
     this.holdCount = 0;
     this.heldList = [];
+    return heldList;
   }
 }

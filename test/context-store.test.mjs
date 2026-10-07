@@ -178,3 +178,47 @@ test('슬라이드 마크에 실제 전환 시각이 있으면 그 시각으로 
   assert.deepEqual(store.getSlide(2).visitList, [{ startTs: 6000, endTs: null }]);
   assert.equal(store.getUtteranceList()[0].slideMajor, 2);
 });
+
+test('전환 고지 문장은 스크립트용 화면 전환 AD 로 모은다 (주제 대체·고지 없는 사유 구분)', () => {
+  const store = createContextStore();
+  store.applyRecord(baseMark({ ts: 1000, slideLabel: '1' }));
+  store.applyRecord({ kind: 'page_transition', ts: 1100, slideLabel: '1', narration: '슬라이드 1: 표지', displayNumber: 1 });
+  store.applyRecord({ kind: 'page_transition', ts: 2100, slideLabel: '2', narration: '',
+    skipReason: 'incomplete_description', pageTopic: '분기 매출', displayNumber: 2 });
+  store.applyRecord({ kind: 'page_transition', ts: 3100, slideLabel: '3', narration: '', skipReason: 'same_topic', pageTopic: '분기 매출' });
+  store.applyRecord({ kind: 'page_transition', ts: 4100, slideLabel: '1', narration: '이전 슬라이드 1: 표지', isRevisit: true });
+  assert.deepEqual(store.snapshot().transitionList.map(({ ts, slideMajor, text, isRevisit }) => [ts, slideMajor, text, isRevisit]), [
+    [1100, 1, '슬라이드 1: 표지', false],
+    [2100, 2, '슬라이드 2: 분기 매출', false],
+    [4100, 1, '이전 슬라이드 1: 표지', true],
+  ]);
+});
+
+test('체류 미달로 취소된 전환은 스냅숏에 남겨 스크립트가 뺄 수 있게 하고, 새 세션에서는 비운다', () => {
+  const store = createContextStore();
+  assert.equal(store.cancelTransition({ slideLabel: '4-2', requestTs: 5100, transitionTs: 5000 }), true);
+  assert.equal(store.cancelTransition({ slideLabel: '' }), false);
+  assert.deepEqual(store.snapshot().cancelledTransitionList, [{ slideMajor: 4, requestTs: 5100, transitionTs: 5000 }]);
+  store.start({ sessionId: 's2', startedAt: 0 });
+  assert.deepEqual(store.snapshot().cancelledTransitionList, []);
+  assert.deepEqual(store.snapshot().transitionList, []);
+});
+
+test('ASR 기록의 화자 식별 여부를 발화에 남긴다(값이 없던 예전 기록은 켜진 것으로 본다)', () => {
+  const store = createContextStore();
+  store.applyRecord({ kind: 'asr', ts: 1000, text: '켜짐', speakerHint: '김지오', isSpeakerTracked: true });
+  store.applyRecord({ kind: 'asr', ts: 2000, text: '꺼짐', speakerHint: null, isSpeakerTracked: false });
+  store.applyRecord({ kind: 'asr', ts: 3000, text: '예전 기록', speakerHint: null });
+  assert.deepEqual(store.snapshot().utteranceList.map((utterance) => [utterance.text, utterance.isSpeakerTracked]), [
+    ['켜짐', true], ['꺼짐', false], ['예전 기록', true],
+  ]);
+});
+
+test('듣지 못한 해설은 해설 목록에서 뺀다', () => {
+  const store = createContextStore();
+  store.applyRecord({ kind: 'narration', ts: 100, text: '빨간 막대 상승 구간', isEmitted: true, narrationClass: 'deixis' });
+  store.applyRecord({ kind: 'narration', ts: 200, text: '다른 해설', isEmitted: true, narrationClass: 'deixis' });
+  assert.equal(store.forgetNarration({ ts: 100, text: '빨간 막대 상승 구간' }), true);
+  assert.equal(store.forgetNarration({ ts: 100, text: '빨간 막대 상승 구간' }), false);
+  assert.deepEqual(store.getNarrationList().map((narration) => narration.text), ['다른 해설']);
+});

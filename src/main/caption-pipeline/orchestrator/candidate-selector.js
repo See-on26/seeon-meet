@@ -5,8 +5,8 @@ const GENERATABLE_TYPE_LIST = [
   NARRATION_TYPE_MAP.deixis, NARRATION_TYPE_MAP.interpretation, NARRATION_TYPE_MAP.visualDescription,
 ];
 
-// 라우터가 내는 시각 묘사 후보는 척도뿐이다. 척도는 보류 중이라 기본으로 걸러 낸다.
-// 중재 전에 거르므로, 척도에 흡수됐을 지시 후보가 남아 대신 선택된다.
+// 라우터가 내는 시각 묘사 후보는 척도뿐이다. 척도를 끄면(isScaleEnabled=false) 중재 전에 걸러 내므로,
+// 척도에 흡수됐을 지시 후보가 남아 대신 선택된다.
 function filterGeneratableCandidateList({ candidateList, isScaleEnabled }) {
   const keptList = [];
   const excludedList = [];
@@ -21,7 +21,7 @@ function filterGeneratableCandidateList({ candidateList, isScaleEnabled }) {
   return { keptList, excludedList };
 }
 
-function selectGeneratableCandidate({ candidateList, isScaleEnabled = false }) {
+function selectGeneratableCandidate({ candidateList, isScaleEnabled = true }) {
   const { keptList, excludedList } = filterGeneratableCandidateList({ candidateList, isScaleEnabled });
   if (!keptList.length) return { selected: null, excludedList };
   const { resolvedList } = resolveCandidateList({ candidateList: keptList });

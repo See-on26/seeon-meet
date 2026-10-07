@@ -1,4 +1,4 @@
-import { NarrationQueue, shouldInterrupt, QUEUE_DROP_REASON_MAP } from './narration-queue.js';
+import { NarrationQueue, shouldInterrupt, QUEUE_DROP_REASON_MAP, readEntryAudio } from './narration-queue.js';
 
 export const DEFAULT_DUCK_DB = -12;
 const DEFAULT_RAMP_MS = 120;
@@ -24,8 +24,9 @@ export function createSidePanner({ audioContext, positionX }) {
 export class NarrationMixer {
   constructor({ onStatus = null, onDrop = null, duckDecibel = DEFAULT_DUCK_DB,
     createAudioContext = () => new AudioContext(), now = () => performance.now(),
-    isEntryEnabled = () => true } = {}) {
+    isEntryEnabled = () => true, prepareAudio = readEntryAudio } = {}) {
     this.onStatus = onStatus || (() => {});
+    this.prepareAudio = prepareAudio;
     this.onDrop = onDrop || (() => {});
     this.duckDecibel = duckDecibel;
     this.createAudioContext = createAudioContext;
@@ -79,7 +80,11 @@ export class NarrationMixer {
 
   // 여러 해설을 한꺼번에 넣은 뒤 한 번만 꺼낸다. 하나씩 넣으면 첫 항목이 순위 비교 없이 바로 재생된다.
   queueCaptionList(entryList) {
-    if (!this.audioContext || !entryList.length) return;
+    if (!entryList.length) return;
+    if (!this.audioContext) {
+      for (const entry of entryList) this.onDrop({ entry, reason: QUEUE_DROP_REASON_MAP.stopped });
+      return;
+    }
     for (const entry of entryList) this.queue.push(entry);
     // 꺼진 분류의 질문 답은 어차피 버려지므로 재생 중인 해설을 끊지 않는다.
     const isInterrupting = entryList.some((entry) => this.queue.isEntryEnabled(entry)
@@ -105,7 +110,14 @@ export class NarrationMixer {
     this.currentEntry = entry;
     try {
       if (this.audioContext.state === 'suspended') await this.audioContext.resume();
-      const audioBuffer = await this.audioContext.decodeAudioData(entry.wavArrayBuffer);
+      const wavArrayBuffer = await this.prepareAudio(entry);
+      if (token !== this.playToken) return;
+      if (!wavArrayBuffer) {
+        this.onDrop({ entry, reason: QUEUE_DROP_REASON_MAP.ttsFailed });
+        this.handleNarrationEnded();
+        return;
+      }
+      const audioBuffer = await this.audioContext.decodeAudioData(wavArrayBuffer);
       if (token !== this.playToken) return;
       const source = this.audioContext.createBufferSource();
       source.buffer = audioBuffer;
@@ -155,10 +167,14 @@ export class NarrationMixer {
 
   stop() {
     this.playToken += 1;
+    // 소리가 나기 전(합성 중)에 멈춘 해설과 대기 줄에 남은 해설은 사용자가 듣지 못했다.
+    const unplayedList = [
+      ...(this.currentEntry && !this.currentSource ? [this.currentEntry] : []), ...this.queue.drain(),
+    ];
     try { this.currentSource?.stop(); } catch {  }
     this.currentSource = null;
     this.currentEntry = null;
-    this.queue.clear();
+    for (const entry of unplayedList) this.onDrop({ entry, reason: QUEUE_DROP_REASON_MAP.stopped });
     this.isInserting = false;
     try { this.meetingSource?.disconnect(); } catch {  }
     this.meetingSource = null;

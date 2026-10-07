@@ -47,8 +47,11 @@ export class NarrationScheduler {
     return this.pendingList.length;
   }
 
+  // 삽입 시각을 기다리던 항목을 돌려준다. 호출부가 재생 못 한 해설로 알린다.
   reset() {
+    const pendingList = this.pendingList;
     this.pendingList = [];
     if (this.timerHandle !== null) { this.clearTimer(this.timerHandle); this.timerHandle = null; }
+    return pendingList;
   }
 }

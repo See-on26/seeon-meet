@@ -22,3 +22,9 @@ test('무발화 판정기는 애매하면 차단하고, 보세요·보시겠습�
   assert.match(SILENCE_JUDGE_SYSTEM_PROMPT, /보시겠습니다/);
   assert.match(SILENCE_JUDGE_SYSTEM_PROMPT, /음·어/);
 });
+
+test('무발화 판정기는 "보다·look"이 들어간 함정 표현(들어 보시죠·look into)을 단서로 보지 않는다', () => {
+  assert.match(SILENCE_JUDGE_SYSTEM_PROMPT, /들어 보시죠/);
+  assert.match(SILENCE_JUDGE_SYSTEM_PROMPT, /look into/);
+  assert.match(SILENCE_JUDGE_SYSTEM_PROMPT, /Take a look at the chart/);
+});

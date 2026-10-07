@@ -10,12 +10,17 @@
     "mock": "node tools/mock-gpu-server.js",
     "test": "node --test test/*.test.mjs",
     "check:renderer": "node tools/check-esm.mjs src/renderer/app/main.js",
+    "eval:detection": "node tools/detection-eval/run-detection-eval.mjs",
+    "setup:kiwi": "node tools/kiwi/fetch-kiwi-model.mjs",
+    "predist:win": "npm run setup:kiwi",
     "dist:win": "electron-builder --config electron-builder.config.js --win nsis --x64 --publish never",
+    "predist:mac:dir": "npm run setup:kiwi",
     "dist:mac:dir": "electron-builder --config electron-builder.config.js --mac --dir --publish never",
     "dist:win:kit": "node tools/windows-kit/build-windows-kit.mjs"
   },
   "dependencies": {
     "@anthropic-ai/bedrock-sdk": "^0.32.0",
+    "kiwi-nlp": "0.24.0",
     "ssh2": "^1.17.0"
   },
   "devDependencies": {
