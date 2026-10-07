@@ -699,13 +699,17 @@ function registerPipeline({ getViewerView, meetingArchive = null }) {
   } = {}) => {
     const isForgotten = narrationHistory.forget({ ts, text });
     const described = captionDescribed.revert({ ts, text });
+    const isContextForgotten = contextStore.forgetNarration({ ts, text });
     // 듣지 못한 화자 안내면 같은 화자를 다음 폴링에서 다시 안내하게 한다.
     if (narrationClass === NARRATION_CLASS_MAP.speakerIdentity) speakerRegistry.reset();
+    // 듣지 못한 무발화 해설이면 그 슬라이드의 "이미 냄" 기록을 지운다(슬라이드당 1회·분당 1회).
+    if (narrationClass === NARRATION_CLASS_MAP.silenceBased) silenceGate.revert({ slideLabel });
     markDebug({
       stage: DEBUG_STAGE_MAP.queue, verdict: DEBUG_VERDICT_MAP.info, ts,
       reason: '재생 안 된 해설을 중복·재설명 기록에서 지움',
       detail: `"${text}" · 사유=${reason} · 슬라이드 ${slideLabel ?? '-'}`
-        + ` · 중복 기록 ${isForgotten ? '지움' : '없음'} · 재설명 금지 ${described ? `${described.elementList.length}개 뺌` : '없음'}`,
+        + ` · 중복 기록 ${isForgotten ? '지움' : '없음'} · 재설명 금지 ${described ? `${described.elementList.length}개 뺌` : '없음'}`
+        + ` · 해설 목록 ${isContextForgotten ? '뺌' : '없음'}`,
     });
   });
 

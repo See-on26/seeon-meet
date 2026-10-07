@@ -25,7 +25,8 @@ import { StreamDelaySource } from '../core/audio-renderer/stream-delay-source.js
 import { NarrationScheduler } from '../core/audio-renderer/narration-scheduler.js';
 import { GapCandidateStore, resolveGapSearchFromMs } from '../core/audio-renderer/gap-candidate-store.js';
 import { isImmediateCaption, isAnchoredCaption, NarrationHoldGate } from '../core/audio-renderer/narration-entry.js';
-import { QUEUE_DROP_LABEL_MAP } from '../core/audio-renderer/narration-queue.js';
+import { QUEUE_DROP_LABEL_MAP, QUEUE_DROP_REASON_MAP } from '../core/audio-renderer/narration-queue.js';
+import { NarrationAudioPrefetcher } from '../core/audio-renderer/narration-audio-prefetcher.js';
 import { QuestionRecorder } from '../core/command/question-recorder.js';
 import { MeetMicGuard } from '../core/command/meet-mic-guard.js';
 import { MicQuestionController, MIC_PHASE_MAP } from '../core/command/mic-question-controller.js';
@@ -105,7 +106,8 @@ const featureToggleStore = createFeatureToggleStore({ storage: readLocalStorage(
 const meetingLanguageStore = createMeetingLanguageStore({ storage: readLocalStorage() });
 const isNarrationEntryEnabled = (entry) => featureToggleStore.isClassOn(entry.narrationClass);
 
-// Orchestrator → TTS → 전달 Layer: 우선순위 대기 줄이 이번에 재생할 해설을 고른 뒤에만 main 에 합성을 요청한다.
+// Orchestrator → TTS → 전달 Layer: TTS 는 Orchestrator 를 통과한 해설만 만든다. 재생 차례가 가까운 2개는 미리 만들어
+// 차례가 오면 바로 들리게 하고(NarrationAudioPrefetcher), 그보다 뒤는 앞 해설이 재생·버려질 때 차례로 만든다.
 async function synthesizeEntryAudio(entry) {
   const result = await window.seeon.synthesizeNarration({ ts: entry.ts, text: entry.text, source: entry.source })
     .catch(() => null);
@@ -114,8 +116,10 @@ async function synthesizeEntryAudio(entry) {
   return wavData.buffer.slice(wavData.byteOffset, wavData.byteOffset + wavData.byteLength);
 }
 
+const narrationAudio = new NarrationAudioPrefetcher({ synthesize: synthesizeEntryAudio });
+
 const narrator = new CaptionNarrator({
-  prepareAudio: synthesizeEntryAudio,
+  prepareAudio: (entry) => narrationAudio.take(entry),
   getLiveVideo: getPlaybackVideo,
   onStatus: handleNarrationStatus,
   onDrop: handleNarrationDrop,
@@ -258,7 +262,7 @@ function startNarrationPlayer({ stream }) {
   if (policy?.isMixed) {
     narrationMixer = new NarrationMixer({
       onStatus: handleNarrationStatus, onDrop: handleNarrationDrop, isEntryEnabled: isNarrationEntryEnabled,
-      prepareAudio: synthesizeEntryAudio,
+      prepareAudio: (entry) => narrationAudio.take(entry),
     });
     narrationMixer.start(stream);
 
@@ -383,8 +387,9 @@ function setPrepOverlay({ isVisible, remainingSec = 0 }) {
 
 function stopDelayBuffer() {
   stopDriftMonitor();
-  narrationScheduler?.reset();
+  const unplayedList = narrationScheduler?.reset() || [];
   narrationScheduler = null;
+  for (const item of unplayedList) reportUnplayedNarration({ entry: item.entry, reason: QUEUE_DROP_REASON_MAP.stopped });
   $('stBuffer').textContent = '–';
   setPrepOverlay({ isVisible: false });
   if (!delayBuffer) return;
@@ -1522,20 +1527,15 @@ async function emitCaption(payload, { leaderHandle = null } = {}) {
   const transitionLeaderList = isSpeaker ? await pendingTransitions.waitAll() : [];
   const leader = isFollower ? await transitionOrderGate.waitLeader({ slideLabel: payload.slideLabel }) : null;
   if (isFollower && leader.status === LEADER_STATUS_MAP.cancelled) {
-    markDebug({
-      stage: DEBUG_STAGE_MAP.slide, verdict: DEBUG_VERDICT_MAP.skip,
-      narrationType: NARRATION_TYPE_MAP.visualDescription,
-      reason: '전환 고지 취소 — 딸린 사진 묘사도 버림',
-      detail: `슬라이드 ${payload.slideLabel} "${payload.text}"`,
-    });
+    reportUnplayedNarration({ entry: toNarrationEntry(payload), reason: QUEUE_DROP_REASON_MAP.leaderCancelled });
     return;
   }
   const captionCaptureMs = handleCaption(payload);
-  // 소리는 아직 없다. 대기 줄이 재생 차례로 고를 때 합성한다(synthesizeEntryAudio).
+  // 소리는 아직 없다. 재생 차례가 가까우면 미리 만들고, 아니면 대기 줄이 고를 때 만든다(narrationAudio).
   const entry = {
-    narrationClass: payload.narrationClass, slideLabel: payload.slideLabel ?? null,
-    source: payload.source, text: payload.text, ts: payload.ts, eventTimeMs: captionCaptureMs,
+    ...toNarrationEntry(payload), eventTimeMs: captionCaptureMs,
   };
+  narrationAudio.register(entry);
   if (isImmediateCaption(payload)) {
     leaderHandle?.settle({ status: LEADER_STATUS_MAP.unscheduled });
     getNarrationPlayer()?.queueCaption({ ...entry, dueAt: performance.now() });
@@ -1548,7 +1548,10 @@ async function emitCaption(payload, { leaderHandle = null } = {}) {
     ? resolveAfterTransitionInsertMs({ insertVideoTimeMs: ownInsertVideoTimeMs, leaderList: transitionLeaderList })
     : ownInsertVideoTimeMs;
   leaderHandle?.settle({ status: LEADER_STATUS_MAP.scheduled, insertVideoTimeMs });
-  if (insertVideoTimeMs === null) return;
+  if (insertVideoTimeMs === null) {
+    reportUnplayedNarration({ entry, reason: QUEUE_DROP_REASON_MAP.leaderCancelled });
+    return;
+  }
   scheduleNarration({ entry, captionCaptureMs: insertVideoTimeMs });
 }
 
@@ -1556,6 +1559,7 @@ function emitCaptionSafely(payload, { leaderHandle = null } = {}) {
   emitCaption(payload, { leaderHandle }).catch((error) => {
     leaderHandle?.settle({ status: LEADER_STATUS_MAP.unscheduled });
     console.warn('[caption] 발행 실패(무시):', error.message);
+    reportUnplayedNarration({ entry: toNarrationEntry(payload), reason: QUEUE_DROP_REASON_MAP.emitFailed });
   });
 }
 
@@ -1578,12 +1582,7 @@ function applyCaption(payload) {
     callback: (isSatisfied) => {
       if (isSatisfied) { emitCaptionSafely(payload, { leaderHandle }); return; }
       leaderHandle.settle({ status: LEADER_STATUS_MAP.cancelled });
-      markDebug({
-        stage: DEBUG_STAGE_MAP.slide, verdict: DEBUG_VERDICT_MAP.skip,
-        narrationType: NARRATION_TYPE_MAP.pageTransition,
-        reason: '체류 미달 — 재생 전 취소(선판정 후취소)',
-        detail: `슬라이드 ${payload.slideLabel} "${payload.text}"`,
-      });
+      reportUnplayedNarration({ entry: toNarrationEntry(payload), reason: QUEUE_DROP_REASON_MAP.dwellCancelled });
     },
   });
 }
@@ -1608,11 +1607,9 @@ function scheduleNarration({ entry, captionCaptureMs }) {
     const excessMs = delayBuffer.getExcessMs();
     if (isCaptionDroppable({ excessMs, dropThresholdMs: EXCESS_DROP_MS })) {
       console.log(`[delay] 캡션 드롭 — 누적 지연 ${Math.round(excessMs)}ms (상한 ${EXCESS_DROP_MS}ms)`);
-      markDebug({
-        stage: DEBUG_STAGE_MAP.session, verdict: DEBUG_VERDICT_MAP.skip,
-        reason: '누적 지연 상한 초과 — 캡션 드롭',
-        detail: `초과 ${Math.round(excessMs)}ms / 상한 ${EXCESS_DROP_MS}ms`
-          + ` · 모드=${getCurrentMode()} · 회수되면 다시 받는다`,
+      reportUnplayedNarration({
+        entry, reason: QUEUE_DROP_REASON_MAP.delayExceeded,
+        detailSuffix: ` · 초과 ${Math.round(excessMs)}ms / 상한 ${EXCESS_DROP_MS}ms · 모드=${getCurrentMode()}`,
       });
       return;
     }
@@ -1628,22 +1625,36 @@ function scheduleNarration({ entry, captionCaptureMs }) {
   narrationScheduler.schedule({ entry, captionCaptureMs });
 }
 
-// 재생 대기 줄에서 버려지거나 질문 답에 끊긴 해설. main 이 중복 억제·재설명 금지 기록을 되돌리게 알린다.
-function handleNarrationDrop({ entry, reason, waitedMs = null }) {
+function toNarrationEntry(payload) {
+  return {
+    narrationClass: payload.narrationClass, slideLabel: payload.slideLabel ?? null,
+    source: payload.source, text: payload.text, ts: payload.ts,
+  };
+}
+
+// 사용자가 듣지 못한 해설. main 은 해설을 내보낼 때 이미 "말했음"(간격 억제·중복·재설명 금지·맥락 저장소)으로 적어 두므로,
+// 재생하지 못하고 버리는 모든 경로는 여기로 알려 그 기록을 되돌린다. 미리 만들던 소리 자리도 다음 해설에 넘긴다.
+function reportUnplayedNarration({ entry, reason, waitedMs = null, detailSuffix = '' }) {
+  narrationAudio.discard(entry);
   window.seeon.reportNarrationDropped({
     ts: entry.ts, text: entry.text, slideLabel: entry.slideLabel, source: entry.source,
     narrationClass: entry.narrationClass, reason,
   });
   const label = QUEUE_DROP_LABEL_MAP[reason] || reason;
   const waitedText = Number.isFinite(waitedMs) ? ` · 대기 ${(waitedMs / 1000).toFixed(1)}초` : '';
-  console.log(`[queue] ${label} [${entry.narrationClass}] "${entry.text}"${waitedText}`);
+  console.log(`[queue] ${label} [${entry.narrationClass}] "${entry.text}"${waitedText}${detailSuffix}`);
   markDebug({
     stage: DEBUG_STAGE_MAP.queue, verdict: DEBUG_VERDICT_MAP.skip,
     narrationType: entry.source || null,
     reason: label,
     detail: `"${entry.text}" · 분류=${entry.narrationClass}`
-      + `${entry.slideLabel !== null ? ` · 슬라이드 ${entry.slideLabel}` : ''}${waitedText}`,
+      + `${entry.slideLabel !== null && entry.slideLabel !== undefined ? ` · 슬라이드 ${entry.slideLabel}` : ''}${waitedText}${detailSuffix}`,
   });
+}
+
+// 재생 대기 줄에서 버려지거나 질문 답에 끊긴 해설.
+function handleNarrationDrop({ entry, reason, waitedMs = null }) {
+  reportUnplayedNarration({ entry, reason, waitedMs });
 }
 
 function isNarrationEchoWindow() {
@@ -1873,7 +1884,10 @@ function stopExperiment() {
     ['지시 탐지기', () => deixisDetector.reset()],
     ['후보 스케줄러', () => candidateScheduler.reset()],
     ['마이크 질문', () => micQuestionController.cancel()],
-    ['해설 보류 게이트', () => narrationGate.clear()],
+    ['해설 보류 게이트', () => {
+      for (const entry of narrationGate.clear()) reportUnplayedNarration({ entry, reason: QUEUE_DROP_REASON_MAP.stopped });
+      narrationAudio.reset();
+    }],
     ['인접 발화 창', () => transcriptWindow.reset()],
     ['삽입 후보 틈', () => gapCandidateStore.reset()],
     ['프레임 샘플러', () => {

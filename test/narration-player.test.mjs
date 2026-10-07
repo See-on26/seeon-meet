@@ -377,3 +377,38 @@ test('교차 모드 재생기도 고른 해설만 합성하고, 합성 실패는
   assert.deepEqual(startedIdList(sourceList), ['발화']);
   assert.equal(dropList[0].reason, QUEUE_DROP_REASON_MAP.ttsFailed);
 });
+
+test('재생을 멈추면 대기 줄에 남은 해설과 합성 중이던 해설을 듣지 못한 것으로 알린다', async () => {
+  let resolveSynthesis = null;
+  const { context } = createFakeAudioContext();
+  const dropList = [];
+  const mixer = new NarrationMixer({
+    createAudioContext: () => context, onDrop: (drop) => dropList.push(drop),
+    prepareAudio: () => new Promise((resolve) => { resolveSynthesis = resolve; }),
+  });
+  mixer.start(fakeStream);
+  mixer.queueCaptionList([makeTextEntry({ id: '합성 중' }), makeTextEntry({ id: '대기' })]);
+  await flush();
+  mixer.stop();
+  resolveSynthesis({ id: '합성 중', durationSec: 1 });
+  await flush();
+  assert.deepEqual(dropList.map((drop) => [drop.entry.text, drop.reason]).sort(), [
+    ['대기', QUEUE_DROP_REASON_MAP.stopped], ['합성 중', QUEUE_DROP_REASON_MAP.stopped],
+  ]);
+});
+
+test('재생기가 아직 켜지지 않았을 때 들어온 해설도 듣지 못한 것으로 알린다', () => {
+  const dropList = [];
+  const narrator = new CaptionNarrator({ getLiveVideo: () => null, onDrop: (drop) => dropList.push(drop) });
+  narrator.queueCaptionList([makeTextEntry({ id: '늦게 옴' })]);
+  assert.deepEqual(dropList.map((drop) => [drop.entry.text, drop.reason]), [['늦게 옴', QUEUE_DROP_REASON_MAP.stopped]]);
+});
+
+test('재생 중이던 해설은 멈춰도 들은 것으로 본다(대기 줄 것만 알린다)', async () => {
+  const { mixer, sourceList, dropList } = createSynthesizingMixer();
+  mixer.queueCaptionList([makeTextEntry({ id: '재생 중' }), makeTextEntry({ id: '대기' })]);
+  await flush();
+  assert.deepEqual(startedIdList(sourceList), ['재생 중']);
+  mixer.stop();
+  assert.deepEqual(dropList.map((drop) => drop.entry.text), ['대기']);
+});

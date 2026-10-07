@@ -197,6 +197,15 @@ function createContextStore({ onChange = () => {} } = {}) {
     return true;
   }
 
+  // 사용자가 듣지 못한 해설(렌더러가 재생하지 못하고 버림)은 "해설 다시 듣기"에서 되읽지 않게 뺀다.
+  function forgetNarration({ ts, text }) {
+    const index = narrationList.findIndex((narration) => narration.ts === ts && narration.text === String(text ?? '').trim());
+    if (index < 0) return false;
+    narrationList.splice(index, 1);
+    notifyChange();
+    return true;
+  }
+
   const APPLIER_BY_KIND_MAP = {
     [RECORD_KIND_MAP.slideMark]: applySlideMark,
     [RECORD_KIND_MAP.pageTransition]: applyPageTransition,
@@ -327,7 +336,7 @@ function createContextStore({ onChange = () => {} } = {}) {
   return {
     start, reset,
     getSessionInfo: () => ({ sessionId, startedAt }),
-    applyRecord, applySlideText, cancelTransition, listReadyForLabelMajors, markLabelRequested, setLabel, addQa,
+    applyRecord, applySlideText, cancelTransition, forgetNarration, listReadyForLabelMajors, markLabelRequested, setLabel, addQa,
     getSlide, getSlideList, getCurrentSlideMajor: () => currentMajor,
     getUtteranceList, getNarrationList, getLastQa: () => qaList[qaList.length - 1] || null,
     buildIndex, resolveSlideNumber, snapshot,

@@ -213,3 +213,12 @@ test('ASR 기록의 화자 식별 여부를 발화에 남긴다(값이 없던 �
     ['켜짐', true], ['꺼짐', false], ['예전 기록', true],
   ]);
 });
+
+test('듣지 못한 해설은 해설 목록에서 뺀다', () => {
+  const store = createContextStore();
+  store.applyRecord({ kind: 'narration', ts: 100, text: '빨간 막대 상승 구간', isEmitted: true, narrationClass: 'deixis' });
+  store.applyRecord({ kind: 'narration', ts: 200, text: '다른 해설', isEmitted: true, narrationClass: 'deixis' });
+  assert.equal(store.forgetNarration({ ts: 100, text: '빨간 막대 상승 구간' }), true);
+  assert.equal(store.forgetNarration({ ts: 100, text: '빨간 막대 상승 구간' }), false);
+  assert.deepEqual(store.getNarrationList().map((narration) => narration.text), ['다른 해설']);
+});

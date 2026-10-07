@@ -27,6 +27,11 @@ export const QUEUE_DROP_REASON_MAP = {
   interrupted: 'interrupted',
   featureOff: 'feature_off',
   ttsFailed: 'tts_failed',
+  stopped: 'stopped',
+  delayExceeded: 'delay_exceeded',
+  dwellCancelled: 'dwell_cancelled',
+  leaderCancelled: 'leader_cancelled',
+  emitFailed: 'emit_failed',
 };
 
 export const QUEUE_DROP_LABEL_MAP = {
@@ -35,6 +40,11 @@ export const QUEUE_DROP_LABEL_MAP = {
   [QUEUE_DROP_REASON_MAP.interrupted]: '질문 답이 재생 중인 해설을 끊음',
   [QUEUE_DROP_REASON_MAP.featureOff]: '기능 꺼짐 — 대기 중이던 해설 버림',
   [QUEUE_DROP_REASON_MAP.ttsFailed]: 'TTS 합성 실패 — 소리 없이 건너뜀',
+  [QUEUE_DROP_REASON_MAP.stopped]: '재생 멈춤(일시정지·모드 전환·정지) — 기다리던 해설 버림',
+  [QUEUE_DROP_REASON_MAP.delayExceeded]: '누적 지연 상한 초과 — 해설 버림',
+  [QUEUE_DROP_REASON_MAP.dwellCancelled]: '체류 미달 — 전환 고지 취소',
+  [QUEUE_DROP_REASON_MAP.leaderCancelled]: '전환 고지 취소 — 딸린 사진 묘사도 버림',
+  [QUEUE_DROP_REASON_MAP.emitFailed]: '해설 발행 실패 — 버림',
 };
 
 // 대기 줄이 재생할 해설을 고른 뒤에 소리를 만든다(Orchestrator → TTS). 기본은 해설에 이미 담긴 wav 를 쓴다.
@@ -168,6 +178,13 @@ export class NarrationQueue {
 
   get size() {
     return this.entryList.length;
+  }
+
+  // 남은 해설을 모두 꺼내고 비운다. 호출부가 재생 못 한 해설로 알린다.
+  drain() {
+    const entryList = this.entryList;
+    this.entryList = [];
+    return entryList;
   }
 
   clear() {

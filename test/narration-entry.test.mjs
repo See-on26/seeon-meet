@@ -68,3 +68,14 @@ test('deliverList 가 있으면 모은 해설을 한꺼번에 넘긴다', () => 
   gate.release();
   assert.deepEqual(batchList, [['a', 'b']]);
 });
+
+test('보류 게이트를 비우면 모아 두던 해설을 돌려준다(재생 못 한 것으로 알리기 위해)', () => {
+  const deliveredList = [];
+  const gate = new NarrationHoldGate({ deliver: (item) => deliveredList.push(item) });
+  gate.hold();
+  gate.submit({ text: 'a' });
+  gate.submit({ text: 'b' });
+  assert.deepEqual(gate.clear().map((item) => item.text), ['a', 'b']);
+  assert.equal(gate.isHeld, false);
+  assert.deepEqual(deliveredList, []);
+});
