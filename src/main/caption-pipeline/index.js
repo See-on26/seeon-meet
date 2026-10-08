@@ -37,6 +37,7 @@ const { createRecordStore, RECORD_KIND_MAP } = require('./instrumentation/record
 const { createSessionStore } = require('./instrumentation/session-store');
 const { requestVlmContent, setVlmFallbackListener } = require('./agents/shared/vlm-gateway');
 const { createSlideTextAgent } = require('./agents/slide-text-agent');
+const { createOcrClient } = require('./agents/shared/ocr-client');
 const { createSlideTextStore } = require('./orchestrator/slide-text-store');
 const { verifyValuePresence, VALUE_PRESENCE_VERDICT_MAP } = require('./orchestrator/value-presence');
 const { createContextStore, toSlideMajor, LABEL_STATUS_MAP } = require('./context/context-store');
@@ -220,15 +221,17 @@ function registerPipeline({ getViewerView, meetingArchive = null }) {
     });
   });
 
-  const slideTextAgent = createSlideTextAgent({ config });
+  const slideTextAgent = createSlideTextAgent({ config, ocrClient: createOcrClient({ config }) });
   const slideTextStore = createSlideTextStore({
     transcribe: ({ jpegBuffer }) => slideTextAgent.transcribe({ jpegBuffer }),
-    onSettled: ({ slideLabel, status, textLength, errorMessage }) => {
+    onSettled: ({ slideLabel, status, textLength, errorMessage, source, fallbackReason, lineCount, elapsedMs }) => {
       markDebug({
         stage: DEBUG_STAGE_MAP.valueCheck,
         verdict: status === 'failed' ? DEBUG_VERDICT_MAP.fail : DEBUG_VERDICT_MAP.info,
         reason: `슬라이드 텍스트 전사 ${status}`,
-        detail: `슬라이드=${slideLabel} 글자수=${textLength}${errorMessage ? ` · ${errorMessage}` : ''}`,
+        detail: `슬라이드=${slideLabel} 글자수=${textLength} 출처=${source || '-'}`
+          + `${fallbackReason ? ` 넘김=${fallbackReason}` : ''} 줄=${lineCount} ${elapsedMs}ms`
+          + `${errorMessage ? ` · ${errorMessage}` : ''}`,
       });
       contextStore.applySlideText({
         slideLabel, status, text: slideTextStore.get(slideLabel).text,
@@ -986,7 +989,8 @@ function registerPipeline({ getViewerView, meetingArchive = null }) {
           value: slotMap.value, slideText: slideText.text, slideTextStatus: slideText.status,
           utterance, contextText: [beforeText, afterText].filter(Boolean).join(' '),
           subKind: selectedCandidate?.subKind || INTERPRETATION_KIND_MAP.valueToMeaning,
-          retranscribe: () => slideTextAgent.transcribe({ jpegBuffer: Buffer.from(buffer) }),
+          // 값이 없다고 나오면 지금 화면을 OCR 과 다른 엔진(VLM)으로 다시 읽어, 클릭으로 나타난 값과 OCR 오독을 함께 거른다.
+          retranscribe: () => slideTextAgent.transcribeWithVlm({ jpegBuffer: Buffer.from(buffer) }),
         });
         const verdictByValueMap = {
           [VALUE_PRESENCE_VERDICT_MAP.present]: DEBUG_VERDICT_MAP.pass,

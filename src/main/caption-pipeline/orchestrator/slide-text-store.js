@@ -11,13 +11,17 @@ function toMajorKey(slideLabel) {
 }
 
 // 새 슬라이드(major)마다 화면 글자를 한 번 전사해 두고, 값 슬롯 검사가 꺼내 쓴다.
-function createSlideTextStore({ transcribe, onSettled = () => {} }) {
+// 전사 출처(ocr·vlm)·넘긴 이유·줄 수·걸린 시간은 기록용으로 onSettled 에 함께 알린다.
+function createSlideTextStore({ transcribe, onSettled = () => {}, now = Date.now }) {
   let entryByKeyMap = new Map();
 
-  function settle({ key, entry, status, text = '', errorMessage = '' }) {
+  function settle({ key, entry, status, text = '', errorMessage = '', source = null, fallbackReason = null,
+    lineCount = 0, elapsedMs = 0 }) {
     entry.status = status;
     entry.text = text;
-    onSettled({ slideLabel: key, status, textLength: text.length, errorMessage });
+    onSettled({
+      slideLabel: key, status, textLength: text.length, errorMessage, source, fallbackReason, lineCount, elapsedMs,
+    });
   }
 
   function ensure({ slideLabel, jpegBuffer }) {
@@ -25,13 +29,16 @@ function createSlideTextStore({ transcribe, onSettled = () => {} }) {
     if (!key || entryByKeyMap.has(key)) return false;
     const entry = { status: SLIDE_TEXT_STATUS_MAP.pending, text: '', promise: null };
     entryByKeyMap.set(key, entry);
+    const startedAt = now();
     entry.promise = Promise.resolve()
       .then(() => transcribe({ jpegBuffer }))
-      .then(({ text, hasText }) => settle({
-        key, entry, status: hasText ? SLIDE_TEXT_STATUS_MAP.ready : SLIDE_TEXT_STATUS_MAP.none, text,
+      .then((result) => settle({
+        key, entry, status: result.hasText ? SLIDE_TEXT_STATUS_MAP.ready : SLIDE_TEXT_STATUS_MAP.none,
+        text: result.text, source: result.source ?? null, fallbackReason: result.fallbackReason ?? null,
+        lineCount: result.lineList?.length ?? 0, elapsedMs: now() - startedAt,
       }))
       .catch((error) => settle({
-        key, entry, status: SLIDE_TEXT_STATUS_MAP.failed, errorMessage: error.message,
+        key, entry, status: SLIDE_TEXT_STATUS_MAP.failed, errorMessage: error.message, elapsedMs: now() - startedAt,
       }));
     return true;
   }
