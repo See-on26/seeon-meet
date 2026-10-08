@@ -50,21 +50,28 @@ def create_ocr_state(model_dir=None):
         return None, f'{type(error).__name__}: {error}'
 
 
-def read_image_size(jpeg_bytes):
+def decode_image(jpeg_bytes):
+    """끝까지 디코딩한 PIL 이미지를 돌려준다.
+
+    헤더만 읽으면(verify·size) 스캔 데이터가 잘린 JPEG 이 통과해 엔진 안에서 OSError(500)가 나므로,
+    여기서 한 번 다 읽어 보고 그 이미지를 그대로 엔진에 넘긴다.
+    close 하면 픽셀까지 닫히므로 with 로 감싸지 않는다.
+    """
     from PIL import Image
     try:
-        with Image.open(io.BytesIO(jpeg_bytes)) as image:
-            image.verify()
-        with Image.open(io.BytesIO(jpeg_bytes)) as image:
-            return image.size
+        image = Image.open(io.BytesIO(jpeg_bytes))
+        image.load()
     except Exception as error:  # noqa: BLE001 — 어떤 이유든 읽지 못한 이미지는 400
         raise InvalidImageError(f'이미지를 읽지 못했다: {error}') from error
+    return image
 
 
 def recognize(engine, jpeg_bytes):
-    image_width, image_height = read_image_size(jpeg_bytes)
+    image = decode_image(jpeg_bytes)
+    image_width, image_height = image.size
     started_at = time.perf_counter()
-    result = engine(jpeg_bytes)
+    # rapidocr 는 bytes 도 PIL 이미지로 열어 같은 경로(RGB→BGR)로 바꾸므로 결과가 같다.
+    result = engine(image)
     box_list = [] if result.boxes is None else [
         {'poly': [[float(x), float(y)] for x, y in box], 'text': text, 'score': float(score)}
         for box, text, score in zip(result.boxes, result.txts, result.scores)
