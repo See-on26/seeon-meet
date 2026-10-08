@@ -14,7 +14,7 @@ const DEFAULT_HOST_FINGERPRINT = '<서버 호스트 키 지문>';
 const PACKAGED_KEY_FILE_NAME = 'gpu-tunnel-key';
 
 const LOCAL_HOSTNAME_LIST = ['127.0.0.1', 'localhost'];
-const FORWARD_URL_KEY_LIST = ['vlmUrl', 'asrUrl', 'ttsUrl', 'ttsLongUrl', 'embedUrl', 'judgeGpuUrl'];
+const FORWARD_URL_KEY_LIST = ['vlmUrl', 'asrUrl', 'ttsUrl', 'ttsLongUrl', 'embedUrl', 'ocrUrl', 'judgeGpuUrl'];
 
 function readTunnelMode(env) {
   const mode = env.SEEON_GPU_TUNNEL;

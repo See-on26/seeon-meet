@@ -140,6 +140,15 @@ test('전달 포트: 원격 주소·포트 없는 주소·잘못된 주소는 �
   ]);
 });
 
+test('전달 포트: OCR 이 임베딩과 같은 포트면 한 번만, 다른 포트로 주면 그 포트도 넘긴다', () => {
+  assert.deepEqual(
+    buildForwardList({ pipelineConfig: readPipelineConfig({}) }).map((forward) => forward.localPort),
+    [8801, 8802, 8803, 8804, 8805],
+  );
+  const forwardList = buildForwardList({ pipelineConfig: readPipelineConfig({ SEEON_OCR_URL: 'http://127.0.0.1:8806/ocr' }) });
+  assert.ok(forwardList.some((forward) => forward.localPort === 8806 && forward.remotePort === 8806));
+});
+
 test('지문: 호스트 공개 키의 SHA256 을 OpenSSH 표기(SHA256:base64, = 없음)로 계산한다', () => {
   const hostKey = Buffer.from(SAMPLE_HOST_KEY_BASE64, 'base64');
   assert.equal(computeHostKeyFingerprint(hostKey), SAMPLE_HOST_KEY_FINGERPRINT);
