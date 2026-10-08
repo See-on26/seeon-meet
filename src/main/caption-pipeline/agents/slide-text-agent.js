@@ -6,7 +6,7 @@ const AGENT_LABEL = '슬라이드전사';
 const SLIDE_TEXT_MAX_TOKENS = 600;
 const CODE_FENCE_PATTERN = /```[a-zA-Z]*\n?|```/g;
 
-// OCR 결과를 믿지 않고 VLM 으로 다시 전사하는 기준. 합성 슬라이드 시험(2026-10-08)으로 정한 시작값이다.
+// OCR 결과를 믿지 않고 VLM 으로 다시 전사하는 기준. 합성 슬라이드로 정한 시작값이며 실제 자료로 다시 정한다.
 const OCR_MIN_MEAN_SCORE = 0.8;
 const OCR_MAX_VERTICAL_BOX_RATIO = 0.2;
 // OCR 서비스가 응답하지 않으면 이 시간 동안 OCR 을 건너뛰고 바로 VLM 으로 전사한다. 장마다 상한까지 기다리지 않기 위해서다.

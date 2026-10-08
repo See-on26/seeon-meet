@@ -989,7 +989,7 @@ function registerPipeline({ getViewerView, meetingArchive = null }) {
           value: slotMap.value, slideText: slideText.text, slideTextStatus: slideText.status,
           utterance, contextText: [beforeText, afterText].filter(Boolean).join(' '),
           subKind: selectedCandidate?.subKind || INTERPRETATION_KIND_MAP.valueToMeaning,
-          // OCR 은 같은 입력에 같은 결과를 내므로, 값이 없다고 나왔을 때의 재확인은 늘 VLM 에게 받는다.
+          // 값이 없다고 나오면 지금 화면을 OCR 과 다른 엔진(VLM)으로 다시 읽어, 클릭으로 나타난 값과 OCR 오독을 함께 거른다.
           retranscribe: () => slideTextAgent.transcribeWithVlm({ jpegBuffer: Buffer.from(buffer) }),
         });
         const verdictByValueMap = {
