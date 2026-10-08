@@ -20,6 +20,10 @@ class InvalidImageError(ValueError):
     pass
 
 
+class OcrEngineError(Exception):
+    """읽힌 이미지를 엔진이 그 장에서 처리하지 못했다(예: 너무 가늘고 긴 이미지). 서비스 장애가 아니다."""
+
+
 def resolve_model_dir(model_dir=None):
     return Path(model_dir or os.environ.get('SEEON_OCR_MODEL_DIR') or DEFAULT_MODEL_DIR)
 
@@ -71,7 +75,11 @@ def recognize(engine, jpeg_bytes):
     image_width, image_height = image.size
     started_at = time.perf_counter()
     # rapidocr 는 bytes 도 PIL 이미지로 열어 같은 경로(RGB→BGR)로 바꾸므로 결과가 같다.
-    result = engine(image)
+    # 엔진이 이 장에서 낸 예외는 OcrEngineError 로 바꿔, 서버가 500(서비스 다운)이 아닌 그 장만의 오류로 답하게 한다.
+    try:
+        result = engine(image)
+    except Exception as error:  # noqa: BLE001 — rapidocr 내부 예외 종류가 정해져 있지 않다
+        raise OcrEngineError(f'OCR 엔진이 이 이미지를 처리하지 못했다: {type(error).__name__}: {error}') from error
     box_list = [] if result.boxes is None else [
         {'poly': [[float(x), float(y)] for x, y in box], 'text': text, 'score': float(score)}
         for box, text, score in zip(result.boxes, result.txts, result.scores)

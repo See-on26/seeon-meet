@@ -2,7 +2,7 @@
 # GPU 서버에서 EMBED(8804, SigLIP 이미지 임베딩)용 venv-embed를 만든다.
 # 사용: bash ~/gpu-server/setup-embed.sh
 #
-# embed_server.py가 쓰는 것만 넣는다: torch · transformers · Pillow · FastAPI.
+# embed_server.py가 쓰는 것만 넣는다: torch · transformers · Pillow · FastAPI, /ocr 용 onnxruntime · opencv-python-headless · rapidocr.
 # (예전엔 구 VLM용 venv-vllm에 vLLM 0.7.3까지 깔고 EMBED가 얹혀 썼다 — EMBED에 vLLM은 필요 없다)
 # 버전은 그 venv에서 SigLIP이 실제로 돌던 조합(torch 2.5.1+cu121 · transformers 4.49.0)을 따른다.
 #
