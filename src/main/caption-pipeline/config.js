@@ -55,7 +55,10 @@ function readJudgeBackend({ env }) {
 
 function readSlideTextBackend({ env }) {
   const backend = env.SEEON_SLIDE_TEXT_BACKEND;
-  return SLIDE_TEXT_BACKEND_LIST.includes(backend) ? backend : DEFAULT_SLIDE_TEXT_BACKEND;
+  if (backend === undefined || backend === '') return DEFAULT_SLIDE_TEXT_BACKEND;
+  if (SLIDE_TEXT_BACKEND_LIST.includes(backend)) return backend;
+  console.warn(`[pipeline] SEEON_SLIDE_TEXT_BACKEND="${backend}" 은 지원하지 않는 전사 백엔드입니다 — ${DEFAULT_SLIDE_TEXT_BACKEND} 로 전사합니다 (허용: ${SLIDE_TEXT_BACKEND_LIST.join('·')})`);
+  return DEFAULT_SLIDE_TEXT_BACKEND;
 }
 
 // OCR 은 임베딩 서비스에 붙어 있어 기본 주소를 임베딩 주소에서 만든다. 포트를 나누면 SEEON_OCR_URL 로 준다.
