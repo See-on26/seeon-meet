@@ -26,8 +26,8 @@ import { NarrationScheduler } from '../core/audio-renderer/narration-scheduler.j
 import { GapCandidateStore, resolveGapSearchFromMs } from '../core/audio-renderer/gap-candidate-store.js';
 import { SilenceSpanTracker } from '../core/audio-renderer/silence-span-tracker.js';
 import {
-  AsrSegmentTimeline, buildAudioGapCandidateList, selectGapCandidateList, resolveSilenceSafeInsertMs,
-  GAP_SOURCE_MAP, SNAP_REASON_MAP,
+  AsrSegmentTimeline, buildAudioGapCandidateList, selectGapCandidateList, resolveSilenceSafeInsertMs, isAudioGapActive,
+  GAP_CANDIDATE_SOURCE_MAP, SNAP_REASON_MAP,
 } from '../core/audio-renderer/audio-gap-candidates.js';
 import { isImmediateCaption, isAnchoredCaption, NarrationHoldGate } from '../core/audio-renderer/narration-entry.js';
 import { QUEUE_DROP_LABEL_MAP, QUEUE_DROP_REASON_MAP } from '../core/audio-renderer/narration-queue.js';
@@ -93,7 +93,7 @@ const gapCandidateStore = new GapCandidateStore({});
 // 틈 위치를 잰 무음에서 고를 때(SEEON_GAP_SOURCE=audio) 쓴다. asr 이면 재기만 하고 쓰지 않는다.
 const silenceSpanTracker = new SilenceSpanTracker();
 const asrSegmentTimeline = new AsrSegmentTimeline();
-let gapSource = GAP_SOURCE_MAP.asr;
+let gapSource = GAP_CANDIDATE_SOURCE_MAP.asr;
 
 let lastScreenNarration = '';
 
@@ -1472,12 +1472,20 @@ function toNarrationType({ source }) {
   return source === CAPTION_SOURCE_TRANSITION ? NARRATION_TYPE_MAP.pageTransition : source;
 }
 
+function isAudioGapActiveNow() {
+  return isAudioGapActive({
+    gapSource, hasDelayBuffer: Boolean(delayBuffer),
+    delayMs: getModePolicy({ mode: getCurrentMode() })?.delayMs ?? 0,
+  });
+}
+
 function collectInsertionGapList({ triggerVideoTimeMs, fromVideoTimeMs, toVideoTimeMs }) {
   const asrList = gapCandidateStore.getCandidateList({ triggerVideoTimeMs, fromVideoTimeMs, toVideoTimeMs });
-  if (gapSource !== GAP_SOURCE_MAP.audio) return asrList;
+  if (!isAudioGapActiveNow()) return asrList;
   const audioList = buildAudioGapCandidateList({
     spanList: silenceSpanTracker.getSpanList(), segmentList: asrSegmentTimeline.getSegmentList(),
-    asrCoveredUntilMs: asrSegmentTimeline.getCoveredUntilMs(), triggerVideoTimeMs, fromVideoTimeMs, toVideoTimeMs,
+    isTranscribedAt: (videoTimeMs) => asrSegmentTimeline.isTranscribedAt(videoTimeMs),
+    triggerVideoTimeMs, fromVideoTimeMs, toVideoTimeMs,
   });
   return selectGapCandidateList({
     audioList, asrList, triggerVideoTimeMs,
@@ -1486,15 +1494,14 @@ function collectInsertionGapList({ triggerVideoTimeMs, fromVideoTimeMs, toVideoT
 }
 
 const SNAP_REASON_LABEL_MAP = {
-  [SNAP_REASON_MAP.inSilence]: '재생이 지나간 자리라 재생 헤드 뒤 조용한 자리로',
+  [SNAP_REASON_MAP.inSilence]: '같은 무음 안에서 보호 간격·재생 헤드 뒤로',
   [SNAP_REASON_MAP.snapped]: '말하는 자리라 3초 안의 다음 무음으로',
-  [SNAP_REASON_MAP.noSilence]: '3초 안에 무음이 없어 재생 헤드 뒤로',
 };
 
-// 넣기 직전에 그 자리가 조용한지 다시 본다(audio 일 때만). 틈이 없어 트리거 지점에 넣거나 답이 늦어
-// 재생이 고른 자리를 지나쳤을 때 말 한가운데서 멈추지 않게 한다.
+// 넣기 직전에 그 자리가 조용한지 다시 본다(audio·품질·균형일 때만). 틈이 없어 트리거 지점에 넣거나 답이 늦어
+// 재생이 고른 자리를 지나쳤을 때 말 한가운데서 멈추지 않게 한다. 옮길 무음이 없으면 그대로 둔다.
 function snapInsertionToSilence({ targetMs, payload, narrationType }) {
-  if (gapSource !== GAP_SOURCE_MAP.audio || !delayBuffer) return targetMs;
+  if (!isAudioGapActiveNow()) return targetMs;
   const { insertMs, reason } = resolveSilenceSafeInsertMs({
     targetMs, playheadMs: delayBuffer.getDelayedTimeMs(), liveMs: captureSource.videoTimeMs,
     spanList: silenceSpanTracker.getSpanList(),
@@ -1836,7 +1843,8 @@ async function attemptStartExperiment() {
       mode: getCurrentMode(), asrLanguage: meetingLanguageStore.get(),
     }).catch(() => null);
     currentSessionId = sessionResult?.sessionId || null;
-    gapSource = sessionResult?.gapSource === GAP_SOURCE_MAP.audio ? GAP_SOURCE_MAP.audio : GAP_SOURCE_MAP.asr;
+    gapSource = sessionResult?.gapSource === GAP_CANDIDATE_SOURCE_MAP.audio
+      ? GAP_CANDIDATE_SOURCE_MAP.audio : GAP_CANDIDATE_SOURCE_MAP.asr;
 
     const contextPolicy = getModePolicy({ mode: getCurrentMode() });
     const lookaheadMs = computeLookaheadMs({ mode: getCurrentMode() });
@@ -1855,9 +1863,9 @@ async function attemptStartExperiment() {
       reason: '캡처 시작',
       detail: `모드=${getCurrentMode()} · 시작 시점 = 회의 시작 시점(0초)`
         + ` · 앞 맥락 ${describeBeforeWindow({ mode: getCurrentMode(), anchorTs: lastScreenTransitionAt })}`
-        + ` · 뒤 맥락 ${Math.round((contextPolicy?.afterMs ?? 0) / 1000)}초 · 틈 후보=${gapSource}`
+        + ` · 뒤 맥락 ${Math.round((contextPolicy?.afterMs ?? 0) / 1000)}초`
         + ` (ASR 청크 ${contextPolicy?.asrSegmentMs}ms(무음 절단 ${contextPolicy?.asrMinSegmentMs}ms 이후)`
-        + ` + look-ahead ${lookaheadMs}ms + 보류 ${holdMs}ms)`,
+        + ` + look-ahead ${lookaheadMs}ms + 보류 ${holdMs}ms) · 틈 후보=${gapSource}`,
     });
 
     const { audioTrack } = await captureSource.start();

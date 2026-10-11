@@ -19,10 +19,15 @@ test('소리로 잰 후보는 무음에 잰 값 표시, 아직 이어지는 무�
     '[2] +1.2초 · 앞 발화 "(없음)" · 끝맺음=미상(받아쓰기 전) · 무음 ≥0.6초(잰 값) · 뒤 발화 "(없음)"');
 });
 
-test('미상 끝맺음과 잰 무음을 시스템 프롬프트가 설명한다', () => {
+test('잰 무음·미상 설명은 그런 후보가 있을 때만 입력에 붙고, ASR 후보만이면 입력과 시스템 프롬프트가 그대로다', () => {
+  const { buildGapInput } = require('../src/main/caption-pipeline/output/gap-inference-agent.js');
+  const request = { narrationText: '표를 보는 중', narrationType: 'deixis' };
+  const asrInput = buildGapInput({ ...request, gapList: [baseGap] });
+  assert.doesNotMatch(asrInput, /참고:/);
+  assert.doesNotMatch(GAP_SYSTEM_PROMPT, /잰 값|미상/);
+  assert.match(buildGapInput({ ...request, gapList: [{ ...baseGap, source: 'audio' }] }), /참고: 무음에 "\(잰 값\)"/);
+  assert.match(buildGapInput({ ...request, gapList: [{ ...baseGap, kind: 'unknown' }] }), /참고: 끝맺음=미상/);
   assert.equal(BOUNDARY_KIND_MAP.unknown, 'unknown');
-  assert.match(GAP_SYSTEM_PROMPT, /잰 값/);
-  assert.match(GAP_SYSTEM_PROMPT, /미상/);
 });
 
 test('규칙 폴백은 미상보다 완결을 고른다', () => {

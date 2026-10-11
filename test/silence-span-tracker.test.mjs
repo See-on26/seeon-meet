@@ -80,13 +80,36 @@ test('isBlind 로 받은 틱은 판단하지 않는다(기본은 판단한다)',
   assert.deepEqual(tracker.getSpanList(), []);
 });
 
-test('보관 시간이 지난 구간과 측정 범위는 버린다', () => {
+test('보관 시간이 지난 구간과 닫힌 측정 범위는 버린다', () => {
   const tracker = new SilenceSpanTracker({ retainMs: 1000 });
-  feed(tracker, [SPEECH, QUIET, QUIET, QUIET, SPEECH]);
-  const levelList = Array.from({ length: 20 }, () => SPEECH);
-  feed(tracker, levelList, { fromMs: 500 });
+  feed(tracker, [SPEECH, QUIET, QUIET, QUIET, SPEECH, null]);
+  feed(tracker, Array.from({ length: 20 }, () => SPEECH), { fromMs: 600 });
   assert.deepEqual(tracker.getSpanList(), []);
-  assert.ok(tracker.getCoverageList().every((range) => range.toMs >= 2400 - 1000));
+  assert.deepEqual(tracker.getCoverageList(), [{ fromMs: 600, toMs: 2500 }]);
+});
+
+test('구간 끝의 사이 값 틱은 무음으로 치지 않는다(끝은 마지막 무음 틱)', () => {
+  const closed = new SilenceSpanTracker();
+  feed(closed, [SPEECH, QUIET, QUIET, QUIET, BETWEEN, BETWEEN, SPEECH]);
+  assert.deepEqual(closed.getSpanList(), [{ startMs: 100, endMs: 300, isOpen: false }]);
+
+  const open = new SilenceSpanTracker();
+  feed(open, [SPEECH, QUIET, QUIET, QUIET, BETWEEN]);
+  assert.deepEqual(open.getSpanList(), [{ startMs: 100, endMs: 300, isOpen: true }]);
+});
+
+test('틱 간격이 정확히 300ms 면 이어지고 301ms 면 끊긴다', () => {
+  const joined = new SilenceSpanTracker();
+  feed(joined, [SPEECH, QUIET, QUIET, QUIET]);
+  joined.update({ videoTimeMs: 600, level: QUIET });
+  joined.update({ videoTimeMs: 700, level: SPEECH });
+  assert.deepEqual(joined.getSpanList(), [{ startMs: 100, endMs: 600, isOpen: false }]);
+
+  const broken = new SilenceSpanTracker();
+  feed(broken, [SPEECH, QUIET, QUIET, QUIET]);
+  broken.update({ videoTimeMs: 601, level: QUIET });
+  broken.update({ videoTimeMs: 701, level: SPEECH });
+  assert.deepEqual(broken.getSpanList(), [{ startMs: 100, endMs: 300, isOpen: false }]);
 });
 
 test('reset 하면 구간·측정 범위·진행 중 판단이 모두 비워진다', () => {

@@ -1190,7 +1190,7 @@ function registerPipeline({ getViewerView, meetingArchive = null }) {
       gapIndex: result.gapIndex, source: result.source, reason: result.reason,
       mode: mode || null, modelId: result.modelId || null,
       chosenOffsetMs: chosen?.offsetMs ?? null, candidateCount: (gapList || []).length,
-      candidateSourceCount, chosenKind: chosen?.kind ?? null, chosenSource: chosen?.source ?? null,
+      candidateSourceCount, chosenKind: chosen?.kind ?? null, chosenCandidateSource: chosen?.source ?? null,
     });
     markDebug({
       stage: DEBUG_STAGE_MAP.gap, ts, narrationType,

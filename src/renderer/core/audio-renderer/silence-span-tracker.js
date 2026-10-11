@@ -17,6 +17,8 @@ const DEFAULT_CONFIRM_TICK_COUNT = 3;
 const DEFAULT_MAX_TICK_GAP_MS = 300;
 // 품질 모드 지연(60초)보다 넉넉히 둔다.
 const DEFAULT_RETAIN_MS = 90000;
+// 레벨을 읽는 주기. 잰 무음 길이는 첫·마지막 무음 틱 사이라 실제보다 이만큼 짧다.
+export const LEVEL_TICK_MS = 100;
 
 export function classifyLevelTick({ level, speechOnLevel = DEFAULT_SPEECH_ON_LEVEL,
   silenceOffLevel = DEFAULT_SILENCE_OFF_LEVEL }) {
@@ -41,6 +43,7 @@ export class SilenceSpanTracker {
   reset() {
     this.closedSpanList = [];
     this.openSpanStartMs = null;
+    this.lastSilenceTickMs = null;
     this.pendingStartMs = null;
     this.pendingTickCount = 0;
     this.closedCoverageList = [];
@@ -62,23 +65,19 @@ export class SilenceSpanTracker {
     if (kind === LEVEL_TICK_KIND_MAP.speech || (kind === LEVEL_TICK_KIND_MAP.between && this.openSpanStartMs === null)) {
       this.closeOpenSpan();
       this.clearPending();
-    } else if (kind === LEVEL_TICK_KIND_MAP.silence && this.openSpanStartMs === null) {
-      if (this.pendingStartMs === null) this.pendingStartMs = videoTimeMs;
-      this.pendingTickCount += 1;
-      if (this.pendingTickCount >= this.confirmTickCount) {
-        this.openSpanStartMs = this.pendingStartMs;
-        this.clearPending();
-      }
+    } else if (kind === LEVEL_TICK_KIND_MAP.silence) {
+      this.lastSilenceTickMs = videoTimeMs;
+      if (this.openSpanStartMs === null) this.advancePending(videoTimeMs);
     }
     this.lastTickMs = videoTimeMs;
     this.pruneBefore(videoTimeMs - this.retainMs);
   }
 
-  // 무음 구간 목록. 진행 중인 구간은 마지막 틱까지를 끝으로 보고 isOpen 으로 알린다.
+  // 무음 구간 목록. 진행 중인 구간은 마지막 무음 틱까지를 끝으로 보고 isOpen 으로 알린다.
   getSpanList() {
     const spanList = this.closedSpanList.map((span) => ({ ...span }));
     if (this.openSpanStartMs !== null) {
-      spanList.push({ startMs: this.openSpanStartMs, endMs: this.lastTickMs, isOpen: true });
+      spanList.push({ startMs: this.openSpanStartMs, endMs: this.lastSilenceTickMs, isOpen: true });
     }
     return spanList;
   }
@@ -103,10 +102,19 @@ export class SilenceSpanTracker {
     this.lastTickMs = null;
   }
 
-  // 말소리가 시작된 때는 마지막 무음 틱과 이번 틱 사이 어딘가라, 끝은 안전하게 마지막 무음 틱으로 둔다.
+  advancePending(videoTimeMs) {
+    if (this.pendingStartMs === null) this.pendingStartMs = videoTimeMs;
+    this.pendingTickCount += 1;
+    if (this.pendingTickCount < this.confirmTickCount) return;
+    this.openSpanStartMs = this.pendingStartMs;
+    this.clearPending();
+  }
+
+  // 말소리가 시작된 때는 마지막 무음 틱 뒤 어딘가라(사이 값 틱은 무음으로 치지 않는다),
+  // 끝은 안전하게 마지막 무음 틱으로 둔다.
   closeOpenSpan() {
     if (this.openSpanStartMs === null) return;
-    this.closedSpanList.push({ startMs: this.openSpanStartMs, endMs: this.lastTickMs, isOpen: false });
+    this.closedSpanList.push({ startMs: this.openSpanStartMs, endMs: this.lastSilenceTickMs, isOpen: false });
     this.openSpanStartMs = null;
   }
 
