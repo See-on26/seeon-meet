@@ -24,3 +24,39 @@ export function resolveSpeechEndWallTs({ chunkStartTs, chunkEndTs, segmentList =
   }
   return Number.isFinite(chunkEndTs) ? chunkEndTs : null;
 }
+
+// 전사 글에서 세그먼트마다 차지하는 글자 범위를 앞에서부터 찾는다(전사 글은 세그먼트 글을 이어 붙인 것이다).
+function locateSegmentRangeList({ text, segmentList }) {
+  let cursor = 0;
+  return segmentList.map((segment) => {
+    const segmentText = String(segment?.text || '').trim();
+    const index = segmentText ? text.indexOf(segmentText, cursor) : -1;
+    if (index < 0) return null;
+    cursor = index + segmentText.length;
+    return { segment, start: index, end: cursor };
+  });
+}
+
+// 후보의 글자 위치(start)로 세그먼트를 고른다. 같은 구가 한 조각에 두 번 나오거나 짧은 구가 앞 낱말 안에서
+// 먼저 걸려도 실제 자리의 세그먼트를 쓰기 위해서다. 위치를 모르면 구가 든 첫 세그먼트로 찾는다.
+function resolveCandidateEndWallTs({ candidate, text, chunkStartTs, chunkEndTs, segmentList }) {
+  if (text && Number.isFinite(candidate.start) && Number.isFinite(chunkStartTs)) {
+    const range = locateSegmentRangeList({ text, segmentList })
+      .find((entry) => entry && candidate.start >= entry.start && candidate.start < entry.end);
+    if (range && Number.isFinite(range.segment.endSec)) {
+      return clampToChunk({ wallTs: chunkStartTs + range.segment.endSec * 1000, chunkStartTs, chunkEndTs });
+    }
+  }
+  return resolveSpeechEndWallTs({ chunkStartTs, chunkEndTs, segmentList, trigger: candidate.phrase });
+}
+
+// 후보 구마다 그 말을 끝낸 영상 시각을 붙인다. look-ahead·판단 전 보류 중에 합쳐진 뒤 조각의 후보가
+// 해설로 이어지면 결정의 첫 후보 시각이 아니라 그 말 뒤에 해설을 넣기 위해서다.
+export function attachCandidateEventVideoTime({ candidateList = [], text = '', chunkStartTs, chunkEndTs, segmentList = [],
+  nowWallTs = Date.now(), nowVideoTimeMs }) {
+  return candidateList.map((candidate) => {
+    if (!candidate?.phrase) return candidate;
+    const wallTs = resolveCandidateEndWallTs({ candidate, text, chunkStartTs, chunkEndTs, segmentList });
+    return { ...candidate, eventVideoTimeMs: wallToVideoTimeMs({ wallTs, nowWallTs, nowVideoTimeMs }) };
+  });
+}

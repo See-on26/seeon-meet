@@ -70,7 +70,7 @@ import { computeAnchoredPanelPosition } from '../core/ui/anchored-panel-position
 import { RoiStore, SPEAKER_VERDICT_MAP } from '../core/roi/roi-store.js';
 import { MeetCaptureSession } from '../core/capture/meet-capture-session.js';
 import { fitWithinLongEdge } from '../core/capture/frame-scale.js';
-import { wallToVideoTimeMs, resolveSpeechEndWallTs } from '../core/capture/video-time.js';
+import { wallToVideoTimeMs, resolveSpeechEndWallTs, attachCandidateEventVideoTime } from '../core/capture/video-time.js';
 
 const $ = (id) => document.getElementById(id);
 
@@ -1136,15 +1136,19 @@ function handleAsrTranscript({ text, ts, endTs, segmentList = [], triggerCandida
     });
 
     transcriptWindow.push({ text: trimmed, ts: performance.now() });
+    const timedCandidateList = attachCandidateEventVideoTime({
+      candidateList: triggerCandidateList, text, chunkStartTs: ts, chunkEndTs: endTs, segmentList,
+      nowVideoTimeMs: captureSource.videoTimeMs,
+    });
     // 대기·보류 중인 지시 후보가 있으면 이 조각과 그 후보를 그 결정에 먼저 붙인다. 새 후보는 그다음 탐지에서 생긴다.
     // 이 조각으로 앞 후보의 판정이 났으면, 이미 그 문장에 쓴 조각이므로 새 후보의 트리거로 쓰지 않는다.
     const { isAppended, isDecided } = candidateScheduler.appendTranscript({
-      text: trimmed, endTs, candidateList: triggerCandidateList,
+      text: trimmed, endTs, candidateList: timedCandidateList,
     });
     if (isAppended) lastDeixisDecidedAt = performance.now();
     if (!isDecided) {
       deixisDetector.handleTranscript({
-        text: trimmed, candidateList: triggerCandidateList, captureTs: endTs,
+        text: trimmed, candidateList: timedCandidateList, captureTs: endTs,
         resolveEventWallTs: ({ trigger }) => resolveSpeechEndWallTs({
           chunkStartTs: ts, chunkEndTs: endTs, segmentList, trigger,
         }),
