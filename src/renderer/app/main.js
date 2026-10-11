@@ -62,6 +62,7 @@ import { computeAnchoredPanelPosition } from '../core/ui/anchored-panel-position
 
 import { RoiStore, SPEAKER_VERDICT_MAP } from '../core/roi/roi-store.js';
 import { MeetCaptureSession } from '../core/capture/meet-capture-session.js';
+import { fitWithinLongEdge } from '../core/capture/frame-scale.js';
 import { wallToVideoTimeMs, resolveSpeechEndWallTs } from '../core/capture/video-time.js';
 
 const $ = (id) => document.getElementById(id);
@@ -626,8 +627,9 @@ async function captureFrameJpeg(subRegion = null) {
 async function captureRegionJpeg(region) {
   if (!region || !captureSource.liveVideo) return null;
   const canvas = document.createElement('canvas');
-  canvas.width = Math.max(2, Math.round(region.w));
-  canvas.height = Math.max(2, Math.round(region.h));
+  const { width, height } = fitWithinLongEdge({ width: region.w, height: region.h });
+  canvas.width = width;
+  canvas.height = height;
   canvas.getContext('2d').drawImage(
     captureSource.liveVideo, region.x, region.y, region.w, region.h, 0, 0, canvas.width, canvas.height);
   const blob = await new Promise((resolve) => canvas.toBlob(resolve, 'image/jpeg', CROP_JPEG_QUALITY));
