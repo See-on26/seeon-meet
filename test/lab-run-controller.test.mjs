@@ -549,3 +549,31 @@ test('비어 있거나 잘못된 IPC 보고는 던지지 않고 버린다', asyn
   await harness.controller.stop();
   assert.equal(harness.finalizedList[0].run.playbackList.length, 1);
 });
+
+test('영상을 고르면 시작 전에 재생 화면에 불러와 첫 화면에 둔다(캡처·재생은 하지 않는다)', async () => {
+  const harness = createHarness();
+  const result = await harness.controller.previewVideo({ videoPath: '/videos/발표 1.mp4' });
+  assert.equal(result.isOk, true);
+  assert.equal(result.durationMs, 60000);
+  assert.deepEqual(harness.callList, ['player.load:file:///videos/%EB%B0%9C%ED%91%9C%201.mp4']);
+  assert.equal(harness.controller.getStatus().phase, RUN_PHASE_MAP.idle);
+});
+
+test('실행 중에는 미리 불러오지 않고, 경로가 없으면 고르라고 알린다', async () => {
+  const harness = createHarness();
+  assert.equal((await harness.controller.previewVideo({ videoPath: null })).isOk, false);
+  await harness.controller.start({ videoPath: '/videos/a.mp4', isEvalPreset: true });
+  harness.callList.length = 0;
+  const result = await harness.controller.previewVideo({ videoPath: '/videos/b.mp4' });
+  assert.equal(result.isOk, false);
+  assert.match(result.message, /실행 중/);
+  assert.deepEqual(harness.callList, []);
+});
+
+test('미리 불러오기가 실패하거나 응답이 없으면 이유를 돌려주고 실행 상태는 그대로다', async () => {
+  const hung = createHarness({ hangCallList: ['player.load'] });
+  const hungResult = await hung.controller.previewVideo({ videoPath: '/videos/a.mp4' });
+  assert.equal(hungResult.isOk, false);
+  assert.match(hungResult.message, /응답이 없었다/);
+  assert.equal(hung.controller.getStatus().phase, RUN_PHASE_MAP.idle);
+});

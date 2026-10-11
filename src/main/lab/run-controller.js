@@ -397,6 +397,19 @@ function createRunController({
     return { isOk: true, runDir: result.runDir ?? runDir, isComplete: result.isComplete };
   }
 
+  // 영상을 고르면 시작 전에 재생 화면에 불러와 첫 화면에 멈춰 둔다. ROI 를 빈 화면이 아니라 실제 영상 위에서
+  // 맞추기 위해서다. 캡처·재생은 하지 않고, 시작할 때 영상을 다시 불러와 처음부터 돈다.
+  async function previewVideo({ videoPath }) {
+    if (!IDLE_PHASE_LIST.includes(phase)) return { isOk: false, message: '실행 중에는 영상을 바꾸지 않는다' };
+    if (!videoPath) return { isOk: false, message: '영상 파일을 먼저 고른다' };
+    const outcome = await settleWithin({
+      task: () => playerDriver.load({ fileUrl: pathToFileURL(videoPath).href }), timeoutMs: VIDEO_LOAD_TIMEOUT_MS,
+    });
+    if (outcome.isTimedOut) return { isOk: false, message: `영상 불러오기: ${VIDEO_LOAD_TIMEOUT_MS / 1000}초 안에 응답이 없었다` };
+    if (outcome.error) return { isOk: false, message: `영상을 불러오지 못했다: ${outcome.error.message}` };
+    return { isOk: true, ...outcome.value };
+  }
+
   async function setRoiEditing({ isEditing }) {
     if (!IDLE_PHASE_LIST.includes(phase)) return { isOk: false, message: '실행 중에는 ROI 를 바꾸지 않는다' };
     try {
@@ -408,7 +421,7 @@ function createRunController({
 
   // 아래 handle* 는 ipcMain 리스너에서 바로 불린다. 여기서 던지면 main 프로세스 예외가 되므로 이상한 보고는 버린다.
   return {
-    start, pause, resume, stop, setRoiEditing, getStatus,
+    start, pause, resume, stop, setRoiEditing, previewVideo, getStatus,
     handlePlayerTime(report) {
       recorder.addPlayerTime(report);
       if (report?.ended && phase === RUN_PHASE_MAP.running) {

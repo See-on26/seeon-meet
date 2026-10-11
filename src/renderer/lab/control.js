@@ -31,6 +31,7 @@ function render(status) {
   $('statusText').title = status.runDir || status.lastRunDir || '';
 }
 
+// 고른 영상은 재생 화면에 첫 화면으로 띄워, 시작 전에 그 위에서 ROI 를 맞출 수 있게 한다.
 $('pickBtn').addEventListener('click', async () => {
   const pickedPath = await window.labControl.pickVideo();
   if (!pickedPath) return;
@@ -38,6 +39,10 @@ $('pickBtn').addEventListener('click', async () => {
   $('videoName').textContent = pickedPath.split('/').pop();
   $('videoName').title = pickedPath;
   render(lastStatus);
+  const preview = await window.labControl.previewVideo({ videoPath: pickedPath });
+  $('statusText').textContent = preview?.isOk
+    ? '[준비] 첫 화면을 띄웠다 — 필요하면 ROI 편집으로 공유 화면 영역을 맞춘 뒤 시작'
+    : `[준비] 첫 화면을 띄우지 못했다(시작은 할 수 있다): ${preview?.message || ''}`;
 });
 
 $('evalPresetChk').addEventListener('change', () => {
