@@ -2,7 +2,8 @@ const { ensureUsPrefix, buildInferenceConfig } = require('../router/deixis-judge
 const { readConverseText } = require('../agents/shared/bedrock-converse');
 const { NARRATION_TYPE_MAP } = require('../contracts/narration-types');
 const {
-  BOUNDARY_KIND_MAP, BOUNDARY_KIND_LABEL_MAP, GAP_SYSTEM_PROMPT, FEW_SHOT_LIST,
+  BOUNDARY_KIND_MAP, BOUNDARY_KIND_LABEL_MAP, GAP_CANDIDATE_SOURCE_MAP, MEASURED_GAP_NOTE_LIST,
+  GAP_SYSTEM_PROMPT, FEW_SHOT_LIST,
 } = require('../prompts/gap-inference');
 
 const REQUEST_TIMEOUT_MS = 12000;
@@ -14,13 +15,32 @@ const GAP_SOURCE_MAP = {
   none: 'none',
 };
 
+// 소리로 잰 후보(source=audio)는 무음 길이에 "(잰 값)"을, 아직 이어지는 무음(isOpen)은 "≥"를 붙인다.
+function formatSilenceLabel({ gap }) {
+  const silenceSec = (gap.silenceMs / 1000).toFixed(1);
+  const measuredSuffix = gap.source === GAP_CANDIDATE_SOURCE_MAP.audio ? '(잰 값)' : '';
+  return `무음 ${gap.isOpen ? '≥' : ''}${silenceSec}초${measuredSuffix}`;
+}
+
 function formatGapLine({ gap, index }) {
   const offsetSec = (gap.offsetMs / 1000).toFixed(1);
   const sign = gap.offsetMs >= 0 ? '+' : '';
   const kindLabel = BOUNDARY_KIND_LABEL_MAP[gap.kind] || gap.kind;
   return `[${index}] ${sign}${offsetSec}초 · 앞 발화 "${gap.beforeText || '(없음)'}"`
-    + ` · 끝맺음=${kindLabel} · 무음 ${(gap.silenceMs / 1000).toFixed(1)}초`
+    + ` · 끝맺음=${kindLabel} · ${formatSilenceLabel({ gap })}`
     + ` · 뒤 발화 "${gap.afterText || '(없음)'}"`;
+}
+
+// 렌더러가 출처를 싣지 않은 후보(ASR 끝 시각 후보)는 asr 로 센다.
+function countGapCandidateSource({ gapList }) {
+  return gapList.reduce((count, gap) => {
+    count[gap?.source === GAP_CANDIDATE_SOURCE_MAP.audio ? GAP_CANDIDATE_SOURCE_MAP.audio : GAP_CANDIDATE_SOURCE_MAP.asr] += 1;
+    return count;
+  }, { audio: 0, asr: 0 });
+}
+
+function hasMeasuredGap({ gapList }) {
+  return gapList.some((gap) => gap.source === GAP_CANDIDATE_SOURCE_MAP.audio || gap.kind === BOUNDARY_KIND_MAP.unknown);
 }
 
 function buildGapInput({ narrationText, narrationType, subKind = null, rationale = '',
@@ -32,6 +52,7 @@ function buildGapInput({ narrationText, narrationType, subKind = null, rationale
     `화면: ${screenSummary || '(없음)'}`,
     ...(beforeTranscript ? [`직전 맥락: ${beforeTranscript}`] : []),
     '트리거 시각: 0.0초 (아래 후보의 기준점 — 음수는 트리거보다 앞선 틈이다)',
+    ...(hasMeasuredGap({ gapList }) ? MEASURED_GAP_NOTE_LIST : []),
     '',
     '후보 틈:',
     ...gapList.map((gap, index) => formatGapLine({ gap, index })),
@@ -155,6 +176,6 @@ function createGapInferenceAgent({ config }) {
 }
 
 module.exports = {
-  createGapInferenceAgent, buildGapInput, parseGapText, selectFallbackGapIndex, formatGapLine,
+  createGapInferenceAgent, buildGapInput, parseGapText, selectFallbackGapIndex, formatGapLine, countGapCandidateSource,
   canPickBeforeTrigger, GAP_SYSTEM_PROMPT, GAP_SOURCE_MAP, BOUNDARY_KIND_MAP,
 };
