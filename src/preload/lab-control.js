@@ -3,6 +3,7 @@ const { contextBridge, ipcRenderer } = require('electron');
 
 contextBridge.exposeInMainWorld('labControl', {
   pickVideo: () => ipcRenderer.invoke('lab-pick-video'),
+  previewVideo: ({ videoPath }) => ipcRenderer.invoke('lab-preview-video', { videoPath }),
   start: (option) => ipcRenderer.invoke('lab-start', option),
   pause: () => ipcRenderer.invoke('lab-pause'),
   resume: () => ipcRenderer.invoke('lab-resume'),

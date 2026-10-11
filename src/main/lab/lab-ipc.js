@@ -85,6 +85,7 @@ function registerLabIpc({ ipcMain, labWindow, pipelineConfig, onRunFinished = ()
     });
     return result.canceled ? null : result.filePaths[0];
   });
+  ipcMain.handle('lab-preview-video', (_event, { videoPath } = {}) => controller.previewVideo({ videoPath }));
   ipcMain.handle('lab-start', (_event, option) => controller.start(option || {}));
   ipcMain.handle('lab-pause', () => controller.pause());
   ipcMain.handle('lab-resume', () => controller.resume());
