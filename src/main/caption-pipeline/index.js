@@ -9,7 +9,7 @@ const { toNarrationClass, NARRATION_ORIGIN_MAP } = require('./contracts/narratio
 const { buildSpeakerIdentityFromDom } = require('./agents/speaker-identity-agent');
 const { DEBUG_STAGE_MAP, DEBUG_VERDICT_MAP } = require('./contracts/debug-events');
 const { createAgentFieldMap } = require('./agents');
-const { createUnifiedRouter, ROUTER_MODE_MAP } = require('./router/unified-router');
+const { createUnifiedRouter, ROUTER_MODE_MAP, resolveGapEventVideoTimeMs } = require('./router/unified-router');
 const { createSpeechTrigger, TRIGGER_TYPE_LABEL_MAP } = require('./trigger/speech-trigger');
 const { createKiwiTokenizer } = require('./trigger/kiwi-tokenizer');
 const { resolveKiwiModelDir } = require('./trigger/kiwi-model');
@@ -891,6 +891,7 @@ function registerPipeline({ getViewerView, meetingArchive = null }) {
     try {
       let judgeReason = null;
       let selectedCandidate = null;
+      let narrationEventVideoTimeMs = eventVideoTimeMs;
       if (utterance && utterance.trim()) {
         if (isRouterMode) {
           // 트리거가 뽑은 후보 구마다 판단 LLM 이 앞뒤 발화로 공백(O)인지 가린다.
@@ -910,6 +911,15 @@ function registerPipeline({ getViewerView, meetingArchive = null }) {
             candidateList: routed.candidateList, isScaleEnabled: config.isScaleEnabled,
           });
           selectedCandidate = selected;
+          narrationEventVideoTimeMs = resolveGapEventVideoTimeMs({ judgeList: routed.judgeList, fallbackMs: eventVideoTimeMs });
+          if (Number.isFinite(eventVideoTimeMs) && narrationEventVideoTimeMs > eventVideoTimeMs) {
+            markDebug({
+              stage: DEBUG_STAGE_MAP.router, verdict: DEBUG_VERDICT_MAP.info, ts,
+              reason: '해설 자리를 공백 후보의 발화 시각으로 옮김',
+              detail: `결정 시각 ${Math.round(eventVideoTimeMs)}ms → ${Math.round(narrationEventVideoTimeMs)}ms`
+                + ` (+${((narrationEventVideoTimeMs - eventVideoTimeMs) / 1000).toFixed(1)}초)`,
+            });
+          }
           if (excludedList.length) {
             markDebug({
               stage: DEBUG_STAGE_MAP.router, verdict: DEBUG_VERDICT_MAP.skip, ts,
@@ -1024,7 +1034,7 @@ function registerPipeline({ getViewerView, meetingArchive = null }) {
       const sent = await sendCaption({
         ts, text, source: narrationType, slideLabel, slotMap,
         hasPointingRegion,
-        narrationClass: toNarrationClass({ narrationType }), eventVideoTimeMs,
+        narrationClass: toNarrationClass({ narrationType }), eventVideoTimeMs: narrationEventVideoTimeMs,
         rationale: {
           utterance,
           subKind: selectedCandidate?.subKind || null,

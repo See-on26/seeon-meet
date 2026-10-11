@@ -24,3 +24,14 @@ export function resolveSpeechEndWallTs({ chunkStartTs, chunkEndTs, segmentList =
   }
   return Number.isFinite(chunkEndTs) ? chunkEndTs : null;
 }
+
+// 후보 구마다 그 말을 끝낸 영상 시각을 붙인다. 판단 전 보류·look-ahead 중에 합쳐진 뒤 조각의 후보가
+// 공백(O) 판정을 받으면 결정의 첫 후보 시각이 아니라 이 시각 뒤에 해설을 넣기 위해서다.
+export function attachCandidateEventVideoTime({ candidateList = [], chunkStartTs, chunkEndTs, segmentList = [],
+  nowWallTs = Date.now(), nowVideoTimeMs }) {
+  return candidateList.map((candidate) => {
+    if (!candidate?.phrase) return candidate;
+    const wallTs = resolveSpeechEndWallTs({ chunkStartTs, chunkEndTs, segmentList, trigger: candidate.phrase });
+    return { ...candidate, eventVideoTimeMs: wallToVideoTimeMs({ wallTs, nowWallTs, nowVideoTimeMs }) };
+  });
+}
