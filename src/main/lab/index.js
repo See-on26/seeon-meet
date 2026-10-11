@@ -2,7 +2,8 @@ const path = require('path');
 const { app, ipcMain } = require('electron');
 const { loadEnvFile } = require('../env');
 
-loadEnvFile();
+// 설치본에서는 resources 의 .env 를 읽는다(제품 앱과 같은 방식).
+loadEnvFile({ isPackaged: app.isPackaged, resourcesPath: process.resourcesPath });
 // 제품 앱과 userData 를 나눈다. 같은 폴더면 두 앱을 함께 띄울 때 저장소 잠금이 부딪힌다.
 app.setPath('userData', path.join(app.getPath('appData'), 'seeon-lab'));
 

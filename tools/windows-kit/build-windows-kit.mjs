@@ -3,8 +3,10 @@
 // 코드가 바뀔 때마다 이 스크립트 하나로 origin/production(또는 --ref)을 깨끗한 빌드 폴더에 받아 빌드한다.
 // 내 작업 폴더의 미커밋 변경이 설치본에 섞이지 않게, 빌드는 늘 커밋 하나를 그대로 꺼낸 별도 worktree 에서 한다.
 //
-// 사용: node tools/windows-kit/build-windows-kit.mjs [--ref origin/production] [--env .env] [--key <앱 전용 터널 키>]
-//                                             [--out ~/Desktop] [--label 받는사람] [--no-fetch] [--build-dir <폴더>]
+// 사용: node tools/windows-kit/build-windows-kit.mjs [--app meet|lab] [--ref origin/production] [--env .env]
+//                                             [--key <앱 전용 터널 키>] [--out ~/Desktop] [--label 받는사람]
+//                                             [--no-fetch] [--build-dir <폴더>]
+// --app lab 은 실험 창 설치본을 만든다(기준 기본값 origin/experiment).
 import { execFileSync, spawnSync } from 'node:child_process';
 import crypto from 'node:crypto';
 import fs from 'node:fs';
@@ -14,21 +16,30 @@ import { fileURLToPath } from 'node:url';
 
 // 개발 PC 에서만 맞는 값. 설치본에 들어가면 Windows 에 없는 맥 경로를 가리키거나 터널을 꺼 버린다.
 export const DEV_ONLY_ENV_KEY_LIST = ['SEEON_GPU_SSH_KEY', 'SEEON_GPU_TUNNEL'];
-const DEFAULT_REF = 'origin/production';
-// zip 안 이름은 ASCII 로 둔다. bsdtar zip 은 한글 이름에 UTF-8 표시를 하지 않아 Windows 탐색기에서 깨진다.
-const KIT_FOLDER_NAME = 'SEEON-Windows-kit';
-const README_TEMPLATE_PATH = fileURLToPath(new URL('./windows-kit-README.txt', import.meta.url));
+// 앱마다 기준 브랜치·빌드 스크립트·설치 파일 이름·zip 이름·안내문이 다르다.
+// zip 안 폴더 이름은 ASCII 로 둔다. bsdtar zip 은 한글 이름에 UTF-8 표시를 하지 않아 Windows 탐색기에서 깨진다.
+export const KIT_APP_MAP = {
+  meet: {
+    defaultRef: 'origin/production', distScript: 'dist:win', installerPattern: /^SEEON-Setup-.*\.exe$/,
+    kitPrefix: 'SEEON-Windows', folderName: 'SEEON-Windows-kit', readmeFileName: 'windows-kit-README.txt',
+  },
+  lab: {
+    defaultRef: 'origin/experiment', distScript: 'dist:win:lab', installerPattern: /^SEEON-Lab-Setup-.*\.exe$/,
+    kitPrefix: 'SEEON-Lab-Windows', folderName: 'SEEON-Lab-Windows-kit', readmeFileName: 'windows-lab-kit-README.txt',
+  },
+};
+const DEFAULT_APP = 'meet';
 const LOCK_HASH_FILE_NAME = '.kit-lock-hash';
 const isWindows = process.platform === 'win32';
 
 const OPTION_KEY_MAP = {
-  '--ref': 'ref', '--env': 'envFile', '--key': 'keyFile', '--out': 'outDir', '--label': 'label', '--build-dir': 'buildDir',
+  '--app': 'app', '--ref': 'ref', '--env': 'envFile', '--key': 'keyFile', '--out': 'outDir', '--label': 'label', '--build-dir': 'buildDir',
 };
 const PATH_OPTION_KEY_LIST = ['envFile', 'keyFile', 'outDir', 'buildDir'];
 
 export function parseKitArgs(argList, { env, homeDir, repoRoot }) {
   const option = {
-    ref: DEFAULT_REF, envFile: path.join(repoRoot, '.env'), keyFile: env.SEEON_BUILD_TUNNEL_KEY || null,
+    app: DEFAULT_APP, ref: null, envFile: path.join(repoRoot, '.env'), keyFile: env.SEEON_BUILD_TUNNEL_KEY || null,
     outDir: path.join(homeDir, 'Desktop'), label: '', isFetch: true, buildDir: null,
   };
   for (let index = 0; index < argList.length; index += 1) {
@@ -41,6 +52,8 @@ export function parseKitArgs(argList, { env, homeDir, repoRoot }) {
     option[key] = PATH_OPTION_KEY_LIST.includes(key) ? path.resolve(repoRoot, value) : value;
     index += 1;
   }
+  if (!KIT_APP_MAP[option.app]) throw new Error(`--app 은 ${Object.keys(KIT_APP_MAP).join('·')} 중 하나다 (지금 ${option.app})`);
+  if (!option.ref) option.ref = KIT_APP_MAP[option.app].defaultRef;
   return option;
 }
 
@@ -63,10 +76,10 @@ export function readEnvValue(text, key) {
 
 const pad2 = (value) => String(value).padStart(2, '0');
 
-export function buildKitName({ date, commit, label }) {
+export function buildKitName({ date, commit, label, app = DEFAULT_APP }) {
   const stamp = `${date.getFullYear()}${pad2(date.getMonth() + 1)}${pad2(date.getDate())}-${pad2(date.getHours())}${pad2(date.getMinutes())}`;
   const safeLabel = String(label || '').replace(/[^A-Za-z0-9가-힣_-]/g, '');
-  return `SEEON-Windows-${stamp}-${commit.slice(0, 7)}${safeLabel ? `-${safeLabel}` : ''}`;
+  return `${KIT_APP_MAP[app].kitPrefix}-${stamp}-${commit.slice(0, 7)}${safeLabel ? `-${safeLabel}` : ''}`;
 }
 
 // Windows 메모장이 한글을 바로 읽게 UTF-8 BOM 을 붙이고 줄바꿈을 CRLF 로 바꾼다.
@@ -119,9 +132,9 @@ function installDependencies({ buildDir }) {
   fs.writeFileSync(hashPath, lockHash);
 }
 
-function findInstaller({ buildDir }) {
+function findInstaller({ buildDir, installerPattern }) {
   const distDir = path.join(buildDir, 'dist');
-  const name = fs.readdirSync(distDir).find((fileName) => /^SEEON-Setup-.*\.exe$/.test(fileName));
+  const name = fs.readdirSync(distDir).find((fileName) => installerPattern.test(fileName));
   if (!name) throw new Error(`설치 파일을 찾지 못했다: ${distDir}`);
   return path.join(distDir, name);
 }
@@ -143,7 +156,8 @@ async function main() {
   if (option.isFetch) git(repoRoot, ['fetch', 'origin']);
   const commit = git(repoRoot, ['rev-parse', `${option.ref}^{commit}`]);
   const buildDir = option.buildDir || resolveDefaultBuildDir({ repoRoot });
-  console.log(`[kit] 기준 ${option.ref} = ${commit.slice(0, 7)} · 빌드 폴더 ${buildDir}`);
+  const appKit = KIT_APP_MAP[option.app];
+  console.log(`[kit] ${option.app} · 기준 ${option.ref} = ${commit.slice(0, 7)} · 빌드 폴더 ${buildDir}`);
   prepareBuildDir({ repoRoot, buildDir, commit });
   installDependencies({ buildDir });
 
@@ -154,18 +168,18 @@ async function main() {
     const buildEnvPath = path.join(tempDir, 'build.env');
     fs.writeFileSync(buildEnvPath, sanitizeEnvText(envText), { mode: 0o600 });
     fs.rmSync(distDir, { recursive: true, force: true });
-    run('npm', ['run', 'dist:win'], {
+    run('npm', ['run', appKit.distScript], {
       cwd: buildDir, env: { ...process.env, SEEON_BUILD_ENV_FILE: buildEnvPath, SEEON_BUILD_TUNNEL_KEY: keyFile },
     });
 
-    const installerPath = findInstaller({ buildDir });
+    const installerPath = findInstaller({ buildDir, installerPattern: appKit.installerPattern });
     const { version } = JSON.parse(fs.readFileSync(path.join(buildDir, 'package.json'), 'utf8'));
     const builtAt = new Date();
-    const kitName = buildKitName({ date: builtAt, commit, label: option.label });
-    const stageDir = path.join(tempDir, KIT_FOLDER_NAME);
+    const kitName = buildKitName({ date: builtAt, commit, label: option.label, app: option.app });
+    const stageDir = path.join(tempDir, appKit.folderName);
     fs.mkdirSync(stageDir);
     fs.copyFileSync(installerPath, path.join(stageDir, path.basename(installerPath)));
-    const readmeTemplate = fs.readFileSync(README_TEMPLATE_PATH, 'utf8');
+    const readmeTemplate = fs.readFileSync(fileURLToPath(new URL(`./${appKit.readmeFileName}`, import.meta.url)), 'utf8');
     fs.writeFileSync(path.join(stageDir, 'README.txt'), renderKitReadme({
       template: readmeTemplate, version, commit: commit.slice(0, 7), ref: option.ref, builtAt: formatBuiltAt(builtAt),
     }));
@@ -176,7 +190,7 @@ async function main() {
     const zipPath = path.join(option.outDir, `${kitName}.zip`);
     fs.rmSync(zipPath, { force: true });
     // bsdtar 는 macOS·Windows 10 이상에 모두 있고 -a 로 .zip 을 만든다.
-    run('tar', ['-a', '-c', '-f', zipPath, '-C', tempDir, KIT_FOLDER_NAME], { cwd: tempDir });
+    run('tar', ['-a', '-c', '-f', zipPath, '-C', tempDir, appKit.folderName], { cwd: tempDir });
     if (!isWindows) fs.chmodSync(zipPath, 0o600);
     const sizeMb = (fs.statSync(zipPath).size / 1024 / 1024).toFixed(1);
     console.log(`[kit] 완료 → ${zipPath} (${sizeMb}MB, 커밋 ${commit.slice(0, 7)})`);
