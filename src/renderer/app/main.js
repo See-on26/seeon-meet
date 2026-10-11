@@ -26,7 +26,7 @@ import { NarrationScheduler } from '../core/audio-renderer/narration-scheduler.j
 import { GapCandidateStore, resolveGapSearchFromMs } from '../core/audio-renderer/gap-candidate-store.js';
 import { SilenceSpanTracker } from '../core/audio-renderer/silence-span-tracker.js';
 import {
-  AsrSegmentTimeline, buildAudioGapCandidateList, selectGapCandidateList, resolveSilenceSafeInsertMs, isAudioGapActive,
+  AsrSegmentTimeline, buildInsertionGapList, resolveInsertionTargetMs, isAudioGapActive,
   GAP_CANDIDATE_SOURCE_MAP, SNAP_REASON_MAP,
 } from '../core/audio-renderer/audio-gap-candidates.js';
 import { isImmediateCaption, isAnchoredCaption, NarrationHoldGate } from '../core/audio-renderer/narration-entry.js';
@@ -1474,22 +1474,18 @@ function toNarrationType({ source }) {
 
 function isAudioGapActiveNow() {
   return isAudioGapActive({
-    gapSource, hasDelayBuffer: Boolean(delayBuffer),
-    delayMs: getModePolicy({ mode: getCurrentMode() })?.delayMs ?? 0,
+    gapSource, hasDelayBuffer: Boolean(delayBuffer), delayMs: delayBuffer?.targetDelayMs ?? 0,
   });
 }
 
 function collectInsertionGapList({ triggerVideoTimeMs, fromVideoTimeMs, toVideoTimeMs }) {
-  const asrList = gapCandidateStore.getCandidateList({ triggerVideoTimeMs, fromVideoTimeMs, toVideoTimeMs });
-  if (!isAudioGapActiveNow()) return asrList;
-  const audioList = buildAudioGapCandidateList({
+  return buildInsertionGapList({
+    isActive: isAudioGapActiveNow(),
+    asrList: gapCandidateStore.getCandidateList({ triggerVideoTimeMs, fromVideoTimeMs, toVideoTimeMs }),
     spanList: silenceSpanTracker.getSpanList(), segmentList: asrSegmentTimeline.getSegmentList(),
     isTranscribedAt: (videoTimeMs) => asrSegmentTimeline.isTranscribedAt(videoTimeMs),
-    triggerVideoTimeMs, fromVideoTimeMs, toVideoTimeMs,
-  });
-  return selectGapCandidateList({
-    audioList, asrList, triggerVideoTimeMs,
     isMeasuredAt: (videoTimeMs) => silenceSpanTracker.isMeasuredAt(videoTimeMs),
+    triggerVideoTimeMs, fromVideoTimeMs, toVideoTimeMs,
   });
 }
 
@@ -1501,10 +1497,9 @@ const SNAP_REASON_LABEL_MAP = {
 // 넣기 직전에 그 자리가 조용한지 다시 본다(audio·품질·균형일 때만). 틈이 없어 트리거 지점에 넣거나 답이 늦어
 // 재생이 고른 자리를 지나쳤을 때 말 한가운데서 멈추지 않게 한다. 옮길 무음이 없으면 그대로 둔다.
 function snapInsertionToSilence({ targetMs, payload, narrationType }) {
-  if (!isAudioGapActiveNow()) return targetMs;
-  const { insertMs, reason } = resolveSilenceSafeInsertMs({
-    targetMs, playheadMs: delayBuffer.getDelayedTimeMs(), liveMs: captureSource.videoTimeMs,
-    spanList: silenceSpanTracker.getSpanList(),
+  const { insertMs, reason } = resolveInsertionTargetMs({
+    isActive: isAudioGapActiveNow(), targetMs, playheadMs: delayBuffer?.getDelayedTimeMs(),
+    liveMs: captureSource.videoTimeMs, spanList: silenceSpanTracker.getSpanList(),
   });
   if (insertMs === targetMs) return targetMs;
   const shiftSec = (insertMs - targetMs) / 1000;

@@ -27,9 +27,8 @@ export const GAP_INSERT_GUARD_MS = 100;
 // 넣는 자리 뒤로 이만큼은 조용해야 한다. 품질·균형 모드에서 스케줄러는 50ms 마다 확인하고
 // 따라잡기 배속이 최대 1.5배라 실제 정지가 75ms 남짓 늦을 수 있어, 여유를 더해 0.2초로 둔다.
 export const GAP_MIN_TAIL_MS = 200;
-// 재생 헤드보다 이만큼 앞선 목표면 위 확인 지연 안에 닿는다고 보고 그 자리부터 무음을 본다.
-const SNAP_REACH_MS = 100;
-// 이미 지났거나 닿기 빠듯한 목표는 재생 헤드보다 이만큼 뒤부터 찾는다.
+// 이미 지난 목표는 재생 헤드보다 이만큼 뒤부터 찾는다. 아직 앞에 있는 목표는 그 자리부터 본다
+// (스케줄러가 늦게 멈추는 폭은 넣는 자리 뒤 무음 GAP_MIN_TAIL_MS 가 흡수한다).
 const SNAP_LEAD_MS = 300;
 const SNAP_MAX_SHIFT_MS = 3000;
 // 세그먼트가 무음 시작 앞으로 이만큼, 무음 끝 뒤로 COVER_END_MARGIN_MS 넘게 걸쳐 있고
@@ -50,9 +49,26 @@ function pickNearestList({ candidateList, triggerVideoTimeMs, limit }) {
 }
 
 // 소리 후보·넣기 직전 맞추기는 지연 버퍼가 라이브보다 충분히 뒤에 있어 앞의 무음을 미리 아는 모드(품질·균형)에서만 쓴다.
-// 성능 모드는 지연이 0이라 미리 아는 무음이 없고, 기다리면 해설만 늦어진다.
+// 성능 모드는 지연이 0이라 미리 아는 무음이 없고, 기다리면 해설만 늦어진다. 모드를 바꿔도 버퍼는 그대로일 수 있어
+// delayMs 는 지금 돌고 있는 지연 버퍼의 목표 지연을 받는다.
 export function isAudioGapActive({ gapSource, hasDelayBuffer, delayMs }) {
   return gapSource === GAP_CANDIDATE_SOURCE_MAP.audio && hasDelayBuffer && delayMs > 0;
+}
+
+// 해설 하나의 틈 후보 목록. 꺼져 있으면 ASR 후보를 그대로, 켜져 있으면 소리 후보(+측정 못 한 시각의 ASR 후보)를 준다.
+export function buildInsertionGapList({ isActive, asrList, spanList, segmentList, isTranscribedAt, isMeasuredAt,
+  triggerVideoTimeMs, fromVideoTimeMs, toVideoTimeMs }) {
+  if (!isActive) return asrList;
+  const audioList = buildAudioGapCandidateList({
+    spanList, segmentList, isTranscribedAt, triggerVideoTimeMs, fromVideoTimeMs, toVideoTimeMs,
+  });
+  return selectGapCandidateList({ audioList, asrList, triggerVideoTimeMs, isMeasuredAt });
+}
+
+// 예약할 자리. 꺼져 있으면 목표 그대로(reason 없음), 켜져 있으면 넣기 직전 조용한 자리로 맞춘다.
+export function resolveInsertionTargetMs({ isActive, targetMs, playheadMs, liveMs, spanList }) {
+  if (!isActive) return { insertMs: targetMs, reason: null };
+  return resolveSilenceSafeInsertMs({ targetMs, playheadMs, liveMs, spanList });
 }
 
 // ASR 세그먼트를 경계만이 아니라 전부 영상 시각으로 바꿔 두고, 받아쓴 조각 범위도 따로 적는다.
@@ -165,9 +181,8 @@ export function selectGapCandidateList({ audioList, asrList, triggerVideoTimeMs,
 // 지나쳤을 때 그 자리에서 바로 멈추면 말 한가운데가 끊긴다. 그럴 때 3초 안의 첫 무음(시작 + 보호 간격)으로 옮긴다.
 // 옮길 무음이 없으면 원래 목표를 그대로 돌려준다(지금 동작).
 export function resolveSilenceSafeInsertMs({ targetMs, playheadMs, liveMs, spanList,
-  guardMs = GAP_INSERT_GUARD_MS, minTailMs = GAP_MIN_TAIL_MS, reachMs = SNAP_REACH_MS,
-  leadMs = SNAP_LEAD_MS, maxShiftMs = SNAP_MAX_SHIFT_MS }) {
-  const isReachable = !Number.isFinite(playheadMs) || targetMs >= playheadMs + reachMs;
+  guardMs = GAP_INSERT_GUARD_MS, minTailMs = GAP_MIN_TAIL_MS, leadMs = SNAP_LEAD_MS, maxShiftMs = SNAP_MAX_SHIFT_MS }) {
+  const isReachable = !Number.isFinite(playheadMs) || targetMs >= playheadMs;
   const baseMs = isReachable ? targetMs : playheadMs + leadMs;
   const candidateList = spanList
     .map((span) => ({ span, insertMs: Math.max(span.startMs + guardMs, baseMs) }))

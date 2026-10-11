@@ -2,7 +2,8 @@ import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import {
   AsrSegmentTimeline, attachSegmentText, buildAudioGapCandidateList, selectGapCandidateList,
-  resolveSilenceSafeInsertMs, isAudioGapActive, GAP_CANDIDATE_SOURCE_MAP, GAP_BOUNDARY_KIND_MAP, SNAP_REASON_MAP,
+  resolveSilenceSafeInsertMs, isAudioGapActive, buildInsertionGapList, resolveInsertionTargetMs,
+  GAP_CANDIDATE_SOURCE_MAP, GAP_BOUNDARY_KIND_MAP, SNAP_REASON_MAP,
 } from '../src/renderer/core/audio-renderer/audio-gap-candidates.js';
 
 const segment = (startMs, endMs, text) => ({ startMs, endMs, midMs: (startMs + endMs) / 2, text });
@@ -235,4 +236,34 @@ test('넣기 직전: 재생 헤드를 모르면 목표 자리부터 본다', () 
     targetMs: 5000, playheadMs: Number.NaN, liveMs: 15000, spanList: [{ startMs: 5000, endMs: 6000, isOpen: false }],
   });
   assert.deepEqual(result, { insertMs: 5100, reason: SNAP_REASON_MAP.inSilence });
+});
+
+test('넣기 직전: 재생 헤드보다 조금이라도 앞선 목표는 그 자리의 무음을 쓴다', () => {
+  const spanList = [{ startMs: 5000, endMs: 5450, isOpen: false }, { startMs: 7500, endMs: 8000, isOpen: false }];
+  const result = resolveSilenceSafeInsertMs({ targetMs: 5150, playheadMs: 5100, liveMs: 15000, spanList });
+  assert.deepEqual(result, { insertMs: 5150, reason: SNAP_REASON_MAP.inSilence });
+});
+
+test('꺼져 있으면 틈 후보는 ASR 후보 그대로, 예약 자리는 목표 그대로다', () => {
+  const asrList = [{ videoTimeMs: 2900, offsetMs: -100, kind: 'complete', silenceMs: 300 }];
+  const spanList = [{ startMs: 3000, endMs: 4000, isOpen: false }];
+  const common = {
+    asrList, spanList, segmentList: [], isTranscribedAt: always, isMeasuredAt: always,
+    triggerVideoTimeMs: 3000, fromVideoTimeMs: 2000, toVideoTimeMs: 9000,
+  };
+  assert.equal(buildInsertionGapList({ ...common, isActive: false }), asrList);
+  assert.deepEqual(resolveInsertionTargetMs({ isActive: false, targetMs: 2500, playheadMs: 1000, liveMs: 9000, spanList }),
+    { insertMs: 2500, reason: null });
+});
+
+test('켜져 있으면 틈 후보는 소리 후보로, 예약 자리는 조용한 자리로 맞춘다', () => {
+  const asrList = [{ videoTimeMs: 2900, offsetMs: -100, kind: 'complete', silenceMs: 300 }];
+  const spanList = [{ startMs: 3000, endMs: 4000, isOpen: false }];
+  const gapList = buildInsertionGapList({
+    isActive: true, asrList, spanList, segmentList: [], isTranscribedAt: always, isMeasuredAt: always,
+    triggerVideoTimeMs: 3000, fromVideoTimeMs: 2000, toVideoTimeMs: 9000,
+  });
+  assert.deepEqual(gapList.map((gap) => [gap.videoTimeMs, gap.source]), [[3100, 'audio']]);
+  assert.deepEqual(resolveInsertionTargetMs({ isActive: true, targetMs: 2500, playheadMs: 1000, liveMs: 9000, spanList }),
+    { insertMs: 3100, reason: SNAP_REASON_MAP.snapped });
 });
