@@ -14,13 +14,28 @@ const GAP_SOURCE_MAP = {
   none: 'none',
 };
 
+// 소리로 잰 후보(source=audio)는 무음 길이에 "(잰 값)"을, 아직 이어지는 무음(isOpen)은 "≥"를 붙인다.
+function formatSilenceLabel({ gap }) {
+  const silenceSec = (gap.silenceMs / 1000).toFixed(1);
+  const measuredSuffix = gap.source === 'audio' ? '(잰 값)' : '';
+  return `무음 ${gap.isOpen ? '≥' : ''}${silenceSec}초${measuredSuffix}`;
+}
+
 function formatGapLine({ gap, index }) {
   const offsetSec = (gap.offsetMs / 1000).toFixed(1);
   const sign = gap.offsetMs >= 0 ? '+' : '';
   const kindLabel = BOUNDARY_KIND_LABEL_MAP[gap.kind] || gap.kind;
   return `[${index}] ${sign}${offsetSec}초 · 앞 발화 "${gap.beforeText || '(없음)'}"`
-    + ` · 끝맺음=${kindLabel} · 무음 ${(gap.silenceMs / 1000).toFixed(1)}초`
+    + ` · 끝맺음=${kindLabel} · ${formatSilenceLabel({ gap })}`
     + ` · 뒤 발화 "${gap.afterText || '(없음)'}"`;
+}
+
+// 렌더러가 출처를 싣지 않은 후보(ASR 끝 시각 후보)는 asr 로 센다.
+function countGapCandidateSource({ gapList }) {
+  return gapList.reduce((count, gap) => {
+    count[gap?.source === 'audio' ? 'audio' : 'asr'] += 1;
+    return count;
+  }, { audio: 0, asr: 0 });
 }
 
 function buildGapInput({ narrationText, narrationType, subKind = null, rationale = '',
@@ -155,6 +170,6 @@ function createGapInferenceAgent({ config }) {
 }
 
 module.exports = {
-  createGapInferenceAgent, buildGapInput, parseGapText, selectFallbackGapIndex, formatGapLine,
+  createGapInferenceAgent, buildGapInput, parseGapText, selectFallbackGapIndex, formatGapLine, countGapCandidateSource,
   canPickBeforeTrigger, GAP_SYSTEM_PROMPT, GAP_SOURCE_MAP, BOUNDARY_KIND_MAP,
 };

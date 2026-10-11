@@ -32,7 +32,7 @@ const { createAsrClient } = require('./perception/asr-client');
 const { createAsrLanguageSession, applySessionMeetingLanguage } = require('./perception/asr-language');
 const { createEmbedClient } = require('./perception/embed-client');
 const { createTtsClient } = require('./output/tts-client');
-const { createGapInferenceAgent } = require('./output/gap-inference-agent');
+const { createGapInferenceAgent, countGapCandidateSource } = require('./output/gap-inference-agent');
 const { createRecordStore, RECORD_KIND_MAP } = require('./instrumentation/record-store');
 const { createSessionStore } = require('./instrumentation/session-store');
 const { requestVlmContent, setVlmFallbackListener } = require('./agents/shared/vlm-gateway');
@@ -363,7 +363,7 @@ function registerPipeline({ getViewerView, meetingArchive = null }) {
       reason: '세션 시작', detail: `모드=${mode} · 회의 언어=${meetingLanguage} · ${sessionId} · 기록=${recordStore.filePath}`,
     });
 
-    return { isOk: true, sessionId, recordPath: recordStore.filePath };
+    return { isOk: true, sessionId, recordPath: recordStore.filePath, gapSource: config.gapSource };
   });
 
   ipcMain.handle('pipeline-session-end', async () => {
@@ -1184,11 +1184,13 @@ function registerPipeline({ getViewerView, meetingArchive = null }) {
       gapList: gapList || [],
     });
     const chosen = Number.isInteger(result.gapIndex) ? gapList[result.gapIndex] : null;
+    const candidateSourceCount = countGapCandidateSource({ gapList: gapList || [] });
     await appendRecord({
       kind: RECORD_KIND_MAP.gap, ts, narrationType, narration: narrationText,
       gapIndex: result.gapIndex, source: result.source, reason: result.reason,
       mode: mode || null, modelId: result.modelId || null,
       chosenOffsetMs: chosen?.offsetMs ?? null, candidateCount: (gapList || []).length,
+      candidateSourceCount, chosenKind: chosen?.kind ?? null, chosenSource: chosen?.source ?? null,
     });
     markDebug({
       stage: DEBUG_STAGE_MAP.gap, ts, narrationType,
@@ -1197,6 +1199,7 @@ function registerPipeline({ getViewerView, meetingArchive = null }) {
         ? `틈 선택 (트리거 ${chosen.offsetMs >= 0 ? '+' : ''}${(chosen.offsetMs / 1000).toFixed(1)}초, ${result.source})`
         : `틈 미선택 → 트리거 지점 삽입 (${result.source})`,
       detail: `"${truncateForLog(narrationText)}" · 후보 ${(gapList || []).length}개`
+        + ` (소리 ${candidateSourceCount.audio} · ASR ${candidateSourceCount.asr})`
         + ` · 사유="${result.reason || '-'}"`
         + (result.modelId ? ` · 모델=${result.modelId}` : '')
         + (chosen ? ` · 앞 발화="${truncateForLog(chosen.beforeText, 30)}" 끝맺음=${chosen.kind}` : '')

@@ -3,11 +3,13 @@ const { NARRATION_TYPE_MAP } = require('../contracts/narration-types');
 const BOUNDARY_KIND_MAP = {
   complete: 'complete',
   pause: 'pause',
+  unknown: 'unknown',
 };
 
 const BOUNDARY_KIND_LABEL_MAP = {
   [BOUNDARY_KIND_MAP.complete]: '완결',
   [BOUNDARY_KIND_MAP.pause]: '중단',
+  [BOUNDARY_KIND_MAP.unknown]: '미상(받아쓰기 전)',
 };
 
 const GAP_SYSTEM_PROMPT = [
@@ -31,6 +33,8 @@ const GAP_SYSTEM_PROMPT = [
   '   그 전환보다 **앞선** 틈이어야 한다.',
   '4. 1~3이 같다면 **트리거에 가까운 쪽**을 고른다. 설명은 이를수록 좋다.',
   '5. 그래도 같다면 무음이 긴 쪽이 자연스럽다.',
+  '· 무음에 "(잰 값)"이 붙은 후보는 실제 회의 소리로 조용함을 확인한 자리다. "≥"는 아직 이어지는 무음의 지금까지 길이다.',
+  '· 끝맺음=미상은 아직 받아쓰기 전이라 문장이 끝났는지 모르는 자리다. 완결·중단 후보가 있으면 그쪽을 먼저 본다.',
   '',
   '── 트리거보다 앞선 틈(음수 시각) ──',
   `**${NARRATION_TYPE_MAP.speakerIdentity}에만 허용된다.** "누가 말하는지"는 그 사람이 입을 열기`,
