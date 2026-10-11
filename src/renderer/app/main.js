@@ -49,7 +49,9 @@ import { resolveLastSpeechWallTs } from '../core/trigger/speech-activity.js';
 import {
   SilenceTrigger, evaluateSilencePrecondition, SILENCE_TRANSCRIPT_WINDOW_MS, SILENCE_SKIP_LABEL_MAP,
 } from '../core/trigger/silence-trigger.js';
-import { DeixisCandidateScheduler, CANDIDATE_SOURCE_MAP } from '../core/trigger/deixis-candidate-scheduler.js';
+import {
+  DeixisCandidateScheduler, CANDIDATE_SOURCE_MAP, SUBMIT_RESULT_MAP,
+} from '../core/trigger/deixis-candidate-scheduler.js';
 import { judgeScreenDependency, SCREEN_DEPENDENCY_REASON_MAP } from '../core/trigger/screen-dependency.js';
 import { PointingLocator, describeDirection } from '../core/trigger/pointing-locator.js';
 import { SlideHistogramGate } from '../core/trigger/slide-histogram-gate.js';
@@ -471,6 +473,7 @@ function handleClickModeButton({ mode }) {
 
   candidateScheduler.setLookaheadMs({ lookaheadMs: computeLookaheadMs({ mode }) });
   candidateScheduler.setSentenceWaitMs({ sentenceWaitMs: computeSentenceWaitMs({ mode }) });
+  candidateScheduler.setHoldMs({ holdMs: computeContextHoldMs({ mode }) });
   const modePolicy = getModePolicy({ mode });
   asrSegmenter.setSegmentMs({
     segmentMs: modePolicy?.asrSegmentMs, minSegmentMs: modePolicy?.asrMinSegmentMs,
@@ -922,23 +925,29 @@ function getLastSpeechWallTs() {
   });
 }
 
-// 지시 판정이 난 시각. 그 전 조각은 그 판정의 발화에 이미 들어갔다.
+// 지시 판정에 마지막으로 들어간 시각(판정이 났거나 보류 중인 결정에 조각을 합친 때). 그 전 조각은 그 판정의 발화에 이미 들어갔다.
 let lastDeixisDecidedAt = -Infinity;
+
+const SUBMIT_RESULT_LABEL_MAP = {
+  [SUBMIT_RESULT_MAP.started]: 'look-ahead 대기',
+  [SUBMIT_RESULT_MAP.absorbed]: 'look-ahead 중인 후보에 합침',
+  [SUBMIT_RESULT_MAP.merged]: '판단 전 보류 중인 결정에 합침',
+};
 
 const candidateScheduler = new DeixisCandidateScheduler({ onDecide: runDeixisDecision, getLastSpeechWallTs });
 const deixisDetector = new DeixisDetector({
   onDeixis: ({ text, trigger, candidateList, captureTs, eventWallTs }) => {
     const { region, pointingOrderHint } = getPointingSequence();
-    console.log(`[deixis] 🗣 발화 지시 "${trigger}" → look-ahead 대기`);
     const nowVideoTimeMs = captureSource.videoTimeMs;
     const nowTs = performance.now();
-    candidateScheduler.submit({
+    const submitResult = candidateScheduler.submit({
       source: CANDIDATE_SOURCE_MAP.speech, utterance: text, trigger, candidateList, region, pointingOrderHint,
       captureTs: nowTs, videoTimeMs: nowVideoTimeMs,
       eventVideoTimeMs: wallToVideoTimeMs({ wallTs: eventWallTs, nowVideoTimeMs }) ?? nowVideoTimeMs,
       leadText: transcriptWindow.getOpenSentenceLead({ nowTs, sinceTs: lastDeixisDecidedAt }),
       chunkEndWallTs: captureTs,
     });
+    console.log(`[deixis] 🗣 발화 지시 "${trigger}" → ${SUBMIT_RESULT_LABEL_MAP[submitResult] || submitResult}`);
   },
 });
 
@@ -1000,32 +1009,32 @@ const SCREEN_DEPENDENCY_LABEL_MAP = {
   [SCREEN_DEPENDENCY_REASON_MAP.unsupportedSource]: '발화가 아닌 출처 — 트리거로 쓰지 않는다',
 };
 
-async function runDeixisDecision({ source, utterance, triggerList, candidateList = [], region, pointingOrderHint,
-  captureTs, videoTimeMs, eventVideoTimeMs = null,
-  triggerUtterance = utterance, leadText = '', followText = '', isSentenceWaited = false }) {
+// 화면은 판정이 난 지금 찍고, 판단 LLM 에는 보류(균형·품질 모드)가 끝난 결정을 보낸다.
+// 보류 중에 들어온 뒤 조각과 그 후보도 이 결정에 합쳐져 함께 판단을 받는다.
+async function runDeixisDecision(firedDecision) {
   lastDeixisDecidedAt = performance.now();
-  const label = triggerList.join(', ') || '-';
   const mode = getCurrentMode();
+  const sessionSeq = experimentSeq;
+  const [buffer, decision] = await Promise.all([
+    captureFrameJpeg(firedDecision.region), firedDecision.whenSealed ?? firedDecision,
+  ]);
+  if (!buffer || !decision) return;
+  if (!captureSource.isActive || sessionSeq !== experimentSeq) return;
+
+  const { source, utterance, triggerList, candidateList = [], region, pointingOrderHint,
+    captureTs, videoTimeMs, eventVideoTimeMs = null,
+    triggerUtterance = utterance, leadText = '', followText = '', isSentenceWaited = false, mergedChunkCount = 0 } = decision;
+  const label = triggerList.join(', ') || '-';
   if (leadText || followText) {
     markDebug({
       stage: DEBUG_STAGE_MAP.asr, verdict: DEBUG_VERDICT_MAP.info,
       reason: '조각을 문장 단위로 이어 붙임',
       detail: `트리거 조각="${triggerUtterance}" → 문장="${utterance}"`
-        + ` (앞="${leadText || '-'}" · 뒤="${followText || '-'}" · 문장 끝 추가 대기=${isSentenceWaited ? 'Y' : 'N'})`,
+        + ` (앞="${leadText || '-'}" · 뒤="${followText || '-'}" · 문장 끝 추가 대기=${isSentenceWaited ? 'Y' : 'N'}`
+        + `${mergedChunkCount > 0 ? ` · 판단 전 보류 중 합친 뒤 조각 ${mergedChunkCount}개` : ''})`,
     });
   }
   const { beforeMs, afterMs } = getModePolicy({ mode }) || {};
-
-  const buffer = await captureFrameJpeg(region);
-  if (!buffer) return;
-
-  const holdMs = computeContextHoldMs({ mode });
-  if (holdMs > 0) {
-    const sessionSeq = experimentSeq;
-    await waitFor({ ms: holdMs });
-
-    if (!captureSource.isActive || sessionSeq !== experimentSeq) return;
-  }
 
   const anchorTs = resolveBeforeAnchorTs({ mode, screenTransitionTs: lastScreenTransitionAt });
   const { before, after, tokenCount, droppedCount } = transcriptWindow.getContext({
@@ -1117,9 +1126,12 @@ function handleAsrTranscript({ text, ts, endTs, segmentList = [], triggerCandida
     });
 
     transcriptWindow.push({ text: trimmed, ts: performance.now() });
-    // 대기 중인 지시 후보가 있으면 이 조각을 뒤 조각으로 먼저 붙인다. 새 후보는 그다음 탐지에서 생긴다.
+    // 대기·보류 중인 지시 후보가 있으면 이 조각과 그 후보를 그 결정에 먼저 붙인다. 새 후보는 그다음 탐지에서 생긴다.
     // 이 조각으로 앞 후보의 판정이 났으면, 이미 그 문장에 쓴 조각이므로 새 후보의 트리거로 쓰지 않는다.
-    const { isDecided } = candidateScheduler.appendTranscript({ text: trimmed, endTs });
+    const { isAppended, isDecided } = candidateScheduler.appendTranscript({
+      text: trimmed, endTs, candidateList: triggerCandidateList,
+    });
+    if (isAppended) lastDeixisDecidedAt = performance.now();
     if (!isDecided) {
       deixisDetector.handleTranscript({
         text: trimmed, candidateList: triggerCandidateList, captureTs: endTs,
@@ -1793,6 +1805,7 @@ async function attemptStartExperiment() {
     const holdMs = computeContextHoldMs({ mode: getCurrentMode() });
     candidateScheduler.setLookaheadMs({ lookaheadMs });
     candidateScheduler.setSentenceWaitMs({ sentenceWaitMs: computeSentenceWaitMs({ mode: getCurrentMode() }) });
+    candidateScheduler.setHoldMs({ holdMs });
 
     asrSegmenter.setSegmentMs({
       segmentMs: contextPolicy?.asrSegmentMs, minSegmentMs: contextPolicy?.asrMinSegmentMs,
@@ -1822,7 +1835,6 @@ async function attemptStartExperiment() {
     startNarrationPlayer({ stream });
     boundaryDetector.reset();
     silenceTrigger.reset({ nowPerf: performance.now() });
-    deixisDetector.reset();
     candidateScheduler.reset();
     pointingLocator.reset();
     lastPointingMotionAt = -Infinity;
@@ -1887,7 +1899,6 @@ function stopExperiment() {
     ['내레이션 출력기', () => stopNarrationPlayer()],
     ['ASR 세그먼터', () => { asrFinalFlushPromise = asrSegmenter.stop() || Promise.resolve(); }],
     ['경계 탐지기', () => boundaryDetector.reset()],
-    ['지시 탐지기', () => deixisDetector.reset()],
     ['후보 스케줄러', () => candidateScheduler.reset()],
     ['마이크 질문', () => micQuestionController.cancel()],
     ['해설 보류 게이트', () => {
