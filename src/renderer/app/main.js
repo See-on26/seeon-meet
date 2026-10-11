@@ -62,6 +62,7 @@ import { computeAnchoredPanelPosition } from '../core/ui/anchored-panel-position
 
 import { RoiStore, SPEAKER_VERDICT_MAP } from '../core/roi/roi-store.js';
 import { MeetCaptureSession } from '../core/capture/meet-capture-session.js';
+import { fitWithinLongEdge } from '../core/capture/frame-scale.js';
 import { wallToVideoTimeMs, resolveSpeechEndWallTs } from '../core/capture/video-time.js';
 import { LAB_PLAYER_URL_PATTERN } from '../lab/lab-constants.js';
 
@@ -640,8 +641,9 @@ async function captureFrameJpeg(subRegion = null) {
 async function captureRegionJpeg(region) {
   if (!region || !captureSource.liveVideo) return null;
   const canvas = document.createElement('canvas');
-  canvas.width = Math.max(2, Math.round(region.w));
-  canvas.height = Math.max(2, Math.round(region.h));
+  const { width, height } = fitWithinLongEdge({ width: region.w, height: region.h });
+  canvas.width = width;
+  canvas.height = height;
   canvas.getContext('2d').drawImage(
     captureSource.liveVideo, region.x, region.y, region.w, region.h, 0, 0, canvas.width, canvas.height);
   const blob = await new Promise((resolve) => canvas.toBlob(resolve, 'image/jpeg', CROP_JPEG_QUALITY));
@@ -1737,6 +1739,10 @@ function setToggleUi(isRunning) {
   $('toggleBtn').classList.toggle('on', isRunning);
   $('live').classList.toggle('on', isRunning);
   $('liveState').textContent = isRunning ? 'LIVE' : '대기 중';
+  const railLabel = isRunning ? '회의 캡처 중' : '대기 중';
+  $('railLive').classList.toggle('on', isRunning);
+  $('railLive').setAttribute('aria-label', railLabel);
+  $('railLive').title = railLabel;
 }
 
 function setPauseUi(isPaused) {
@@ -2165,3 +2171,37 @@ document.addEventListener('pointerdown', (event) => {
   if ($('settingsPanel').contains(event.target) || $('settingsBtn').contains(event.target)) return;
   setSettingsPanelOpen(false);
 });
+
+// 패널 접기·펼치기(Ctrl+9): 창 폭은 main 이 바꾸고, 여기서는 패널과 띠 중 무엇을 보일지만 바꾼다.
+// 화면 낭독기 안내 영역은 패널 밖에 두어 접혀 있어도 해설·안내를 읽는다.
+function renderViewerPanel({ isCollapsed }) {
+  const hadFocusInPanel = document.querySelector('.app').contains(document.activeElement);
+  const hadFocusOnRail = document.activeElement === $('panelExpandBtn');
+  if (isCollapsed) setSettingsPanelOpen(false);
+  document.body.classList.toggle('panel-collapsed', isCollapsed);
+  if (isCollapsed) {
+    if (hadFocusInPanel) $('panelExpandBtn').focus();
+    return;
+  }
+  // 접혀 있는 동안 쌓인 기록은 목록이 숨어 있어 아래로 내려가지 않았다.
+  $('logStream').scrollTop = $('logStream').scrollHeight;
+  if (hadFocusOnRail) $('panelCollapseBtn').focus();
+}
+
+function requestViewerPanelCollapsed(isCollapsed) {
+  window.seeon.setViewerPanelCollapsed({ isCollapsed }).catch(() => {});
+}
+
+$('panelCollapseBtn').addEventListener('click', () => requestViewerPanelCollapsed(true));
+$('panelExpandBtn').addEventListener('click', () => requestViewerPanelCollapsed(false));
+window.seeon.onViewerPanelChanged(renderViewerPanel);
+
+// 알림 창·지난 회의 창·소리 모으는 중 안내는 패널 안에 뜨므로, 접혀 있으면 펼쳐서 보이게 한다.
+const panelPopupObserver = new MutationObserver(() => {
+  if (!document.body.classList.contains('panel-collapsed')) return;
+  const isPopupShown = $('permModal').open || $('archiveModal').open || !$('prepOverlay').hidden;
+  if (isPopupShown) requestViewerPanelCollapsed(false);
+});
+for (const id of ['permModal', 'archiveModal', 'prepOverlay']) {
+  panelPopupObserver.observe($(id), { attributes: true, attributeFilter: ['open', 'hidden'] });
+}

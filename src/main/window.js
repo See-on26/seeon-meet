@@ -1,9 +1,9 @@
-const { BaseWindow, WebContentsView } = require('electron');
+const { BaseWindow, WebContentsView, screen } = require('electron');
 const path = require('path');
 const { createMeetSession } = require('./meeting/session');
 const { getUaForUrl } = require('./meeting/ua');
+const { computeViewBoundsPair, computeToggledWindowBounds } = require('./viewer-panel-layout');
 
-const MEET_VIEW_WIDTH_RATIO = 0.52;
 const MEET_HOME_URL = 'https://meet.google.com/';
 
 const SMOKE_URL = 'about:blank';
@@ -11,6 +11,7 @@ const SMOKE_URL = 'about:blank';
 let win = null;
 let viewerView = null;
 let meetView = null;
+let isViewerCollapsed = false;
 
 const getWindow = () => win;
 const getViewerView = () => viewerView;
@@ -19,9 +20,37 @@ const getMeetView = () => meetView;
 function layoutView() {
   if (!win) return;
   const { width, height } = win.getContentBounds();
-  const meetWidth = Math.round(width * MEET_VIEW_WIDTH_RATIO);
-  meetView.setBounds({ x: 0, y: 0, width: meetWidth, height });
-  viewerView.setBounds({ x: meetWidth, y: 0, width: width - meetWidth, height });
+  const { meetBounds, viewerBounds } = computeViewBoundsPair({
+    contentWidth: width, contentHeight: height, isCollapsed: isViewerCollapsed,
+  });
+  meetView.setBounds(meetBounds);
+  viewerView.setBounds(viewerBounds);
+}
+
+// 전체 화면이면 창 폭을 바꿀 수 없어, 창 크기를 바꿀 때처럼 Meet 화면 폭이 대신 바뀐다.
+// 최대화된 창(맥은 화면을 꽉 채운 창도 최대화로 본다)은 최대화를 풀고 줄인다. 윈도우는 최대화를 풀면
+// 이전 크기로 돌아가므로 풀기 전 크기를 기준으로 계산한다.
+// 창 크기와 화면 배치는 한 번에 바꿔야 중간 크기의 Meet 화면이 캡처되지 않는다.
+function setViewerCollapsed({ isCollapsed }) {
+  if (!win || isCollapsed === isViewerCollapsed) return isViewerCollapsed;
+  isViewerCollapsed = isCollapsed;
+  if (!win.isFullScreen()) {
+    const windowBounds = win.getBounds();
+    const { workArea } = screen.getDisplayMatching(windowBounds);
+    if (win.isMaximized() && process.platform !== 'darwin') win.unmaximize();
+    win.setBounds(computeToggledWindowBounds({ windowBounds, workArea, isCollapsed }));
+  }
+  layoutView();
+  viewerView.webContents.send('viewer-panel-changed', { isCollapsed });
+  return isViewerCollapsed;
+}
+
+const toggleViewerCollapsed = () => setViewerCollapsed({ isCollapsed: !isViewerCollapsed });
+
+function registerViewerPanel({ ipcMain }) {
+  ipcMain.handle('viewer-panel-set', async (_event, { isCollapsed } = {}) => ({
+    isCollapsed: setViewerCollapsed({ isCollapsed: Boolean(isCollapsed) }),
+  }));
 }
 
 function createMeetView() {
@@ -70,7 +99,9 @@ function createWindow() {
 
   viewerView.webContents.loadFile(path.join(__dirname, '..', 'renderer', 'app', 'index.html'));
 
-  win.on('closed', () => { win = null; viewerView = null; meetView = null; });
+  win.on('closed', () => { win = null; viewerView = null; meetView = null; isViewerCollapsed = false; });
 }
 
-module.exports = { createWindow, layoutView, getWindow, getViewerView, getMeetView };
+module.exports = {
+  createWindow, layoutView, getWindow, getViewerView, getMeetView, toggleViewerCollapsed, registerViewerPanel,
+};
