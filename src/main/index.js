@@ -37,13 +37,16 @@ app.whenReady().then(() => {
   registerViewerDisplayMedia({ getMeetView: window.getMeetView });
   registerCommandShortcut({
     getViewerView: window.getViewerView, getMeetView: window.getMeetView,
+    onViewerPanelToggle: window.toggleViewerCollapsed,
   });
+  window.registerViewerPanel({ ipcMain });
   registerMeetReload({ ipcMain, getMeetView: window.getMeetView, getViewerView: window.getViewerView });
   registerMeetMicControl({ ipcMain, getMeetView: window.getMeetView });
   Menu.setApplicationMenu(Menu.buildFromTemplate(buildAppMenuTemplate({
     onReloadMeet: () => reloadMeetView({
       getMeetView: window.getMeetView, getViewerView: window.getViewerView, reason: 'shortcut',
     }),
+    onToggleViewerPanel: window.toggleViewerCollapsed,
   })));
   console.log(`[meet] Meet 화면 새로고침 단축키 등록 — ${MEET_RELOAD_ACCELERATOR}`);
 
