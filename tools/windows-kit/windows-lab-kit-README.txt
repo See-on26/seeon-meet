@@ -33,6 +33,8 @@ SEEON Lab(실험 창) Windows 설치 안내
   [ ] 끝난 뒤 결과 폴더에 output-audio.webm · ad.srt · transcript.txt 가 생김
 
 5. 문제가 생기면
+  - 제품 SEEON 과 SEEON Lab 을 같이 켜 두었다가 하나를 닫으면, 남은 앱의 GPU 서버 연결이 끊길 수 있습니다.
+    설정의 "GPU 서버" 가 연결됨이 아니면 남은 앱도 껐다가 다시 켜 주세요.
   - 증상, 시각, 화면 사진과 함께 그 실행의 결과 폴더를 통째로 보내 주세요.
     결과 폴더가 없으면 %APPDATA%\seeon-lab\out 의 pipeline-*.jsonl 파일을 보내 주세요.
 
