@@ -5,7 +5,7 @@ export function wallToVideoTimeMs({ wallTs, nowWallTs = Date.now(), nowVideoTime
   return Math.max(0, nowVideoTimeMs - (nowWallTs - wallTs));
 }
 
-function clampToChunk({ wallTs, chunkStartTs, chunkEndTs }) {
+export function clampToChunk({ wallTs, chunkStartTs, chunkEndTs }) {
   let clamped = wallTs;
   if (Number.isFinite(chunkStartTs)) clamped = Math.max(clamped, chunkStartTs);
   if (Number.isFinite(chunkEndTs)) clamped = Math.min(clamped, chunkEndTs);

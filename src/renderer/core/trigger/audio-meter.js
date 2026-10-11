@@ -2,6 +2,14 @@ const METER_WIDTH_PX = 160;
 const METER_HEIGHT_PX = 14;
 const METER_LOUD_LEVEL = 0.35;
 
+function readAnalyserLevel(analyser) {
+  const sampleData = new Uint8Array(analyser.fftSize);
+  analyser.getByteTimeDomainData(sampleData);
+  let squareSum = 0;
+  for (const sample of sampleData) squareSum += (sample - 128) ** 2;
+  return Math.sqrt(squareSum / sampleData.length) / 128;
+}
+
 export class AudioMeter {
   constructor(canvas = null) {
     this.context = canvas ? canvas.getContext('2d') : null;
@@ -13,6 +21,12 @@ export class AudioMeter {
 
   getLevel() {
     return this.level;
+  }
+
+  // getLevel 은 화면 그리기 주기(requestAnimationFrame)로만 갱신돼 창이 가려지면 마지막 값으로 굳는다.
+  // 무음 구간을 재는 쪽은 굳은 값을 긴 침묵으로 오해하면 안 되므로 그 순간 analyser 에서 바로 잰다.
+  sampleLevel() {
+    return this.analyser ? readAnalyserLevel(this.analyser) : null;
   }
 
   start(stream) {
@@ -36,11 +50,7 @@ export class AudioMeter {
 
   _sample() {
     if (!this.isRunning || !this.analyser) return;
-    const sampleData = new Uint8Array(this.analyser.fftSize);
-    this.analyser.getByteTimeDomainData(sampleData);
-    let squareSum = 0;
-    for (const sample of sampleData) squareSum += (sample - 128) ** 2;
-    this.level = Math.sqrt(squareSum / sampleData.length) / 128;
+    this.level = readAnalyserLevel(this.analyser);
     if (this.context) {
       this.context.clearRect(0, 0, METER_WIDTH_PX, METER_HEIGHT_PX);
       this.context.fillStyle = this.level > METER_LOUD_LEVEL ? '#e0a545' : '#3ecf6f';

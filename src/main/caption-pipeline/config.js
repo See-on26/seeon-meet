@@ -9,6 +9,9 @@ const DEFAULT_EMBED_URL = 'http://127.0.0.1:8804/embed';
 // 슬라이드 전사 백엔드. ocr 은 임베딩 서비스(같은 GPU 서버 프로세스)의 /ocr 로 화면 글자를 읽어 VLM 호출을 줄인다.
 const SLIDE_TEXT_BACKEND_LIST = ['vlm', 'ocr'];
 const DEFAULT_SLIDE_TEXT_BACKEND = 'vlm';
+// 교차 모드 틈 후보 위치: asr = ASR 조각 끝 시각(지금 동작), audio = 앱이 잰 회의 소리의 무음 구간.
+const GAP_SOURCE_LIST = ['asr', 'audio'];
+const DEFAULT_GAP_SOURCE = 'asr';
 // 탐지 단계 경량 LLM 판정 전용 서버. GPU 서버에서 VLM(8801)과 따로 Qwen3.5-9B 를 8805 에 띄운다.
 const DEFAULT_JUDGE_GPU_URL = 'http://127.0.0.1:8805/v1/chat/completions';
 const DEFAULT_JUDGE_GPU_MODEL = 'qwen3.5-9b';
@@ -61,6 +64,14 @@ function readSlideTextBackend({ env }) {
   return DEFAULT_SLIDE_TEXT_BACKEND;
 }
 
+function readGapSource({ env }) {
+  const source = env.SEEON_GAP_SOURCE;
+  if (source === undefined || source === '') return DEFAULT_GAP_SOURCE;
+  if (GAP_SOURCE_LIST.includes(source)) return source;
+  console.warn(`[pipeline] SEEON_GAP_SOURCE="${source}" 은 지원하지 않는 틈 후보 출처입니다 — ${DEFAULT_GAP_SOURCE} 로 찾습니다 (허용: ${GAP_SOURCE_LIST.join('·')})`);
+  return DEFAULT_GAP_SOURCE;
+}
+
 // OCR 은 임베딩 서비스에 붙어 있어 기본 주소를 임베딩 주소에서 만든다. 포트를 나누면 SEEON_OCR_URL 로 준다.
 function resolveOcrUrl({ env, embedUrl }) {
   if (env.SEEON_OCR_URL) return env.SEEON_OCR_URL;
@@ -88,6 +99,7 @@ function readPipelineConfig(env = process.env) {
     ttsLongUrl: env.SEEON_TTS_LONG_URL || DEFAULT_TTS_LONG_URL,
     embedUrl,
     slideTextBackend: readSlideTextBackend({ env }),
+    gapSource: readGapSource({ env }),
     ocrUrl: resolveOcrUrl({ env, embedUrl }),
     bedrockRegion: env.SEEON_BEDROCK_REGION || DEFAULT_BEDROCK_REGION,
     bedrockModelId,
@@ -120,5 +132,5 @@ function readPipelineConfig(env = process.env) {
 
 module.exports = {
   readPipelineConfig, DEFAULT_JUDGE_GPU_URL, DEFAULT_JUDGE_GPU_MODEL, ASR_LANGUAGE_LIST, DEFAULT_ASR_LANGUAGE, isAsrLanguage, JUDGE_BACKEND_LIST, DEFAULT_JUDGE_BACKEND,
-  SLIDE_TEXT_BACKEND_LIST, DEFAULT_SLIDE_TEXT_BACKEND,
+  SLIDE_TEXT_BACKEND_LIST, DEFAULT_SLIDE_TEXT_BACKEND, GAP_SOURCE_LIST, DEFAULT_GAP_SOURCE,
 };

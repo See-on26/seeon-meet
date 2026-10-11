@@ -3,12 +3,26 @@ const { NARRATION_TYPE_MAP } = require('../contracts/narration-types');
 const BOUNDARY_KIND_MAP = {
   complete: 'complete',
   pause: 'pause',
+  unknown: 'unknown',
 };
 
 const BOUNDARY_KIND_LABEL_MAP = {
   [BOUNDARY_KIND_MAP.complete]: '완결',
   [BOUNDARY_KIND_MAP.pause]: '중단',
+  [BOUNDARY_KIND_MAP.unknown]: '미상(받아쓰기 전)',
 };
+
+// 틈 후보의 출처. audio 는 앱이 잰 회의 소리의 무음, asr 은 받아쓰기 조각 끝 시각이다.
+const GAP_CANDIDATE_SOURCE_MAP = {
+  audio: 'audio',
+  asr: 'asr',
+};
+
+// 소리로 잰 후보나 끝맺음 미상 후보가 있을 때만 입력에 붙인다. ASR 후보만 있을 때의 입력은 그대로 둔다.
+const MEASURED_GAP_NOTE_LIST = [
+  '참고: 무음에 "(잰 값)"이 붙은 후보는 실제 회의 소리로 조용함을 확인한 자리다. "≥"는 아직 이어지는 무음의 지금까지 길이다.',
+  '참고: 끝맺음=미상은 아직 받아쓰기 전이라 문장이 끝났는지 모르는 자리다. 완결·중단 후보가 있으면 그쪽을 먼저 본다.',
+];
 
 const GAP_SYSTEM_PROMPT = [
   '너는 시각장애인용 회의 캡션 시스템의 "삽입 위치 결정자"다.',
@@ -115,4 +129,7 @@ const FEW_SHOT_LIST = [
   },
 ];
 
-module.exports = { BOUNDARY_KIND_MAP, BOUNDARY_KIND_LABEL_MAP, GAP_SYSTEM_PROMPT, FEW_SHOT_LIST };
+module.exports = {
+  BOUNDARY_KIND_MAP, BOUNDARY_KIND_LABEL_MAP, GAP_CANDIDATE_SOURCE_MAP, MEASURED_GAP_NOTE_LIST,
+  GAP_SYSTEM_PROMPT, FEW_SHOT_LIST,
+};
