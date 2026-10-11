@@ -1137,7 +1137,7 @@ function handleAsrTranscript({ text, ts, endTs, segmentList = [], triggerCandida
 
     transcriptWindow.push({ text: trimmed, ts: performance.now() });
     const timedCandidateList = attachCandidateEventVideoTime({
-      candidateList: triggerCandidateList, chunkStartTs: ts, chunkEndTs: endTs, segmentList,
+      candidateList: triggerCandidateList, text, chunkStartTs: ts, chunkEndTs: endTs, segmentList,
       nowVideoTimeMs: captureSource.videoTimeMs,
     });
     // 대기·보류 중인 지시 후보가 있으면 이 조각과 그 후보를 그 결정에 먼저 붙인다. 새 후보는 그다음 탐지에서 생긴다.
