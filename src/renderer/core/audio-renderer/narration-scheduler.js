@@ -1,4 +1,5 @@
-const DEFAULT_POLL_MS = 200;
+// 50ms 마다 확인해 고른 틈보다 늦게 멈추는 폭을 줄인다(따라잡기 배속 1.5배에서도 75ms 남짓).
+const DEFAULT_POLL_MS = 50;
 
 export function isInsertDue({ captionCaptureMs, playbackTimeMs }) {
   return playbackTimeMs >= captionCaptureMs;
