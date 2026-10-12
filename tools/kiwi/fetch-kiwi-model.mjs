@@ -1,5 +1,5 @@
 // 한국어 트리거용 Kiwi 형태소 분석 모델을 vendor/kiwi-model 에 받는다. 이미 같은 버전이 있으면 건너뛴다.
-// 사용: npm run setup:kiwi   (dist:win · dist:mac:dir 전에 자동으로 돈다)
+// 사용: npm run setup:kiwi   (dist:win · dist:win:lab · dist:mac:dir 전에 자동으로 돈다)
 import fs from 'node:fs';
 import path from 'node:path';
 import zlib from 'node:zlib';

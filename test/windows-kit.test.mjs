@@ -80,3 +80,12 @@ test('앱마다 빌드 스크립트·설치 파일 이름·zip 이름·안내문
   assert.equal(buildKitName({ date, commit: '232932e1234', label: '김지오', app: 'lab' }), 'SEEON-Lab-Windows-20261011-1630-232932e-김지오');
   assert.equal(buildKitName({ date, commit: '232932e1234', label: '' }), 'SEEON-Windows-20261011-1630-232932e');
 });
+
+test('키트가 부르는 앱별 빌드 스크립트는 모두 그 전에 Kiwi 모델을 받는다', async () => {
+  const { readFile } = await import('node:fs/promises');
+  const { scripts } = JSON.parse(await readFile(new URL('../package.json', import.meta.url), 'utf8'));
+  for (const { distScript } of Object.values(KIT_APP_MAP)) {
+    assert.ok(scripts[distScript], `${distScript} 스크립트가 없다`);
+    assert.equal(scripts[`pre${distScript}`], 'npm run setup:kiwi', `pre${distScript} 가 Kiwi 모델을 받지 않는다`);
+  }
+});
