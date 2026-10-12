@@ -8,9 +8,11 @@ const {
   ROUTER_BLOCKED_REASON_MAP, ROUTER_SYSTEM_PROMPT, FEW_SHOT_LIST, GAP_VERDICT_MAP,
   buildRouterInput, buildFewShotMessageList,
 } = require('../prompts/unified-router');
+const { verifyValueEvidence, needsEvidence } = require('./judge-evidence');
 
 const REQUEST_TIMEOUT_MS = 15000;
-const MAX_ROUTER_TOKENS = 400;
+// 단순 수치·변화 X 판단마다 근거 구절을 옮겨 적으므로 예전(400)보다 넉넉히 둔다.
+const MAX_ROUTER_TOKENS = 500;
 
 const ROUTER_SOURCE_MAP = { gpu: 'gpu', bedrock: 'bedrock', fallback: 'fallback', error: 'error', none: 'none' };
 
@@ -37,7 +39,9 @@ function numberCandidateList(candidateList) {
 }
 
 // 판단 JSON 을 후보마다 읽는다. 판단이 없거나 "O"가 아니면 X 로 본다(애매하면 내보내지 않는다).
-function parseJudgeText({ text, candidateList }) {
+// context({ before, utterance, after })를 주면 단순 수치·변화 후보의 X 판단은 옮겨 적은 근거(evidence)가
+// 확인될 때만 믿고, 확인되지 않으면 O 로 바꾼다. 판단 자체를 못 읽은 후보는 그대로 X 다.
+function parseJudgeText({ text, candidateList, context = null }) {
   const verdictById = new Map();
   if (typeof text === 'string') {
     const match = text.replace(/```(?:json)?/g, '').match(/\{[\s\S]*\}/);
@@ -49,6 +53,7 @@ function parseJudgeText({ text, candidateList }) {
           verdictById.set(id, {
             isGap: String(entry.gap).trim().toUpperCase() === GAP_VERDICT_MAP.gap,
             reason: typeof entry.reason === 'string' ? entry.reason.trim() : '',
+            evidence: typeof entry.evidence === 'string' ? entry.evidence.trim() : '',
           });
         }
       }
@@ -56,11 +61,21 @@ function parseJudgeText({ text, candidateList }) {
       // 읽지 못한 판단은 모두 X 로 둔다.
     }
   }
-  return candidateList.map((candidate) => ({
-    ...candidate,
-    isGap: Boolean(verdictById.get(candidate.id)?.isGap),
-    reason: verdictById.get(candidate.id)?.reason || (verdictById.has(candidate.id) ? '' : '판단 없음'),
-  }));
+  return candidateList.map((candidate) => {
+    const verdict = verdictById.get(candidate.id);
+    const judged = {
+      ...candidate,
+      isGap: Boolean(verdict?.isGap),
+      reason: verdict?.reason || (verdict ? '' : '판단 없음'),
+      evidence: verdict?.evidence || '',
+    };
+    if (!context || !verdict || judged.isGap || !needsEvidence({ type: candidate.type })) return judged;
+    const { isVerified, failReason } = verifyValueEvidence({
+      type: candidate.type, phrase: candidate.phrase, evidence: judged.evidence, context,
+    });
+    if (isVerified) return judged;
+    return { ...judged, isGap: true, reason: `근거 확인 실패(${failReason}) → O · 원래 판단: ${judged.reason}` };
+  });
 }
 
 // 공백(O)인 후보를 해설 후보로 바꾼다. 지시 공백이 둘 이상이면 여러 대상을 함께 말한 것이라 완전형으로 묘사한다.
@@ -120,7 +135,7 @@ function createUnifiedRouter({ config, judgeLlm = createJudgeLlm({ config }) }) 
         ],
         maxTokens: MAX_ROUTER_TOKENS, timeoutMs: REQUEST_TIMEOUT_MS, label: '통합 라우터',
       });
-      const judgeList = parseJudgeText({ text, candidateList: numberedList });
+      const judgeList = parseJudgeText({ text, candidateList: numberedList, context: { before, utterance, after } });
       const narrationCandidateList = toNarrationCandidateList(judgeList);
       return {
         candidateList: narrationCandidateList, judgeList, source,
