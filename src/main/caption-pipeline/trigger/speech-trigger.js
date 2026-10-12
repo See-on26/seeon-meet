@@ -87,7 +87,9 @@ const NUMERAL_DETERMINER_SET = new Set([
   '한', '두', '세', '네', '다섯', '여섯', '일곱', '여덟', '아홉', '열', '스무', '수십', '수백', '수천', '몇',
 ]);
 // 날짜·시각·순번은 "무엇의 수치인지"를 묻는 값이 아니다.
-const NON_QUANTITY_UNIT_SET = new Set(['년', '년대', '월', '시', '번', '호', '차', '학년', '기', '회차', '번째', '째', '세기']);
+const NON_QUANTITY_UNIT_SET = new Set([
+  '년', '년대', '월', '시', '번', '호', '차', '학년', '기', '회차', '번째', '째', '세기', '분기', '호점', '조',
+]);
 const UNIT_NOUN_SET = new Set([
   '퍼센트', '프로', '퍼센트포인트', '포인트', '달러', '유로', '엔', '위안', '킬로', '킬로미터', '미터', '센티', '센티미터', '밀리',
   '그램', '킬로그램', '톤', '리터', '시간', '개월', '주', '배',
@@ -102,6 +104,13 @@ const CHANGE_NOUN_SET = new Set([
   '둔화', '반등', '회복', '역전', '추월', '폭증', '폭락', '급등', '급락', '반감', '배증', '인상', '인하', '절감', '감량',
 ]);
 const COMPARISON_MARKER_FORM_SET = new Set(['보다', '더', '덜']);
+// 사람이 늘리고 줄이는 타동사. 지난 일(었·았)이 아니면 "줄이겠습니다", "늘립니다", "내려 보세요"처럼 계획·지시라 값의 변화가 아니다.
+const AGENTIVE_CHANGE_VERB_SET = new Set(['늘리', '줄이', '내리']);
+const PAST_TENSE_FORM_SET = new Set(['었', '았', '였', '었었', '았었']);
+// "-겠-", "-ㄹ게요"는 말하는 사람의 의지라 이미 일어난 변화가 아니다.
+const INTENTION_ENDING_PATTERN = /^(?:ᆯ|을)게/;
+// "한 번 더", "하나 더"의 더는 비교가 아니라 덧붙임이다.
+const ADDITIVE_COUNT_FORM_SET = new Set(['번', '개', '명', '대', '곳', '하나', '둘', '셋']);
 const CONCLUSION_MARKER_SET = new Set(['결국', '따라서', '결과적으로', '결론적으로', '최종적으로']);
 const SCALE_ADJ_SET = new Set(['크', '작', '길', '짧', '넓', '좁', '많', '적']);
 
@@ -165,6 +174,9 @@ function detectKoreanDemonstrative(context) {
   const candidateList = [];
   tokenList.forEach((token, index) => {
     if (token.tag === 'MM' && DEMONSTRATIVE_DETERMINER_SET.has(token.form)) {
+      // "반이 자막을"처럼 앞말에 붙은 "이"를 Kiwi 가 관형사로 자르는 일이 있다. 지시 관형사는 띄어 쓴다.
+      const previous = tokenList[index - 1];
+      if (previous && previous.end === token.start && !/^S/.test(previous.tag)) return;
       const nounIndex = findNextIndex({
         tokenList, fromIndex: index, maxDistance: 4,
         isMatch: (next) => NOUN_TAG_SET.has(next.tag),
@@ -248,8 +260,12 @@ function detectKoreanNumber(context) {
     const isAttached = Boolean(unit) && unit.start === tokenList[endIndex].end
       && !(unit.tag === 'NNG' && ['NNG', 'NNP'].includes(tokenList[endIndex + 2]?.tag))
       && !(unit.tag === 'NNG' && tokenList[endIndex + 2]?.tag === 'NNB' && tokenList[endIndex + 2].start === unit.end);
-    if (isUnitToken(unit, { isAttached }) && !(isNumeralDeterminer && unit.tag !== 'NNB')) {
-      candidateList.push(buildCandidate({ text, type: TRIGGER_TYPE_MAP.number, start: token.start, end: unit.end }));
+    // "두 대", "한 달"처럼 고유어 수 관형사로 센 개수·기간은 발화로 이미 정해진 값이라 화면 수치가 아니다.
+    // "1kg에 4,000원"의 1kg처럼 다른 수치의 기준이 되는 단위, "한 건도 없다"처럼 없음을 말하는 수도 넘긴다.
+    if (isUnitToken(unit, { isAttached }) && !isNumeralDeterminer) {
+      if (!isBasisOrNoneQuantity({ tokenList, unitIndex: endIndex + 1 })) {
+        candidateList.push(buildCandidate({ text, type: TRIGGER_TYPE_MAP.number, start: token.start, end: unit.end }));
+      }
       index = endIndex + 2;
     } else {
       index = endIndex + 1;
@@ -258,9 +274,24 @@ function detectKoreanNumber(context) {
   return candidateList.filter(Boolean);
 }
 
+function isBasisOrNoneQuantity({ tokenList, unitIndex }) {
+  const next = tokenList[unitIndex + 1];
+  if (next?.tag === 'JKB' && ['에', '당'].includes(next.form) && isNumberToken(tokenList[unitIndex + 2] || {})) return true;
+  return next?.tag === 'JX' && next.form === '도' && ['없', '않'].includes(tokenList[unitIndex + 2]?.form);
+}
+
 function isComparisonMarker(token) {
   if (COMPARISON_MARKER_FORM_SET.has(token.form) && ['JKB', 'MAG'].includes(token.tag)) return true;
   return (token.form === '비하' && token.tag === 'VV') || (token.form === '대비' && token.tag === 'NNG');
+}
+
+function isAdditiveMore({ tokenList, index }) {
+  const token = tokenList[index];
+  return token.form === '더' && ADDITIVE_COUNT_FORM_SET.has(tokenList[index - 1]?.form);
+}
+
+function isComparisonMarkerAt({ tokenList, index }) {
+  return isComparisonMarker(tokenList[index]) && !isAdditiveMore({ tokenList, index });
 }
 
 function hasComparisonMarkerBefore({ context, index, maxDistance = 6 }) {
@@ -269,6 +300,7 @@ function hasComparisonMarkerBefore({ context, index, maxDistance = 6 }) {
     const token = tokenList[back];
     if (token.tag === 'EC' && tokenList[back - 1]?.form === '비하') return true;
     if (isSentenceBoundary(token) || (token.tag === 'EC' && token.form !== '게')) return false;
+    if (isAdditiveMore({ tokenList, index: back })) return false;
     if (isComparisonMarker(token)) return true;
   }
   return false;
@@ -290,7 +322,10 @@ const ADJ_TO_CHANGE_VERB_PATTERN = /(?:아|어|여|해|워|와|러)지$/;
 function findChangeStemIndex({ context, index }) {
   const { tokenList } = context;
   const token = tokenList[index];
-  if (PREDICATE_VERB_TAG_SET.has(token.tag) && CHANGE_VERB_SET.has(token.form)) return index;
+  if (PREDICATE_VERB_TAG_SET.has(token.tag) && CHANGE_VERB_SET.has(token.form)) {
+    // "줄인 집단", "무너져 내린 흙더미"처럼 관형형으로 명사를 꾸미면 술어가 아니다.
+    return tokenList[index + 1]?.tag === 'ETM' ? -1 : index;
+  }
   // "길어지다", "좋아지다"처럼 한 동사로 분석된 형용사+어지다.
   if (PREDICATE_VERB_TAG_SET.has(token.tag) && ADJ_TO_CHANGE_VERB_PATTERN.test(token.form)
     && tokenList[index + 1]?.tag !== 'ETM') return index;
@@ -311,7 +346,7 @@ function isFirstPredicateAfterMarker({ context, stemIndex }) {
   const { tokenList } = context;
   for (let back = stemIndex - 1; back >= 0; back -= 1) {
     const token = tokenList[back];
-    if (isComparisonMarker(token)) return true;
+    if (isComparisonMarkerAt({ tokenList, index: back })) return true;
     if (isSentenceBoundary(token)) return false;
     if (readPredicateStemIndex({ tokenList, index: back }) >= 0 && token.tag !== 'MAG') return false;
   }
@@ -326,6 +361,7 @@ function detectKoreanChange(context) {
     const stemIndex = findChangeStemIndex({ context, index });
     if (stemIndex < 0) return;
     const stem = tokenList[stemIndex];
+    if (isPlannedChange({ tokenList, stemIndex })) return;
     let endToken = token;
     // "더 낮게 나왔습니다"처럼 비교 형용사가 부사어(-게)면 뒤 술어 어절까지 한 구로 잡는다.
     const next = tokenList[index + 1];
@@ -343,6 +379,23 @@ function detectKoreanChange(context) {
   });
   // 결론 표지("결국", "따라서")가 바로 앞에 없더라도 같은 문장의 변화 구와 이어지면 표지부터 한 구로 묶는다.
   return candidateList.filter(Boolean).map((candidate) => attachConclusionMarker({ context, candidate }));
+}
+
+// 술어 줄기 뒤 어미를 문장 끝(EF)까지 본다. 의지 어미면 계획이고, 사람이 하는 타동사(늘리·줄이·내리)가 지난 일이 아니면 지시·계획이다.
+function isPlannedChange({ tokenList, stemIndex }) {
+  const endingList = [];
+  for (let cursor = stemIndex + 1; cursor < tokenList.length && cursor <= stemIndex + 6; cursor += 1) {
+    const token = tokenList[cursor];
+    if (isSentenceBoundary(token)) break;
+    endingList.push(token);
+    if (token.tag === 'EF') break;
+  }
+  if (endingList.some((token) => (token.tag === 'EP' && token.form === '겠') || (token.tag === 'EF' && INTENTION_ENDING_PATTERN.test(token.form)))) {
+    return true;
+  }
+  const stem = tokenList[stemIndex];
+  if (!AGENTIVE_CHANGE_VERB_SET.has(stem.form)) return false;
+  return !endingList.some((token) => token.tag === 'EP' && PAST_TENSE_FORM_SET.has(token.form));
 }
 
 function attachConclusionMarker({ context, candidate }) {
@@ -502,6 +555,38 @@ const EN_SCALE_PATTERN_LIST = [
   new RegExp(`(?<=\\b(?:is|are|was|were|looks?|seems?|got|gets|get)\\s)(?:${EN_SCALE_ADJ_TEXT})\\b(?!\\s+than)`, 'gi'),
 ];
 
+// 값의 변화가 아닌 쓰임: 주어 명사("Crashes went down"), 구동사·관용구("drop off", "falls apart", "jumped out", "cut from"),
+// 계절의 fall, 횟수를 센 crashed twice, 명사를 꾸미는 -ing("the growing season").
+const EN_SUBJECT_FOLLOW_PATTERN = /^\s+(?:has|have|had|is|are|was|were|went|goes|go|rose|fell|will)\b/i;
+const EN_NON_VALUE_CHANGE_RULE_LIST = [
+  { head: /^cut$/i, after: /^\s+(?:from|is|was|are|were)\b/i },
+  // "drop the sensor"처럼 목적어를 받으면 내려놓기다. "dropped a ton", "dropped a great deal"의 a 는 변화량이라 남긴다.
+  { head: /^drop(?:s|ped|ping)?$/i, after: /^\s+(?:off|the|our|their|your|my|it|them|this|that)\b|^\s+an?\s+(?!(?:ton|great deal|lot|bit|little|good bit|fair bit|whole lot)\b)/i },
+  { head: /^fall(?:s|ing)?$/i, after: /^\s+apart\b/i },
+  { head: /^fall$/i, before: /\b(?:next|last|this|early|late|in the)\s+$/i },
+  { head: /^crash(?:es|ed)?$/i, after: /^\s+(?:twice|once|again|\d+\s+times|(?:two|three|four|five|several|many)\s+times)\b/i },
+  { head: /^jump(?:s|ed)?$/i, after: /^\s+out\b/i },
+  { head: /^[a-z]+ing$/i, before: /\bthe\s+$/i },
+];
+// "over the eight weeks"처럼 기간을 나타내는 수는 화면 수치가 아니다.
+const EN_PERIOD_BEFORE_PATTERN = /\b(?:over|for|during|in)\s+the\s+(?:past\s+|last\s+|next\s+|first\s+)?$/i;
+const EN_PERIOD_UNIT_PATTERN = /\b(?:days?|weeks?|months?|years?|hours?)$/i;
+
+function isNonValueEnglishChange({ text, candidate }) {
+  const phrase = text.slice(candidate.start, candidate.end);
+  if (/\s/.test(phrase.trim())) return false;
+  const before = text.slice(0, candidate.start);
+  const after = text.slice(candidate.end);
+  if (EN_SUBJECT_FOLLOW_PATTERN.test(after)) return true;
+  return EN_NON_VALUE_CHANGE_RULE_LIST.some((rule) => rule.head.test(phrase)
+    && (!rule.after || rule.after.test(after)) && (!rule.before || rule.before.test(before)));
+}
+
+function isEnglishPeriodNumber({ text, candidate }) {
+  const phrase = text.slice(candidate.start, candidate.end);
+  return EN_PERIOD_UNIT_PATTERN.test(phrase) && EN_PERIOD_BEFORE_PATTERN.test(text.slice(0, candidate.start));
+}
+
 function listEnglishWord(text) {
   return [...text.matchAll(/[A-Za-z']+/g)].map((match) => ({
     word: match[0], lower: match[0].toLowerCase(), start: match.index, end: match.index + match[0].length,
@@ -606,6 +691,7 @@ function detectEnglishCandidateList({ text }) {
   const changeList = mergeOverlapping(collectPatternCandidateList({ text, type: TRIGGER_TYPE_MAP.change, patternList: EN_CHANGE_PATTERN_LIST }))
     .map((candidate) => buildCandidate({ text, type: candidate.type, start: candidate.start, end: candidate.end }))
     .filter(Boolean)
+    .filter((candidate) => !isNonValueEnglishChange({ text, candidate }))
     .map((candidate) => attachEnglishConclusion({ text, candidate }));
   const scaleList = collectPatternCandidateList({ text, type: TRIGGER_TYPE_MAP.scale, patternList: EN_SCALE_PATTERN_LIST })
     .filter((candidate) => !changeList.some((change) => candidate.start < change.end && change.start < candidate.end));
@@ -614,7 +700,7 @@ function detectEnglishCandidateList({ text }) {
     ...detectEnglishAdjectiveNoun({ text }),
     ...mergeOverlapping(collectPatternCandidateList({
       text, type: TRIGGER_TYPE_MAP.number, patternList: [EN_NUMBER_PATTERN, EN_PLURAL_COUNT_PATTERN],
-    })),
+    })).filter((candidate) => !isEnglishPeriodNumber({ text, candidate })),
     ...changeList,
     ...mergeOverlapping(scaleList),
   ]);
