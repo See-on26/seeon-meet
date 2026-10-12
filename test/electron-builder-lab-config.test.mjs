@@ -13,9 +13,23 @@ test('실험 창 설치본은 시작 파일을 실험 창으로 두고 앱 이�
   const config = createLabBuilderConfig(option);
   assert.equal(config.appId, 'kr.seeon.lab');
   assert.equal(config.productName, 'SEEON Lab');
-  assert.deepEqual(config.extraMetadata, { main: 'src/main/lab/index.js', productName: 'SEEON Lab', author: { name: 'SEEON' } });
+  assert.deepEqual(config.extraMetadata, { main: 'src/main/lab/index.js', name: 'seeon-lab', productName: 'SEEON Lab', author: { name: 'SEEON' } });
   assert.equal(config.nsis.shortcutName, 'SEEON Lab');
   assert.equal(config.nsis.artifactName, 'SEEON-Lab-Setup-${version}.${ext}');
+});
+
+// 사용자별 원클릭 설치(oneClick·perMachine false)에서 electron-builder 는 설치 폴더 이름을 package.json name 으로 정한다.
+// 이름이 같으면 두 앱이 %LOCALAPPDATA%\\Programs 의 한 폴더에 깔려 나중에 깐 쪽 app.asar 만 남고, 두 바로가기가 모두 그 앱을 연다.
+test('실험 창 설치본은 package 이름을 제품과 달리 해 설치 폴더를 나눈다', () => {
+  const lab = createLabBuilderConfig(option);
+  const meet = createBuilderConfig(option);
+  const packageName = require('../package.json').name;
+  assert.equal(meet.nsis.oneClick, true);
+  assert.equal(meet.nsis.perMachine, false);
+  assert.equal(typeof lab.extraMetadata.name, 'string');
+  assert.ok(lab.extraMetadata.name.length > 0);
+  assert.notEqual(lab.extraMetadata.name, packageName);
+  assert.notEqual(lab.extraMetadata.name, meet.extraMetadata?.name ?? packageName);
 });
 
 test('실험 창 설치본도 제품과 같은 코드·비밀·Kiwi 모델·설치 방식으로 묶는다', () => {
