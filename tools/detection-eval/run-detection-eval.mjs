@@ -3,6 +3,8 @@
 //   node tools/detection-eval/run-detection-eval.mjs --db "<탐지 평가 DB>/문항" --split train            (트리거만)
 //   node tools/detection-eval/run-detection-eval.mjs --db "<탐지 평가 DB>/문항" --split test --judge     (트리거 + 판단 LLM)
 //   --lang ko|en · --type <유형> · --limit N · --concurrency N · --out <결과 JSON 경로> · --show-miss N
+//   --outside-labels <JSON> : 트리거 문장 안 정답 밖 후보의 라벨([{ key: "<id>@<시작>-<끝>", label: "O"|"X" }]).
+//     주면 판단기가 그 위치에 낸 O/X 도 혼동표에 더한다("정답 밖" 줄과 전체). 없으면 정답 후보만 센다.
 // 판단 LLM 은 앱과 같은 설정(.env 의 SEEON_JUDGE_*)을 쓴다. 평가 계획상 판단 LLM 은 평가 데이터를 만든 모델과 다른 계열(GPU Qwen)이어야 한다.
 import fs from 'node:fs';
 import path from 'node:path';
@@ -25,12 +27,12 @@ const DB_TYPE_MAP = {
 const GAP_LABEL = 'O';
 
 export function parseArgs(argList) {
-  const option = { db: '', split: 'train', judge: false, lang: '', type: '', limit: 0, concurrency: 4, out: '', showMiss: 0 };
+  const option = { db: '', split: 'train', judge: false, lang: '', type: '', limit: 0, concurrency: 4, out: '', showMiss: 0, outsideLabels: '' };
   for (let index = 0; index < argList.length; index += 1) {
     const arg = argList[index];
     const value = argList[index + 1];
     if (arg === '--judge') { option.judge = true; continue; }
-    const key = { '--db': 'db', '--split': 'split', '--lang': 'lang', '--type': 'type', '--out': 'out' }[arg];
+    const key = { '--db': 'db', '--split': 'split', '--lang': 'lang', '--type': 'type', '--out': 'out', '--outside-labels': 'outsideLabels' }[arg];
     if (key) { option[key] = value; index += 1; continue; }
     const numberKey = { '--limit': 'limit', '--concurrency': 'concurrency', '--show-miss': 'showMiss' }[arg];
     if (numberKey) { option[numberKey] = Number(value); index += 1; continue; }
@@ -59,6 +61,37 @@ export function matchTrigger({ item, speechTrigger }) {
   const matched = candidateList.find((candidate) => overlaps(candidate, label)) || null;
   const extraList = candidateList.filter((candidate) => !overlaps(candidate, label));
   return { matched, extraList, analyzer, candidateList };
+}
+
+export function buildOutsideKey({ id, start, end }) {
+  return `${id}@${start}-${end}`;
+}
+
+// 판단 목록(트리거 문장 기준 위치)에서 정답 후보를 뺀 나머지 후보의 판단.
+export function toOutsideVerdictList({ id, judgeList = [], matchedInSentence = null }) {
+  return judgeList
+    .filter((entry) => !(matchedInSentence && entry.start === matchedInSentence.start && entry.end === matchedInSentence.end))
+    .map((entry) => ({ key: buildOutsideKey({ id, start: entry.start, end: entry.end }), phrase: entry.phrase, isPredictedGap: Boolean(entry.isGap) }));
+}
+
+export function scoreOutsideVerdictList({ outsideVerdictList, labelMap }) {
+  const score = { tp: 0, fp: 0, fn: 0, tn: 0, unlabeledCount: 0 };
+  for (const verdict of outsideVerdictList) {
+    const label = labelMap.get(verdict.key);
+    if (!label) { score.unlabeledCount += 1; continue; }
+    const isGap = label === GAP_LABEL;
+    if (isGap && verdict.isPredictedGap) score.tp += 1;
+    else if (!isGap && verdict.isPredictedGap) score.fp += 1;
+    else if (isGap) score.fn += 1;
+    else score.tn += 1;
+  }
+  return score;
+}
+
+function loadOutsideLabelMap(labelPath) {
+  if (!labelPath) return null;
+  const labelList = JSON.parse(fs.readFileSync(labelPath, 'utf8'));
+  return new Map(labelList.map((entry) => [entry.key, entry.label]));
 }
 
 function emptyCount() {
@@ -124,7 +157,7 @@ async function judgeItem({ item, trigger, judge }) {
     const verdict = await judge.silenceJudge.judge({ transcript: item.segments.before, silenceMs });
     return { isPredictedGap: verdict.hasCue, reason: verdict.reason || '', source: verdict.source };
   }
-  if (!trigger.matched) return { isPredictedGap: false, reason: '트리거 놓침', source: 'trigger' };
+  if (!trigger.matched) return { isPredictedGap: false, reason: '트리거 놓침', source: 'trigger', outsideVerdictList: [] };
   const sentenceStart = item.text.indexOf(item.segments.trigger_sentence);
   const sentenceEnd = sentenceStart + item.segments.trigger_sentence.length;
   // 앱처럼 트리거 문장 안의 후보만 판단에 넘긴다. 위치는 문장 기준으로 옮긴다.
@@ -136,7 +169,10 @@ async function judgeItem({ item, trigger, judge }) {
   });
   const matchedInSentence = { start: trigger.matched.start - sentenceStart, end: trigger.matched.end - sentenceStart };
   const verdict = (routed.judgeList || []).find((entry) => entry.start === matchedInSentence.start && entry.end === matchedInSentence.end);
-  return { isPredictedGap: Boolean(verdict?.isGap), reason: verdict?.reason || routed.blockedReason || '', source: routed.source };
+  return {
+    isPredictedGap: Boolean(verdict?.isGap), reason: verdict?.reason || routed.blockedReason || '', source: routed.source,
+    outsideVerdictList: toOutsideVerdictList({ id: item.id, judgeList: routed.judgeList, matchedInSentence }),
+  };
 }
 
 async function main() {
@@ -146,6 +182,7 @@ async function main() {
   const speechTrigger = createSpeechTrigger({ tokenizer });
   const itemList = loadItemList(option);
   const judge = option.judge ? await createJudge() : null;
+  const outsideLabelMap = loadOutsideLabelMap(option.outsideLabels);
   console.log(`[eval] ${option.split} ${itemList.length}건${option.judge ? ' · 판단 LLM 포함' : ' · 트리거만'}`);
 
   const resultList = await mapWithConcurrency({
@@ -170,6 +207,19 @@ async function main() {
     }
     if (!isTriggerHit || (verdict && verdict.isPredictedGap !== isGap)) missList.push({ item, trigger, verdict });
   }
+  if (judge && outsideLabelMap) {
+    let unlabeledCount = 0;
+    for (const { item, verdict } of resultList) {
+      const score = scoreOutsideVerdictList({ outsideVerdictList: verdict?.outsideVerdictList || [], labelMap: outsideLabelMap });
+      unlabeledCount += score.unlabeledCount;
+      for (const key of ['정답 밖', `전체/${item.lang}`, '전체']) {
+        if (!countMap.has(key)) countMap.set(key, emptyCount());
+        const count = countMap.get(key);
+        for (const cell of ['tp', 'fp', 'fn', 'tn']) count[cell] += score[cell];
+      }
+    }
+    console.log(`[eval] 정답 밖 위치를 라벨로 채점했다${unlabeledCount ? ` (라벨 없는 위치 ${unlabeledCount}개는 뺐다)` : ''}`);
+  }
   const keyList = [...countMap.keys()].sort();
   for (const key of keyList) console.log(formatRow({ key, count: countMap.get(key), isJudge: Boolean(judge) }));
   for (const { item, trigger, verdict } of missList.slice(0, option.showMiss)) {
@@ -183,6 +233,7 @@ async function main() {
       matched: trigger.matched?.phrase || null, matchedType: trigger.matched?.type || null,
       extraList: (trigger.extraList || []).map((candidate) => candidate.phrase),
       predicted: verdict ? (verdict.isPredictedGap ? 'O' : 'X') : null, reason: verdict?.reason || null,
+      outsideList: verdict?.outsideVerdictList?.map((entry) => ({ key: entry.key, phrase: entry.phrase, predicted: entry.isPredictedGap ? 'O' : 'X' })) || [],
     })), null, 2));
     console.log(`[eval] 결과 저장 ${option.out}`);
   }
