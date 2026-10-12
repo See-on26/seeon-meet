@@ -1,12 +1,16 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { createRequire } from 'node:module';
+import fs from 'node:fs';
+import path from 'node:path';
+import { fileURLToPath } from 'node:url';
 
 const require = createRequire(import.meta.url);
 const { createBuilderConfig } = require('../electron-builder.config.js');
 const loadLabBuilderConfig = require('../electron-builder.lab.config.js');
 const { createLabBuilderConfig } = loadLabBuilderConfig;
 
+const repoRoot = path.join(path.dirname(fileURLToPath(import.meta.url)), '..');
 const option = { env: {}, fileExists: () => true, warn: () => {}, kiwiModelDir: '/build/vendor/kiwi-model' };
 
 test('실험 창 설치본은 시작 파일을 실험 창으로 두고 앱 이름·appId·설치 이름을 제품과 나눈다', () => {
@@ -32,13 +36,22 @@ test('실험 창 설치본은 package 이름을 제품과 달리 해 설치 폴�
   assert.notEqual(lab.extraMetadata.name, meet.extraMetadata?.name ?? packageName);
 });
 
+test('실험 창 설치본은 제품과 다른 아이콘을 쓴다', () => {
+  const lab = createLabBuilderConfig(option);
+  const meet = createBuilderConfig(option);
+  assert.equal(lab.win.icon, 'build/icon-lab.png');
+  assert.equal(lab.mac.icon, 'build/icon-lab.png');
+  assert.notEqual(lab.win.icon, meet.win.icon);
+  assert.ok(fs.existsSync(path.join(repoRoot, lab.win.icon)));
+});
+
 test('실험 창 설치본도 제품과 같은 코드·비밀·Kiwi 모델·설치 방식으로 묶는다', () => {
   const lab = createLabBuilderConfig(option);
   const meet = createBuilderConfig(option);
   assert.deepEqual(lab.files, meet.files);
   assert.deepEqual(lab.extraResources, meet.extraResources);
   assert.deepEqual(lab.asarUnpack, meet.asarUnpack);
-  assert.deepEqual(lab.win, meet.win);
+  assert.deepEqual({ ...lab.win, icon: null }, { ...meet.win, icon: null });
   assert.deepEqual({ ...lab.nsis, shortcutName: null, artifactName: null }, { ...meet.nsis, shortcutName: null, artifactName: null });
 });
 
