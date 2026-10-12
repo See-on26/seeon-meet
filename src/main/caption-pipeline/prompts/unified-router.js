@@ -34,10 +34,13 @@ const ROUTER_SYSTEM_PROMPT = [
   `· ${TRIGGER_TYPE_LABEL_MAP[TRIGGER_TYPE_MAP.scale]}(꽤 넓죠, 정말 크죠, really big): 화면에 보이는 대상(사진 속 물체, 지도 위 지역,`,
   '  그래프의 막대, 사람 수)의 정도를 "크다·넓다"로만 말했고 실제 정도가 발화에 없다.',
   '  시간·부담·느낌·소리·난이도처럼 화면으로 볼 수 없는 성질이 주어면 정도가 없어도 X 다.',
+  '  실제 정도가 앞뒤 발화에 숫자로 나오면("4.8km", "26개") "크다·많다"라고 말했어도 X 다.',
   '',
-  `── ${TRIGGER_TYPE_LABEL_MAP[TRIGGER_TYPE_MAP.number]}·${TRIGGER_TYPE_LABEL_MAP[TRIGGER_TYPE_MAP.change]}의 근거 인용 ──`,
-  '이 두 유형을 X 로 판단하려면 근거 구절을 "evidence" 에 발화에서 글자 그대로 옮겨 적는다. 옮길 구절이 없으면 O 다.',
-  `· ${TRIGGER_TYPE_LABEL_MAP[TRIGGER_TYPE_MAP.number]}: 그 수치가 무엇의 수치인지 밝힌 구절. 여럿 가운데 어느 것인지 모르면("세 지점 중 하나") 근거가 아니다.`,
+  `── ${TRIGGER_TYPE_LABEL_MAP[TRIGGER_TYPE_MAP.adjectiveNoun]}·${TRIGGER_TYPE_LABEL_MAP[TRIGGER_TYPE_MAP.number]}·${TRIGGER_TYPE_LABEL_MAP[TRIGGER_TYPE_MAP.change]}의 근거 인용 ──`,
+  '이 세 유형을 X 로 판단하려면 근거 구절을 "evidence" 에 발화에서 글자 그대로 옮겨 적는다. 옮길 구절이 없으면 O 다.',
+  `· ${TRIGGER_TYPE_LABEL_MAP[TRIGGER_TYPE_MAP.adjectiveNoun]}: 그 성질(색·크기·값 등)을 가진 것이 무엇인지 밝힌 구절(예: 두 견적의 금액). 후보를 나열하기만 하고 어느 것이 그런지 말하지 않으면 근거가 아니다.`,
+  `· ${TRIGGER_TYPE_LABEL_MAP[TRIGGER_TYPE_MAP.number]}: 그 수치가 무엇을 세거나 잰 값인지 밝힌 구절. 여럿 가운데 어느 것인지 모르면("세 지점 중 하나") 근거가 아니다.`,
+  '  "요청하신 숫자", "맨 위 숫자", "the number I want to flag"처럼 숫자를 가리키기만 하고 무엇을 센 값인지 말하지 않으면 근거가 아니다.',
   `· ${TRIGGER_TYPE_LABEL_MAP[TRIGGER_TYPE_MAP.change]}: 바뀐 값이나 비교한 양쪽 값을 밝힌 구절(숫자·수량이 들어 있다). 비교 대상의 이름만 있으면 근거가 아니다.`,
   '후보 구 자체는 근거가 아니다. 다른 유형이나 O 판단은 evidence 를 빈 문자열로 둔다.',
   '',
@@ -90,7 +93,7 @@ const FEW_SHOT_LIST = [
         { id: 1, type: TRIGGER_TYPE_MAP.adjectiveNoun, phrase: '싼 쪽' },
       ],
     },
-    output: { judgeList: [{ id: 1, gap: 'X', evidence: '', reason: '앞 발화의 견적으로 동양물산임을 알 수 있다' }] },
+    output: { judgeList: [{ id: 1, gap: 'X', evidence: '동양물산은 840만 원, 한빛은 1,020만 원입니다', reason: '앞 발화의 견적으로 동양물산임을 알 수 있다' }] },
   },
   {
     input: {
@@ -144,6 +147,17 @@ const FEW_SHOT_LIST = [
   },
   {
     input: {
+      before: '보고서에서 짚고 넘어갈 숫자가 하나 있어요.',
+      utterance: '바로 18건입니다.',
+      after: '다음 달에 다시 보겠습니다.',
+      candidateList: [
+        { id: 1, type: TRIGGER_TYPE_MAP.number, phrase: '18건' },
+      ],
+    },
+    output: { judgeList: [{ id: 1, gap: 'O', evidence: '', reason: '"짚고 넘어갈 숫자"라고만 했고 무엇을 센 건수인지 말하지 않았다' }] },
+  },
+  {
+    input: {
       before: '회원 현황부터 보겠습니다.',
       utterance: '올해 신규 가입자는 3,400명입니다.',
       after: '목표는 넘겼습니다.',
@@ -155,6 +169,17 @@ const FEW_SHOT_LIST = [
   },
   {
     input: {
+      before: '로고 시안을 두 개 만들었어요.',
+      utterance: '저는 파란 쪽이 마음에 들어요.',
+      after: '다들 어떠세요?',
+      candidateList: [
+        { id: 1, type: TRIGGER_TYPE_MAP.adjectiveNoun, phrase: '파란 쪽' },
+      ],
+    },
+    output: { judgeList: [{ id: 1, gap: 'O', evidence: '', reason: '두 시안 중 어느 것이 파란지 말하지 않았다' }] },
+  },
+  {
+    input: {
       before: '현장 사진 한 장 띄워 두었습니다.',
       utterance: '음, 침수된 구역이 꽤 넓죠.',
       after: '복구에만 몇 달이 걸릴 것 같습니다.',
@@ -163,6 +188,17 @@ const FEW_SHOT_LIST = [
       ],
     },
     output: { judgeList: [{ id: 1, gap: 'O', evidence: '', reason: '보이는 대상(침수 구역)의 넓이를 가늠할 값이 없다' }] },
+  },
+  {
+    input: {
+      before: '현장 사진 한 장 띄워 두었습니다.',
+      utterance: '음, 침수된 구역이 꽤 넓죠.',
+      after: '약 2만 제곱미터에 달합니다.',
+      candidateList: [
+        { id: 1, type: TRIGGER_TYPE_MAP.scale, phrase: '꽤 넓죠' },
+      ],
+    },
+    output: { judgeList: [{ id: 1, gap: 'X', evidence: '', reason: '뒤 발화에서 넓이를 약 2만 제곱미터라고 밝혔다' }] },
   },
   {
     input: {

@@ -59,6 +59,13 @@ test('수치 후보의 근거는 그 수치가 무엇인지 밝힌 말이어야 
   assert.equal(verifyValueEvidence({ type: 'number', phrase: '3,400명', evidence: '3,400명', context }).failReason, 'phrase_only');
 });
 
+test('형용사 + 지시 명사의 근거는 문맥에 그대로 있어야 하고 후보 구만 옮기면 안 된다', () => {
+  const context = { before: '두 업체 견적을 받았는데요, 동양물산은 840만 원, 한빛은 1,020만 원입니다.', utterance: '저는 싼 쪽으로 가고 싶어요.', after: '' };
+  assert.equal(verifyValueEvidence({ type: 'adjective_noun', phrase: '싼 쪽', evidence: '동양물산은 840만 원, 한빛은 1,020만 원입니다', context }).isVerified, true);
+  assert.equal(verifyValueEvidence({ type: 'adjective_noun', phrase: '싼 쪽', evidence: '싼 쪽', context }).failReason, 'phrase_only');
+  assert.equal(verifyValueEvidence({ type: 'adjective_noun', phrase: '싼 쪽', evidence: '', context }).failReason, 'empty');
+});
+
 test('수량 표현은 숫자·한글 수사+단위·배수·영어 수 낱말을 알아본다', () => {
   for (const text of ['40건', '두 배로', '절반이 됐어요', '세 명', '삼십 퍼센트', 'doubled', 'went from five to nine', 'half of them']) {
     assert.equal(hasQuantityExpression(text), true, text);
@@ -84,6 +91,16 @@ test('문맥을 받으면 수치·변화 X 판단 중 근거 확인에 실패한
   assert.match(failed[0].reason, /^근거 확인 실패\(no_quantity\) → O · 원래 판단: 앞에서 비교 대상을 밝혔다/);
 });
 
+test('형용사 + 지시 명사의 X 판단도 근거가 없으면 O 로 본다', () => {
+  const context = { before: '배너를 두 장 뽑았어요.', utterance: '회색 쪽이 더 눈에 띄네요.', after: '' };
+  const judgeList = parseJudgeText({
+    text: '{"judgeList":[{"id":1,"gap":"X","evidence":"","reason":"두 배너 중 회색인 것을 가리킨다"}]}',
+    candidateList: [{ id: 1, type: 'adjective_noun', phrase: '회색 쪽' }],
+    context,
+  });
+  assert.equal(judgeList[0].isGap, true);
+});
+
 test('문맥 없이 읽으면 예전처럼 판단을 그대로 쓴다', () => {
   const judgeList = parseJudgeText({
     text: '{"judgeList":[{"id":1,"gap":"X","reason":"앞에서 밝혔다"}]}',
@@ -95,14 +112,16 @@ test('문맥 없이 읽으면 예전처럼 판단을 그대로 쓴다', () => {
 test('판단 지시문은 수치·변화의 근거 인용을 요구하고 few-shot 답은 모두 evidence 칸을 가진다', () => {
   assert.match(ROUTER_SYSTEM_PROMPT, /"evidence"/);
   assert.match(ROUTER_SYSTEM_PROMPT, /비교 대상의 이름만 있으면 근거가 아니다/);
+  assert.match(ROUTER_SYSTEM_PROMPT, /어느 것이 그런지 말하지 않으면 근거가 아니다/);
   for (const example of FEW_SHOT_LIST) {
     for (const entry of example.output.judgeList) assert.equal(typeof entry.evidence, 'string');
   }
   const verifiedExampleList = FEW_SHOT_LIST.flatMap((example) => example.output.judgeList
     .filter((entry) => entry.gap === 'X')
     .map((entry) => ({ entry, candidate: example.input.candidateList.find((candidate) => candidate.id === entry.id), example })))
-    .filter(({ candidate }) => ['number', 'change'].includes(candidate.type));
-  assert.ok(verifiedExampleList.length >= 2);
+    .filter(({ candidate }) => ['number', 'change', 'adjective_noun'].includes(candidate.type));
+  assert.ok(verifiedExampleList.length >= 3);
+  assert.ok(verifiedExampleList.some(({ candidate }) => candidate.type === 'adjective_noun'));
   for (const { entry, candidate, example } of verifiedExampleList) {
     const result = verifyValueEvidence({
       type: candidate.type, phrase: candidate.phrase, evidence: entry.evidence,
