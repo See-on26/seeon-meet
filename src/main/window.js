@@ -1,10 +1,9 @@
-const { BaseWindow, WebContentsView, screen } = require('electron');
+const { BaseWindow, WebContentsView, screen, shell } = require('electron');
 const path = require('path');
 const { createMeetSession } = require('./meeting/session');
+const { MEET_HOME_URL, handleMeetWindowOpen } = require('./meeting/meet-navigation');
 const { getUaForUrl } = require('./meeting/ua');
 const { computeViewBoundsPair, computeToggledWindowBounds } = require('./viewer-panel-layout');
-
-const MEET_HOME_URL = 'https://meet.google.com/';
 
 const SMOKE_URL = 'about:blank';
 
@@ -70,10 +69,12 @@ function createMeetView() {
     if (isMainFrame) view.webContents.setUserAgent(getUaForUrl(url));
   });
 
-  view.webContents.setWindowOpenHandler(({ url }) => {
-    view.webContents.loadURL(url);
-    return { action: 'deny' };
-  });
+  view.webContents.setWindowOpenHandler(({ url }) => handleMeetWindowOpen({
+    url,
+    loadInView: (target) => view.webContents.loadURL(target),
+    openExternal: (target) => shell.openExternal(target)
+      .catch((error) => console.warn(`[meet] 기본 브라우저로 열지 못함: ${error.message}`)),
+  }));
 
   view.webContents.loadURL(process.env.SEEON_SMOKE ? SMOKE_URL : MEET_HOME_URL);
   return view;
