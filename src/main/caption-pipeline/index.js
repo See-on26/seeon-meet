@@ -21,8 +21,9 @@ const { createCaptionDescribedRegistry } = require('./orchestrator/caption-descr
 const { createSilenceNarrator, SILENCE_RESULT_MAP } = require('./orchestrator/silence-narrator');
 const { selectGeneratableCandidate } = require('./orchestrator/candidate-selector');
 const { createDescribedStore } = require('./orchestrator/described-store');
-const { createScreenRegistry } = require('./orchestrator/screen-registry');
+const { createScreenRegistry, SCREEN_TYPE_MAP } = require('./orchestrator/screen-registry');
 const { createSlideTopicRegistry, SLIDE_TOPIC_VERDICT_MAP } = require('./orchestrator/slide-topic-registry');
+const { buildTransitionNarration, buildRevisitNarration } = require('./orchestrator/slide-transition-text');
 const { createSpeakerRegistry } = require('./orchestrator/speaker-registry');
 const { createNarrationHistory } = require('./orchestrator/narration-history');
 const {
@@ -444,7 +445,7 @@ function registerPipeline({ getViewerView, meetingArchive = null }) {
         reason: verdict.reason,
         detail: `화면유형=${result.screenType} 주제="${result.pageTopic}" 사진단독=${result.isPhotoOnly}`,
       });
-      const slideMajor = String(slideLabel ?? '').split('-')[0];
+      const isSlideScreen = result.screenType === SCREEN_TYPE_MAP.ppt;
 
       const topicVerdict = slideTopicRegistry.judge({
         topic: result.pageTopic, description: result.description,
@@ -471,20 +472,24 @@ function registerPipeline({ getViewerView, meetingArchive = null }) {
         ? Number(result.pageNumber) : null;
       const slideEntry = slideTopicRegistry.remember({
         topic: result.pageTopic, description: result.description, pageNumber: visiblePageNumber,
+        isSlide: isSlideScreen,
       });
+      // 임베딩 라벨(slideLabel)은 OS 화면까지 세는 내부 번호라 들려주는 번호로 쓰지 않는다.
       const displayNumber = slideTopicRegistry.resolveDisplayNumber({ entry: slideEntry })
-        || visiblePageNumber || slideMajor;
+        || visiblePageNumber || null;
       markDebug({
         stage: DEBUG_STAGE_MAP.slide, verdict: DEBUG_VERDICT_MAP.info, ts,
         narrationType: NARRATION_TYPE_MAP.pageTransition,
         reason: `주제 판정 ${topicVerdict.kind}`,
-        detail: `${topicDetail} 번호=${displayNumber}`
+        detail: `${topicDetail} 번호=${displayNumber ?? '-'}`
           + `(${visiblePageNumber ? '화면표기' : '안내순서'}) 임베딩라벨=${slideLabel}`
           + (isRevisit && !isRevisitFinal ? ' · 임베딩 복귀 판정을 주제로 뒤집음' : ''),
       });
 
       if (isRevisitFinal) {
-        const revisitNarration = `이전 슬라이드 ${displayNumber}: ${result.pageTopic || result.narration}`;
+        const revisitNarration = buildRevisitNarration({
+          isSlide: isSlideScreen, displayNumber, topic: result.pageTopic || result.narration,
+        });
         await appendRecord({
           kind: RECORD_KIND_MAP.pageTransition, ts, slideLabel, screenType: result.screenType,
           narration: revisitNarration, isRevisit: true, displayNumber,
@@ -519,9 +524,7 @@ function registerPipeline({ getViewerView, meetingArchive = null }) {
       }
       // 고지를 끈 상태면 사용자가 듣지 못한 요소이므로 지시 해설이 "이미 설명함"으로 건너뛰지 않게 등록하지 않는다.
       const isTransitionEnabled = featureGate.isEnabled(NARRATION_CLASS_MAP.pageTransition);
-      const narration = result.screenType === 'ppt' && displayNumber
-        ? `슬라이드 ${displayNumber}: ${result.narration}`
-        : result.narration;
+      const narration = buildTransitionNarration({ isSlide: isSlideScreen, displayNumber, narration: result.narration });
       if (isTransitionEnabled) {
         captionDescribed.add({ ts, text: narration, slideLabel, elementList: result.describedElementList });
       }

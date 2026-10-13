@@ -1,6 +1,7 @@
 const { parseJsonObject } = require('./parse-json-response');
 const { formatElapsed } = require('./clock-format');
 const { QUESTION_ROUTE_MAP } = require('./question-classifier');
+const { formatHeardSlideTag } = require('./slide-tag');
 
 const FOLLOW_UP_WINDOW_MS = 60000;
 const MAX_TARGET_SLIDE_COUNT = 3;
@@ -21,7 +22,7 @@ function selectFollowUpQa({ lastQa, now }) {
 function formatIndexLine({ entry, startedAt }) {
   const fieldList = [
     entry.major,
-    `슬라이드 ${entry.displayNumber ?? entry.major}`,
+    formatHeardSlideTag({ displayNumber: entry.displayNumber }),
     entry.title || '(제목 없음)',
     entry.keywordList.length ? entry.keywordList.join(', ') : '-',
     formatElapsed({ ts: entry.firstSeenTs, startedAt }),

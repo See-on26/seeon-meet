@@ -38,6 +38,7 @@ import { MicQuestionController, MIC_PHASE_MAP } from '../core/command/mic-questi
 import { CaptionNarrator } from '../core/audio-renderer/caption-narrator.js';
 import { NarrationMixer } from '../core/audio-renderer/narration-mixer.js';
 import { buildMeetReloadNotice } from '../core/ui/meet-reload-notice.js';
+import { buildSlideTransitionNotice } from '../core/ui/slide-transition-notice.js';
 import {
   TransitionOrderGate, LEADER_STATUS_MAP, resolveFollowerInsertMs,
   PendingTransitionTracker, resolveAfterTransitionInsertMs,
@@ -782,9 +783,7 @@ async function requestPageTransitionNarration(decision) {
   }
   const ts = Date.now();
   slideTransitionRequestTsMap.set(decision.label, ts);
-  showNotice(decision.isRevisit
-    ? `이전 슬라이드 ${decision.label}로 복귀 — 고지 생성 중…`
-    : `슬라이드 ${decision.label} 전환 — 화면 고지 생성 중…`);
+  showNotice(buildSlideTransitionNotice({ isRevisit: decision.isRevisit }));
 
   saveSlideFrameWithMark({
     slideLabel: decision.label, frameKind: 'base', buffer,
