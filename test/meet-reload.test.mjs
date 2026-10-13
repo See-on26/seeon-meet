@@ -6,13 +6,17 @@ const require = createRequire(import.meta.url);
 const { reloadMeetView, registerMeetReload } = require('../src/main/meeting/meet-reload.js');
 const { buildAppMenuTemplate, MEET_RELOAD_ACCELERATOR } = require('../src/main/app-menu.js');
 
-function makeView({ isDestroyed = false } = {}) {
+const MEETING_URL = 'https://meet.google.com/abc-defg-hij';
+
+function makeView({ isDestroyed = false, url = MEETING_URL } = {}) {
   const callList = [];
   return {
     callList,
     webContents: {
       isDestroyed: () => isDestroyed,
+      getURL: () => url,
       reload: () => callList.push(['reload']),
+      loadURL: (target) => callList.push(['loadURL', target]),
       send: (channel, payload) => callList.push(['send', channel, payload]),
     },
   };
@@ -22,13 +26,23 @@ function flattenItemList(template) {
   return template.flatMap((item) => [item, ...(Array.isArray(item.submenu) ? flattenItemList(item.submenu) : [])]);
 }
 
-test('Meet 화면만 새로고침하고 뷰어에 알린다', () => {
+test('회의 주소에 있으면 그 회의 화면만 새로고침하고 뷰어에 알린다', () => {
   const meetView = makeView();
   const viewerView = makeView();
   const isReloaded = reloadMeetView({ getMeetView: () => meetView, getViewerView: () => viewerView, reason: 'shortcut' });
   assert.equal(isReloaded, true);
   assert.deepEqual(meetView.callList, [['reload']]);
-  assert.deepEqual(viewerView.callList, [['send', 'meet-reloaded', { reason: 'shortcut' }]]);
+  assert.deepEqual(viewerView.callList, [['send', 'meet-reloaded', { reason: 'shortcut', target: 'meeting' }]]);
+});
+
+test('회의 밖 페이지에 있으면 Meet 첫 화면으로 돌아가고 뷰어에 알린다', () => {
+  for (const url of ['https://workspace.google.com/products/meet/', 'https://meet.google.com/', 'about:blank']) {
+    const meetView = makeView({ url });
+    const viewerView = makeView();
+    assert.equal(reloadMeetView({ getMeetView: () => meetView, getViewerView: () => viewerView, reason: 'button' }), true);
+    assert.deepEqual(meetView.callList, [['loadURL', 'https://meet.google.com/']], url);
+    assert.deepEqual(viewerView.callList, [['send', 'meet-reloaded', { reason: 'button', target: 'home' }]], url);
+  }
 });
 
 test('Meet 화면이 없거나 파괴됐으면 아무것도 하지 않는다', () => {
