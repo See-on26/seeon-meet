@@ -36,7 +36,8 @@ test('라우터 프롬프트는 색인·현재 슬라이드·직전 Q&A·질문�
   });
   assert.match(prompt, /현재 슬라이드 id: 5/);
   assert.match(prompt, /3 \| 슬라이드 171 \| 반기 연봉 조정 \| 연봉, \+500 \| 02:30/);
-  assert.match(prompt, /5 \| 슬라이드 5 \| 복지 \| - \| 06:39 \| 현재/);
+  assert.match(prompt, /5 \| 번호 없는 화면 \| 복지 \| - \| 06:39 \| 현재/, '들은 번호가 없으면 내부 id 를 번호처럼 보이지 않는다');
+  assert.match(prompt, /1 \| 번호 없는 화면 \| 회사 소개/);
   assert.match(prompt, /slideMajorList 에는 근거가 될 슬라이드의 id/);
   assert.match(prompt, /대상 슬라이드: 3/);
   assert.match(prompt, /질문: 거기서 두 번째는\?/);
