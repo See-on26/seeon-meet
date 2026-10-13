@@ -16,6 +16,13 @@ function createSlideTopicRegistry({
 } = {}) {
   let entryList = [];
   let lastEntry = null;
+  // 들려주는 "슬라이드 N" 순번. 문서·웹 같은 화면도 복귀 판단을 위해 기록하지만 이 순번은 슬라이드에만 준다.
+  let slideCount = 0;
+
+  const nextSlideOrder = () => {
+    slideCount += 1;
+    return slideCount;
+  };
 
   function scoreEntry({ topic, description, entry }) {
     return {
@@ -76,19 +83,23 @@ function createSlideTopicRegistry({
     });
   }
 
-  function remember({ topic, description = '', pageNumber = null }) {
+  // 주제를 못 읽은 슬라이드는 복귀를 알아볼 수 없어 기록하지 않지만, 번호는 슬라이드 순번에서 받는다.
+  function remember({ topic, description = '', pageNumber = null, isSlide = false }) {
     const trimmedTopic = String(topic || '').trim();
-    if (!trimmedTopic) return null;
+    if (!trimmedTopic) {
+      return isSlide ? { topic: '', description: String(description || ''), order: nextSlideOrder(), pageNumber: pageNumber || null } : null;
+    }
     const nearest = findNearest({ topic: trimmedTopic, description });
     if (nearest && isMatch({ score: nearest })) {
       lastEntry = nearest.entry;
       if (!nearest.entry.pageNumber && pageNumber) nearest.entry.pageNumber = pageNumber;
+      if (isSlide && nearest.entry.order === null) nearest.entry.order = nextSlideOrder();
       return nearest.entry;
     }
     const entry = {
       topic: trimmedTopic,
       description: String(description || ''),
-      order: entryList.length + 1,
+      order: isSlide ? nextSlideOrder() : null,
       pageNumber: pageNumber || null,
     };
     entryList.push(entry);
@@ -99,6 +110,7 @@ function createSlideTopicRegistry({
   function reset() {
     entryList = [];
     lastEntry = null;
+    slideCount = 0;
   }
 
   return { judge, remember, resolveDisplayNumber, reset };
