@@ -175,7 +175,7 @@ test('교차 모드: 질문 답은 회의 영상을 멈추지 않고 소리만 �
   assert.equal(video.paused, false);
   assert.ok(video.volume > 0.2 && video.volume < 0.3, `회의 소리 −12dB, 실제 ${video.volume}`);
   assert.equal(narrator.getSicState().isInserting, true, '답 재생 중에도 해설 메아리 구간으로 본다');
-  assert.notEqual(sourceList[0].connectedNode, narrator.ttsGainNode, '답은 왼쪽 패너로 나간다');
+  assert.notEqual(sourceList[0].connectedNode, narrator.ttsGainNode, '답은 오른쪽 패너로 나간다');
 
   sourceList[0].onended();
   await flush();
