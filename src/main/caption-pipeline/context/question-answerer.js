@@ -1,5 +1,6 @@
 const { parseGroundingText, computeMaxChars, GROUNDING_NONE_TOKEN } = require('../agents/shared/caption-parser');
 const { QUESTION_ROUTE_MAP } = require('./question-classifier');
+const { formatHeardSlideTag } = require('./slide-tag');
 const {
   NEED_IMAGE_TOKEN, formatUtteranceLine, buildSlideEvidence, buildPastSlideAnswerPrompt,
   buildImageAnswerPrompt, buildSpeakerAnswerPrompt, buildNarrationReplayPrompt, buildMeetingFlowPrompt,
@@ -119,7 +120,7 @@ function createQuestionAnswerer({ requestText, requestImage, readImage, contextS
         .map((utterance) => utterance.text.slice(0, FLOW_UTTERANCE_MAX_CHARS))
         .join(' / ');
       return [
-        `[슬라이드 ${entry.major}] ${entry.title}${entry.summary ? ` — ${entry.summary}` : ''}`,
+        `[${formatHeardSlideTag({ displayNumber: entry.displayNumber })}] ${entry.title}${entry.summary ? ` — ${entry.summary}` : ''}`,
         utteranceText ? `  오간 말: ${utteranceText}` : '',
       ].filter(Boolean).join('\n');
     }).join('\n');

@@ -14,7 +14,7 @@ function makeStore() {
   const store = createContextStore();
   store.start({ sessionId: 's', startedAt: 0 });
   store.applyRecord({ kind: 'slide_mark', ts: 1000, slideLabel: '3', frameKind: 'base', filePath: '/tmp/3.jpg' });
-  store.applyRecord({ kind: 'page_transition', ts: 1100, slideLabel: '3', pageTopic: '반기 연봉 조정', description: '연봉 변화 그래프' });
+  store.applyRecord({ kind: 'page_transition', ts: 1100, slideLabel: '3', pageTopic: '반기 연봉 조정', description: '연봉 변화 그래프', displayNumber: 1 });
   store.applySlideText({ slideLabel: '3', status: 'ready', text: '1,000(A) 1,250(B) 1,500(C) +500' });
   store.applyRecord({ kind: 'asr', ts: 2000, text: '500만원이 추가됩니다', speakerHint: '김지오', segmentList: [{ startSec: 0, endSec: 2, text: '500만원이 추가됩니다' }] });
   store.applyRecord({ kind: 'narration', ts: 2500, source: 'deixis', text: '연봉 그래프 보는 중', slideLabel: '3', isEmitted: true });
@@ -41,7 +41,7 @@ test('지난 슬라이드는 저장 텍스트(주제·글자·발화·해설)로
   const result = await answerer.answer({ route: 'past_slide', slideMajorList: [3], questionText: '하반기에 얼마 올랐어?', wordBudget });
   assert.deepEqual(result, { text: '하반기에 500 올랐어요', isGrounded: true, isImageUsed: false });
   const { prompt } = textCallList[0];
-  assert.match(prompt, /\[슬라이드 3\] 반기 연봉 조정/);
+  assert.match(prompt, /\[슬라이드 1\] 반기 연봉 조정/, '내부 번호(3)가 아니라 사용자가 들은 번호(1)를 붙인다');
   assert.match(prompt, /1,500\(C\)/);
   assert.match(prompt, /김지오: 500만원이 추가됩니다/);
   assert.match(prompt, /연봉 그래프 보는 중/);
@@ -94,8 +94,9 @@ test('해설 다시는 고른 해설을 원문 그대로 돌려준다', async ()
 test('회의 흐름은 색인과 슬라이드별 발화 앞부분으로 답한다', async () => {
   const { answerer, textCallList } = makeAnswerer({ textReplyList: ['연봉과 복지를 다뤘어요'] });
   await answerer.answer({ route: 'meeting_flow', slideMajorList: [], questionText: '지금까지 무슨 얘기?', wordBudget });
-  assert.match(textCallList[0].prompt, /\[슬라이드 3\] 반기 연봉 조정/);
-  assert.match(textCallList[0].prompt, /\[슬라이드 4\]/);
+  assert.match(textCallList[0].prompt, /\[슬라이드 1\] 반기 연봉 조정/, '내부 번호(3)가 아니라 사용자가 들은 번호(1)를 붙인다');
+  assert.match(textCallList[0].prompt, /\[번호 없는 화면\]/, '들은 번호가 없는 화면(4)에 내부 번호를 붙이지 않는다');
+  assert.doesNotMatch(textCallList[0].prompt, /\[슬라이드 [34]\]/);
 });
 
 test('none 갈래는 모델 없이 없는 내용이라고 답한다', async () => {
