@@ -37,6 +37,7 @@ import { MeetMicGuard } from '../core/command/meet-mic-guard.js';
 import { MicQuestionController, MIC_PHASE_MAP } from '../core/command/mic-question-controller.js';
 import { CaptionNarrator } from '../core/audio-renderer/caption-narrator.js';
 import { NarrationMixer } from '../core/audio-renderer/narration-mixer.js';
+import { buildMeetReloadNotice } from '../core/ui/meet-reload-notice.js';
 import {
   TransitionOrderGate, LEADER_STATUS_MAP, resolveFollowerInsertMs,
   PendingTransitionTracker, resolveAfterTransitionInsertMs,
@@ -1438,14 +1439,14 @@ $('archiveFolderBtn').addEventListener('click', async () => {
 $('meetReloadBtn').addEventListener('click', () => {
   window.seeon.reloadMeet().catch(() => showNotice('Meet 화면을 새로고침하지 못했어요'));
 });
-window.seeon.onMeetReloaded(({ reason }) => {
-  showNotice(captureSource.isActive
-    ? 'Meet 화면을 새로고침했어요. 회의에 다시 참여한 뒤, 캡처가 멈췄다면 다시 시작해 주세요'
-    : 'Meet 화면을 새로고침했어요. 회의에 다시 참여해 주세요');
+window.seeon.onMeetReloaded(({ reason, target }) => {
+  const notice = buildMeetReloadNotice({ target, isCaptureActive: captureSource.isActive });
+  showNotice(notice);
+  announce(notice);
   markDebug({
     stage: DEBUG_STAGE_MAP.session, verdict: DEBUG_VERDICT_MAP.info,
     reason: 'Meet 화면 새로고침',
-    detail: `경로=${reason} · 캡처=${captureSource.isActive ? '진행 중' : '꺼짐'}`,
+    detail: `경로=${reason} · 대상=${target} · 캡처=${captureSource.isActive ? '진행 중' : '꺼짐'}`,
   });
 });
 
