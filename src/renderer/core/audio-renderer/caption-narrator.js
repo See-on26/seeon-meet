@@ -205,7 +205,7 @@ export class CaptionNarrator {
     this._startCatchup(narratedSec);
   }
 
-  // 질문 답은 회의를 멈추지 않는다. 회의 소리를 동시 모드 덕킹과 같은 −12dB 로 줄이고 답은 왼쪽에서 들려준다.
+  // 질문 답은 회의를 멈추지 않는다. 회의 소리를 동시 모드 덕킹과 같은 −12dB 로 줄이고 답은 오른쪽에서 들려준다.
   _enterOverlay() {
     if (this.isInserting) this._endInsertion();
     if (this.isOverlaying) return;

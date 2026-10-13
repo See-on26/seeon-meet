@@ -3,8 +3,9 @@ import { NarrationQueue, shouldInterrupt, QUEUE_DROP_REASON_MAP, readEntryAudio 
 export const DEFAULT_DUCK_DB = -12;
 const DEFAULT_RAMP_MS = 120;
 const START_LEAD_SEC = 0.02;
-const MEETING_PAN_X = 0.7;
-export const NARRATION_PAN_X = -0.7;
+// 소리 방향을 화면 배치와 맞춘다. 회의 화면은 왼쪽, SEEON 패널은 오른쪽이라 회의 소리는 왼쪽, 해설·답은 오른쪽에서 들린다.
+const MEETING_PAN_X = -0.7;
+export const NARRATION_PAN_X = 0.7;
 const PANNER_DISTANCE_Z = -0.4;
 
 export function computeGainFromDecibel({ decibel }) {
