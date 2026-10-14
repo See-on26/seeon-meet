@@ -20,14 +20,19 @@ function buildVisualDescriptionPrompt({ subKind = VISUAL_DESCRIPTION_KIND_MAP.re
     ? maxChars : computeMaxChars({ maxWordCount: effectiveMaxWordCount });
   const isScale = subKind === VISUAL_DESCRIPTION_KIND_MAP.scale;
 
+  const isSilence = origin === NARRATION_ORIGIN_MAP.silence;
+  // 무발화는 같은 장의 전환 해설이 자료 종류·주제("…비교 그래프")를 이미 말한 뒤에 오는 일이 많다.
+  // 대상이 같다는 이유로 NONE 을 내면 보라고 한 자료가 무엇을 보여 주는지 끝내 전하지 못하므로, 무발화는 값·변화를 보충한다.
+  const describedRule = isSilence
+    ? `· 이미 안내된 내용: ${describedElementList.join(' / ')}. 자료의 종류·주제만 안내됐다면 반복하지 말고`
+      + ` 그 자료가 보여 주는 값·변화·차이를 묘사한다. 값·변화까지 이미 안내됐을 때만 "${GROUNDING_NONE_TOKEN}"만 출력한다.`
+    : `· 이미 안내된 요소(${describedElementList.join(', ')})면 반복하지 말고 "${GROUNDING_NONE_TOKEN}"만 출력한다.`;
   const commonTailList = [
     '',
     buildSlotOutputInstruction({ narrationType: NARRATION_TYPE_MAP.visualDescription, subKind }),
     '',
     '규칙:',
-    describedElementList.length
-      ? `· 이미 안내된 요소(${describedElementList.join(', ')})면 반복하지 말고 "${GROUNDING_NONE_TOKEN}"만 출력한다.`
-      : '',
+    describedElementList.length ? describedRule : '',
     `(참고: 조립 후 총 ${effectiveMinWordCount}~${effectiveMaxWordCount}어절, 최대 ${effectiveMaxChars}자 분량이다.)`,
   ].filter(Boolean);
 
@@ -54,7 +59,7 @@ function buildVisualDescriptionPrompt({ subKind = VISUAL_DESCRIPTION_KIND_MAP.re
   }
 
   // 무발화는 사진 전환이 아니라 "화면을 보라"고 한 뒤의 침묵이다. 보라고 한 대상을 자료 종류로 끝맺어 묘사한다.
-  if (origin === NARRATION_ORIGIN_MAP.silence) {
+  if (isSilence) {
     return [
       '이 이미지는 회의에서 공유 중인 화면이다.',
       '발표자가 화면을 보라고 한 뒤 말없이 기다리고 있다. 청중은 지금 이 화면을 보고 있다.',
@@ -64,6 +69,7 @@ function buildVisualDescriptionPrompt({ subKind = VISUAL_DESCRIPTION_KIND_MAP.re
       '발표자가 보라고 한 대상(사진·영상·그래프·표 등)이 무엇이고 무엇을 보여 주는지 묘사하라.',
       '  예) "이 사진 한번 보시죠" + 침묵 → "이미지 제시, 뼈가 앙상하게 야윈 어린아이 사진"',
       '  예) "이 그래프 잠깐 보시죠" + 침묵 → "이미지 제시, 3년간 두 배로 늘어난 매출 막대그래프"',
+      '  예) 전환 해설이 "분기별 매출 막대그래프"만 말함 + "그래프 보시죠" + 침묵 → "이미지 제시, 1분기 120억에서 4분기 182억으로 늘어난 매출 막대그래프"',
       '',
       '형식(참고): "이미지 제시" + (묘사).',
       ...commonTailList,

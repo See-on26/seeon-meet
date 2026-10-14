@@ -164,7 +164,8 @@ const NARRATION_SLOT_MAP = {
   },
   [NARRATION_TYPE_MAP.visualDescription]: {
     [VISUAL_DESCRIPTION_KIND_MAP.reaction]: [
-      { key: 'description', label: '이미지에 대한 묘사 (반응을 일으키는 요소 포함)', minWordCount: 3, maxWordCount: 5, isPhrase: true },
+      // 무발화 묘사는 값·변화를 담아 "…그래프"로 끝맺는다. 5어절에서 자르면 자료 종류 꼬리가 빠져 묘사가 버려진다.
+      { key: 'description', label: '이미지에 대한 묘사 (반응을 일으키는 요소 포함)', minWordCount: 3, maxWordCount: 8, isPhrase: true },
     ],
     [VISUAL_DESCRIPTION_KIND_MAP.scale]: [
       { key: 'comparison', label: '비교 대상 (화면 속 다른 객체, 예: 소나무)', minWordCount: 1, maxWordCount: 2 },
