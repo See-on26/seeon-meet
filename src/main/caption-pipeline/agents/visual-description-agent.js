@@ -28,7 +28,7 @@ function createVisualDescriptionAgent({ config }) {
     });
     return parseSlotCaption({
       content,
-      narrationType: NARRATION_TYPE_MAP.visualDescription, subKind,
+      narrationType: NARRATION_TYPE_MAP.visualDescription, subKind, origin,
       maxChars: effectiveMaxChars, maxWordCount: effectiveMaxWordCount,
     });
   }

@@ -22,8 +22,8 @@ function computeMaxChars({ maxWordCount }) {
   return Math.max(DEFAULT_GROUNDING_MAX_CHARS, Math.round(maxWordCount * CHARS_PER_WORD_ESTIMATE));
 }
 
-function buildSlotOutputInstruction({ narrationType, subKind, extraFieldList = [] }) {
-  const slotList = getSlotList({ narrationType, subKind });
+function buildSlotOutputInstruction({ narrationType, subKind, origin = null, extraFieldList = [] }) {
+  const slotList = getSlotList({ narrationType, subKind, origin });
   if (!slotList) return '';
   return [
     '출력 형식 — JSON 한 줄만. 각 필드는 **그 어절 수를 지켜라**(고정 문구는 시스템이 붙이므로 넣지 마라).',
@@ -81,7 +81,7 @@ function parseSlotCaption(option) {
   return result.isGrounded && containsHanCharacter(result.text) ? { text: '', isGrounded: false, slotMap: null } : result;
 }
 
-function parseSlotCaptionContent({ content, narrationType, subKind, index = '', maxChars, maxWordCount }) {
+function parseSlotCaptionContent({ content, narrationType, subKind, origin = null, index = '', maxChars, maxWordCount }) {
   if (typeof content !== 'string') return { text: '', isGrounded: false, slotMap: null };
   const cleaned = content.replace(/```(?:json)?/g, '').trim();
 
@@ -93,7 +93,7 @@ function parseSlotCaptionContent({ content, narrationType, subKind, index = '', 
   if (jsonMatch) {
     try {
       const assembled = assembleNarration({
-        narrationType, subKind, rawSlotMap: JSON.parse(jsonMatch[0]), index,
+        narrationType, subKind, rawSlotMap: JSON.parse(jsonMatch[0]), index, origin,
       });
       if (assembled) return { ...assembled, isGrounded: true };
 
@@ -103,7 +103,7 @@ function parseSlotCaptionContent({ content, narrationType, subKind, index = '', 
   if (isSlotJsonAttempt({ text: cleaned })) {
     const salvagedSlotMap = salvageSlotMap({ text: cleaned });
     const assembled = salvagedSlotMap
-      && assembleNarration({ narrationType, subKind, rawSlotMap: salvagedSlotMap, index });
+      && assembleNarration({ narrationType, subKind, rawSlotMap: salvagedSlotMap, index, origin });
     if (assembled) return { ...assembled, isGrounded: true };
     return { text: '', isGrounded: false, slotMap: null };
   }

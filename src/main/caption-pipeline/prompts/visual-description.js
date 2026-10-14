@@ -29,7 +29,7 @@ function buildVisualDescriptionPrompt({ subKind = VISUAL_DESCRIPTION_KIND_MAP.re
     : `· 이미 안내된 요소(${describedElementList.join(', ')})면 반복하지 말고 "${GROUNDING_NONE_TOKEN}"만 출력한다.`;
   const commonTailList = [
     '',
-    buildSlotOutputInstruction({ narrationType: NARRATION_TYPE_MAP.visualDescription, subKind }),
+    buildSlotOutputInstruction({ narrationType: NARRATION_TYPE_MAP.visualDescription, subKind, origin }),
     '',
     '규칙:',
     describedElementList.length ? describedRule : '',
@@ -66,16 +66,19 @@ function buildVisualDescriptionPrompt({ subKind = VISUAL_DESCRIPTION_KIND_MAP.re
       recentTranscript ? `발표자의 침묵 직전 발화: ${recentTranscript}` : '',
       '',
       '청자는 화면을 볼 수 없어 발표자가 보여 주는 것을 함께 볼 수 없다.',
-      '발표자가 보라고 한 대상(사진·영상·그래프·표 등)이 무엇이고 무엇을 보여 주는지 묘사하라.',
+      '발표자가 보라고 한 대상(사진·영상·그래프·표·구조도 등)이 무엇이고 무엇을 보여 주는지 묘사하라.',
       '  예) "이 사진 한번 보시죠" + 침묵 → "이미지 제시, 뼈가 앙상하게 야윈 어린아이 사진"',
       '  예) "이 그래프 잠깐 보시죠" + 침묵 → "이미지 제시, 3년간 두 배로 늘어난 매출 막대그래프"',
       '  예) 전환 해설이 "분기별 매출 막대그래프"만 말함 + "그래프 보시죠" + 침묵 → "이미지 제시, 1분기 120억에서 4분기 182억으로 늘어난 매출 막대그래프"',
+      '  예) "흐름도를 잠시 보시죠" + 침묵 → "이미지 제시, 물류 센터를 가운데 두고 공장과 매장, 고객이 화살표로 이어진 흐름도"',
       '',
       '형식(참고): "이미지 제시" + (묘사).',
       ...commonTailList,
       '· 화면에 실제로 있는 것만 쓴다. **없는 사물이나 수치를 지어내지 않는다.**',
-      '· 화면의 제목·본문 문장을 그대로 옮기지 않는다.',
-      '· 묘사는 "…사진", "…그래프", "…표"처럼 자료 종류로 끝맺는다.',
+      '· 화면의 제목·본문 문장을 그대로 옮기지 않는다. 그림 속 구성 요소의 이름표는 써도 된다.',
+      '· 구조도·흐름도·다이어그램이면 제목만 말하지 않는다("○○ 시스템 구조도"만으로는 청자가 무엇을 보는지 모른다).'
+        + ' 주요 구성 요소 3~4개가 무엇을 가운데 두고 어떻게 연결·흐르는지를 묘사한다.',
+      '· 묘사는 "…사진", "…그래프", "…표", "…구조도"처럼 자료 종류로 끝맺는다.',
       `· 보라고 한 대상을 화면에서 찾을 수 없거나 글만 있는 화면이면 "${GROUNDING_NONE_TOKEN}"만 출력한다.`,
     ].filter(Boolean).join('\n');
   }

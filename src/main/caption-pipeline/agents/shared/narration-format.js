@@ -2,6 +2,7 @@ const {
   NARRATION_TYPE_MAP, PAGE_TRANSITION_KIND_MAP, DEIXIS_FORM_MAP,
   INTERPRETATION_KIND_MAP, VISUAL_DESCRIPTION_KIND_MAP, SPEAKER_IDENTITY_KIND_MAP,
 } = require('../../contracts/narration-types');
+const { NARRATION_ORIGIN_MAP } = require('../../contracts/narration-class');
 
 const DIGIT_HAS_FINAL_MAP = {
   0: true, 1: true, 2: false, 3: true, 4: false,
@@ -74,6 +75,7 @@ const DESCRIPTION_TAIL_NOUN_LIST = [
   '수치', '값', '통계', '지표', '비율', '분포', '추이', '변화', '실적', '성과',
   '박스', '상자', '카드', '배너', '도형', '버튼', '메뉴', '창', '탭', '타임라인', '로드맵', '일정',
   '조직도', '목차', '표지', '평가', '제도', '정책',
+  '구조도', '구성도', '개념도', '모식도', '관계도', '계통도', '체계도', '배치도', '설계도', '도면',
 ];
 
 // 묘사 끝 낱말에서 떼어 볼 조사. 긴 것부터 맞춰야 '으로'를 '로'로 잘못 떼지 않는다.
@@ -189,7 +191,22 @@ const NARRATION_SLOT_MAP = {
   },
 };
 
-function getSlotList({ narrationType, subKind }) {
+// 무발화 묘사는 발표자가 보라고 한 자료를 전한다. 구조도는 제목만으로는 무엇을 보는지 알 수 없어
+// 구성 요소와 연결 관계까지 말해야 하므로 사진 반응 묘사(8어절)보다 길게 받는다.
+const SILENCE_DESCRIPTION_SLOT_LIST = [
+  {
+    key: 'description',
+    label: '보라고 한 자료의 묘사 — 그래프·표는 값·변화, 구조도·흐름도는 주요 구성 요소와 연결 관계 (자료 종류로 끝맺음)',
+    minWordCount: 3,
+    maxWordCount: 12,
+    isPhrase: true,
+  },
+];
+
+function getSlotList({ narrationType, subKind, origin = null }) {
+  const isSilenceDescription = origin === NARRATION_ORIGIN_MAP.silence
+    && narrationType === NARRATION_TYPE_MAP.visualDescription && subKind === VISUAL_DESCRIPTION_KIND_MAP.reaction;
+  if (isSilenceDescription) return SILENCE_DESCRIPTION_SLOT_LIST;
   return NARRATION_SLOT_MAP[narrationType]?.[subKind] || null;
 }
 
@@ -321,8 +338,8 @@ const NARRATION_ASSEMBLE_MAP = {
   },
 };
 
-function assembleNarration({ narrationType, subKind, rawSlotMap, index = '' }) {
-  const slotList = getSlotList({ narrationType, subKind });
+function assembleNarration({ narrationType, subKind, rawSlotMap, index = '', origin = null }) {
+  const slotList = getSlotList({ narrationType, subKind, origin });
   const assemble = NARRATION_ASSEMBLE_MAP[narrationType]?.[subKind];
   if (!slotList || !assemble) return null;
   const slotMap = normalizeSlotMap({ slotList, rawSlotMap });
