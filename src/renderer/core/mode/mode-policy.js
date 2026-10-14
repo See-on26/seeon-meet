@@ -191,6 +191,18 @@ export function computeAvailableMs({ mode, currentDelayMs = 0 }) {
 export function computeWordBudget({ mode, narrationType, subKind = null, currentDelayMs = 0 }) {
   const range = getWordRange({ narrationType, subKind });
   if (!range) return { minWordCount: 0, maxWordCount: 0, isDroppable: true };
+  return computeWordBudgetInRange({ mode, range, currentDelayMs });
+}
+
+// 무발화 해설은 발표자가 화면을 보라며 말없이 기다려 주는 자리라 사진 반응 해설(최대 12어절)보다 길게 둔다.
+// 구조도는 구성 요소와 연결 관계까지 말해야 해서 머리말("이미지 제시,") 2어절 + 묘사 12어절이다.
+export const SILENCE_DESCRIPTION_WORD_RANGE = { minWordCount: 5, maxWordCount: 14 };
+
+export function computeSilenceWordBudget({ mode, currentDelayMs = 0 }) {
+  return computeWordBudgetInRange({ mode, range: SILENCE_DESCRIPTION_WORD_RANGE, currentDelayMs });
+}
+
+function computeWordBudgetInRange({ mode, range, currentDelayMs }) {
   const availableMs = computeAvailableMs({ mode, currentDelayMs });
   const affordableWordCount = computeWordCountFromDurationMs({ durationMs: availableMs });
   if (affordableWordCount < range.minWordCount) {
