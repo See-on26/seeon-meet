@@ -2,7 +2,7 @@ const { NARRATION_TYPE_MAP, PAGE_TRANSITION_KIND_MAP } = require('../contracts/n
 const {
   getSlotList, truncateSlot, normalizeSlotMap, DESCRIPTION_TAIL_NOUN_LIST, hasCompleteTailNoun,
 } = require('./shared/narration-format');
-const { truncateToWordCount } = require('./shared/caption-parser');
+const { truncateToWordCount, containsHanCharacter } = require('./shared/caption-parser');
 const { requestVlmContent } = require('./shared/vlm-gateway');
 const {
   buildPageTransitionPrompt, SCREEN_TYPE_LIST, DEFAULT_TRANSITION_MIN_WORD_COUNT, DEFAULT_TRANSITION_MAX_WORD_COUNT,
@@ -31,17 +31,21 @@ function normalizePageTransition(parsed) {
     ? truncateSlot({ text: parsed.screenForm || '', maxWordCount: screenFormSlot.maxWordCount })
     : '';
   const isTailComplete = hasCompleteTailNoun({ text: descriptionText });
+  // 한자가 섞인 전환 해설은 읽지 못하므로 고지하지 않는다(caption-parser containsHanCharacter 참고).
+  const hasHan = containsHanCharacter(descriptionText) || containsHanCharacter(screenForm);
+  const isUsable = isTailComplete && !hasHan;
   return {
     screenType,
     pageNumber: Number.isFinite(parsed.pageNumber) ? Number(parsed.pageNumber) : null,
     pageTopic: typeof parsed.pageTopic === 'string' ? parsed.pageTopic : '',
     isPhotoOnly: parsed.isPhotoOnly === true,
     screenForm,
-    description: isTailComplete ? descriptionText : '',
-    rejectedDescription: isTailComplete ? '' : descriptionText,
-    rejectedRawDescription: isTailComplete ? '' : description.trim(),
+    description: isUsable ? descriptionText : '',
+    rejectedDescription: isUsable ? '' : descriptionText,
+    rejectedRawDescription: isUsable ? '' : description.trim(),
+    rejectedReason: hasHan ? 'han' : (isTailComplete ? null : 'incomplete'),
     subKind,
-    narration: !isTailComplete ? '' : (subKind === PAGE_TRANSITION_KIND_MAP.slide
+    narration: !isUsable ? '' : (subKind === PAGE_TRANSITION_KIND_MAP.slide
       ? descriptionText
       : [screenForm, descriptionText].filter(Boolean).join(', ')),
     describedElementList: Array.isArray(parsed.describedElementList)
