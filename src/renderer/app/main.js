@@ -2,11 +2,10 @@ import {
   CROP_JPEG_QUALITY, NARRATION_TYPE_MAP, NARRATION_CLASS_MAP,
   PAGE_TRANSITION_KIND_MAP, USER_COMMAND_KEY_MAP, USER_COMMAND_MAP, SUMMARY_TOGGLE_KEY,
   MEET_MEETING_URL_PATTERN, SPEAKER_SOURCE_MAP, DEBUG_STAGE_MAP, DEBUG_VERDICT_MAP,
-  VISUAL_DESCRIPTION_KIND_MAP,
 } from '../core/constants.js';
 import {
   MODE_MAP, DWELL_MS, IS_DELAY_BUFFER_ENABLED,
-  computeWordBudget, canSwitchMode, getModePolicy, getCatchupRateRange,
+  computeWordBudget, computeSilenceWordBudget, canSwitchMode, getModePolicy, getCatchupRateRange,
   computeLookaheadMs, computeSentenceWaitMs, computeContextHoldMs, resolveBeforeAnchorTs,
   computeAnswerWordBudget,
 } from '../core/mode/mode-policy.js';
@@ -1774,9 +1773,7 @@ async function handleSilenceTrigger({ silenceMs }) {
   const recentTranscript = transcriptWindow.getBefore({
     nowTs: performance.now(), windowMs: SILENCE_TRANSCRIPT_WINDOW_MS,
   });
-  const wordBudget = buildWordBudget({
-    narrationType: NARRATION_TYPE_MAP.visualDescription, subKind: VISUAL_DESCRIPTION_KIND_MAP.reaction,
-  });
+  const wordBudget = computeSilenceWordBudget({ mode: getCurrentMode() });
   const precondition = evaluateSilencePrecondition({ slideLabel, recentTranscript, wordBudget });
   const silenceLog = `무음 ${Math.round(silenceMs / 1000)}초 · 슬라이드=${slideLabel || '-'} · 모드=${getCurrentMode()}`;
   if (!precondition.isReady) {

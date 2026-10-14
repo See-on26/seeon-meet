@@ -69,7 +69,12 @@ function createSilenceNarrator({ gate, judge }) {
         return { status: SILENCE_RESULT_MAP.blocked, reason: verdict.reason, source: verdict.source };
       }
       const described = await describe();
-      if (!described?.isGrounded || !described.text) return { status: SILENCE_RESULT_MAP.none };
+      if (!described?.isGrounded || !described.text) {
+        return {
+          status: SILENCE_RESULT_MAP.none, rejectKind: described?.rejectKind ?? null,
+          rejectReason: described?.rejectReason ?? '', rawContent: described?.rawContent ?? '',
+        };
+      }
       const text = finalizeSilenceDescription({ text: described.text });
       if (!text) return { status: SILENCE_RESULT_MAP.none, rawText: described.text };
       const sent = await emit({ text });

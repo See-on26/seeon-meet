@@ -209,7 +209,7 @@ test('사진 단독 전환의 반응 묘사는 지금처럼 이미 안내된 요
   assert.match(prompt, /이미 안내된 요소\(.*\)면 반복하지 말고/);
 });
 
-test('무발화·반응 묘사 칸은 값을 담을 수 있게 8어절까지 받는다(5어절에서 잘리면 자료 종류 꼬리가 빠져 버려진다)', () => {
+test('반응 묘사 칸은 값을 담을 수 있게 8어절까지 받는다(5어절에서 잘리면 자료 종류 꼬리가 빠져 버려진다). 무발화 칸은 따로 12어절이다', () => {
   const [slot] = getSlotList({ narrationType: NARRATION_TYPE_MAP.visualDescription, subKind: reaction });
   assert.equal(slot.maxWordCount, 8);
   const result = assembleNarration({

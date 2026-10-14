@@ -1,6 +1,6 @@
 const { NARRATION_TYPE_MAP, INTERPRETATION_KIND_MAP } = require('../contracts/narration-types');
 const {
-  GROUNDING_NONE_TOKEN, computeMaxChars, buildSlotOutputInstruction, parseSlotCaption,
+  GROUNDING_NONE_TOKEN, computeMaxChars, buildSlotOutputInstruction, parseSlotCaption, SLOT_AGENT_MAX_TOKENS,
 } = require('./shared/caption-parser');
 const { requestVlmContent } = require('./shared/vlm-gateway');
 const {
@@ -16,7 +16,7 @@ function createInterpretiveBridgeAgent({ config }) {
     describedElementList = [], mergedAnchorList = [] }) {
     const effectiveMaxChars = computeMaxChars({ maxWordCount });
     const content = await requestVlmContent({
-      config, jpegBuffer, label: AGENT_LABEL,
+      config, jpegBuffer, label: AGENT_LABEL, maxTokens: SLOT_AGENT_MAX_TOKENS,
       prompt: buildInterpretationPrompt({
         utterance, recentTranscript, subKind, minWordCount, maxWordCount,
         maxChars: effectiveMaxChars, describedElementList, mergedAnchorList,
