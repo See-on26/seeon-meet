@@ -38,6 +38,7 @@ const { createRecordStore, RECORD_KIND_MAP } = require('./instrumentation/record
 const { createSessionStore } = require('./instrumentation/session-store');
 const { requestVlmContent, setVlmFallbackListener } = require('./agents/shared/vlm-gateway');
 const { createSlideTextAgent } = require('./agents/slide-text-agent');
+const { describeAgentRejection } = require('./agents/shared/caption-parser');
 const { createOcrClient } = require('./agents/shared/ocr-client');
 const { createSlideTextStore } = require('./orchestrator/slide-text-store');
 const { verifyValuePresence, VALUE_PRESENCE_VERDICT_MAP } = require('./orchestrator/value-presence');
@@ -768,7 +769,9 @@ function registerPipeline({ getViewerView, meetingArchive = null }) {
       },
     });
     const elapsedMs = Date.now() - startedAt;
-    const transcriptLog = `직전 발화="${truncateForLog(recentTranscript, 80)}" 무음=${silenceSec}초 슬라이드=${slideLabel}`;
+    const rejectionDetail = result.status === SILENCE_RESULT_MAP.none && !result.rawText
+      ? describeAgentRejection(result).detailPrefix : '';
+    const transcriptLog = `${rejectionDetail}직전 발화="${truncateForLog(recentTranscript, 80)}" 무음=${silenceSec}초 슬라이드=${slideLabel}`;
     const debugByStatusMap = {
       [SILENCE_RESULT_MAP.gated]: {
         verdict: DEBUG_VERDICT_MAP.skip, reason: SILENCE_GATE_LABEL_MAP[result.reason] || result.reason,
@@ -778,7 +781,8 @@ function registerPipeline({ getViewerView, meetingArchive = null }) {
       },
       [SILENCE_RESULT_MAP.none]: {
         verdict: DEBUG_VERDICT_MAP.skip,
-        reason: result.rawText ? `끝이 흐린 묘사 폐기 ("${result.rawText}")` : '묘사할 것 없음 (NONE)',
+        reason: result.rawText
+          ? `끝이 흐린 묘사 폐기 ("${result.rawText}")` : `묘사할 것 없음 (${describeAgentRejection(result).reason})`,
       },
       [SILENCE_RESULT_MAP.dropped]: { verdict: DEBUG_VERDICT_MAP.skip, reason: '내보내기 억제 (중복·간격)' },
       [SILENCE_RESULT_MAP.emitted]: { verdict: DEBUG_VERDICT_MAP.pass, reason: '무발화 해설 생성' },
@@ -983,19 +987,23 @@ function registerPipeline({ getViewerView, meetingArchive = null }) {
         [NARRATION_TYPE_MAP.deixis]: { hasPointingRegion, pointingOrderHint },
       };
       const agent = agentFieldMap[narrationType] || agentFieldMap[NARRATION_TYPE_MAP.deixis];
-      const { text, isGrounded, slotMap } = await agent.generate({
+      const {
+        text, isGrounded, slotMap, rejectKind = null, rejectReason = '', rawContent = '',
+      } = await agent.generate({
         ...generatorArgs, ...(extraArgByTypeMap[narrationType] || {}),
       });
       await appendRecord({
         kind: RECORD_KIND_MAP.deixis, ts, utterance, caption: text, isGrounded, judgeReason, slideLabel,
         routerMode: config.routerMode, narrationType, subKind: selectedCandidate?.subKind || null,
+        ...(isGrounded && text ? {} : { rejectKind, rejectReason, rawContent }),
       });
       if (!isGrounded || !text) {
-        console.log(`[pipeline] ${narrationType} 스킵 (${Date.now() - startedAt}ms) "${truncateForLog(utterance, 30)}" → 특정 불가/중복/근거없음`);
+        const rejection = describeAgentRejection({ rejectKind, rejectReason, rawContent });
+        console.log(`[pipeline] ${narrationType} 스킵 (${Date.now() - startedAt}ms) "${truncateForLog(utterance, 30)}" → ${rejection.reason}`);
         markDebug({
           stage: DEBUG_STAGE_MAP.vlm, verdict: DEBUG_VERDICT_MAP.skip, ts, narrationType,
-          reason: 'NONE — 특정 불가/이미 설명됨/근거 없음',
-          detail: `발화="${utterance}" 세부=${selectedCandidate?.subKind || '-'} (${Date.now() - startedAt}ms)`,
+          reason: rejection.reason,
+          detail: `${rejection.detailPrefix}발화="${utterance}" 세부=${selectedCandidate?.subKind || '-'} (${Date.now() - startedAt}ms)`,
         });
         return { isOk: true, isGrounded: false };
       }

@@ -1,6 +1,6 @@
 const { NARRATION_TYPE_MAP, VISUAL_DESCRIPTION_KIND_MAP } = require('../contracts/narration-types');
 const {
-  GROUNDING_NONE_TOKEN, computeMaxChars, buildSlotOutputInstruction, parseSlotCaption,
+  GROUNDING_NONE_TOKEN, computeMaxChars, buildSlotOutputInstruction, parseSlotCaption, SLOT_AGENT_MAX_TOKENS,
 } = require('./shared/caption-parser');
 const { requestVlmContent } = require('./shared/vlm-gateway');
 const {
@@ -20,7 +20,7 @@ function createVisualDescriptionAgent({ config }) {
     const effectiveMaxWordCount = Number.isFinite(maxWordCount) ? maxWordCount : defaultRange.maxWordCount;
     const effectiveMaxChars = computeMaxChars({ maxWordCount: effectiveMaxWordCount });
     const content = await requestVlmContent({
-      config, jpegBuffer, label: AGENT_LABEL, temperature: VISUAL_DESCRIPTION_TEMPERATURE,
+      config, jpegBuffer, label: AGENT_LABEL, temperature: VISUAL_DESCRIPTION_TEMPERATURE, maxTokens: SLOT_AGENT_MAX_TOKENS,
       prompt: buildVisualDescriptionPrompt({
         subKind, utterance, recentTranscript, minWordCount, maxWordCount,
         maxChars: effectiveMaxChars, describedElementList, mergedAnchorList, origin,

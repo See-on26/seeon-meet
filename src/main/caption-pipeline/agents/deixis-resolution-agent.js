@@ -1,6 +1,6 @@
 const { NARRATION_TYPE_MAP, DEIXIS_FORM_MAP } = require('../contracts/narration-types');
 const {
-  GROUNDING_NONE_TOKEN, computeMaxChars, buildSlotOutputInstruction, parseSlotCaption,
+  GROUNDING_NONE_TOKEN, computeMaxChars, buildSlotOutputInstruction, parseSlotCaption, SLOT_AGENT_MAX_TOKENS,
 } = require('./shared/caption-parser');
 const { requestVlmContent } = require('./shared/vlm-gateway');
 const {
@@ -16,7 +16,7 @@ function createDeixisResolutionAgent({ config }) {
     maxWordCount = DEFAULT_DEIXIS_MAX_WORD_COUNT, subKind = null, mergedAnchorList = [] }) {
     const effectiveMaxChars = Number.isFinite(maxChars) ? maxChars : computeMaxChars({ maxWordCount });
     const content = await requestVlmContent({
-      config, jpegBuffer, label: AGENT_LABEL,
+      config, jpegBuffer, label: AGENT_LABEL, maxTokens: SLOT_AGENT_MAX_TOKENS,
       prompt: buildGroundingPrompt({
         utterance, recentTranscript, maxChars: effectiveMaxChars, hasPointingRegion,
         pointingOrderHint, describedElementList, minWordCount, maxWordCount, subKind, mergedAnchorList,
