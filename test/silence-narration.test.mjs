@@ -188,3 +188,33 @@ test('무발화 프롬프트는 사진 단독용 반응·NONE 규칙 대신 보�
   assert.match(silencePrompt, /보라고 한 대상을 화면에서 찾을 수 없/);
   assert.match(buildVisualDescriptionPrompt({ subKind: reaction }), /반응을 일으킬 만한 요소가 없는 평범한 화면/);
 });
+
+const { getSlotList, assembleNarration } = require('../src/main/caption-pipeline/agents/shared/narration-format.js');
+const { NARRATION_TYPE_MAP } = require('../src/main/caption-pipeline/contracts/narration-types.js');
+
+const describedTransition = '슬라이드 3: 연도별 매출 실적과 2027년 목표치를 비교한 그래프';
+
+test('무발화 묘사는 전환 해설이 자료 종류·주제만 말했으면 그 자료가 보여 주는 값·변화를 묘사하게 한다', () => {
+  const prompt = buildVisualDescriptionPrompt({
+    subKind: reaction, origin: NARRATION_ORIGIN_MAP.silence, recentTranscript: '그래프를 잠시 보시죠.',
+    describedElementList: [describedTransition],
+  });
+  assert.match(prompt, new RegExp(describedTransition));
+  assert.match(prompt, /값·변화/);
+  assert.doesNotMatch(prompt, /이미 안내된 요소\(.*\)면 반복하지 말고/, '전환 해설과 대상이 같다는 이유만으로 NONE 을 내지 않는다');
+});
+
+test('사진 단독 전환의 반응 묘사는 지금처럼 이미 안내된 요소면 반복하지 않는다', () => {
+  const prompt = buildVisualDescriptionPrompt({ subKind: reaction, describedElementList: [describedTransition] });
+  assert.match(prompt, /이미 안내된 요소\(.*\)면 반복하지 말고/);
+});
+
+test('무발화·반응 묘사 칸은 값을 담을 수 있게 8어절까지 받는다(5어절에서 잘리면 자료 종류 꼬리가 빠져 버려진다)', () => {
+  const [slot] = getSlotList({ narrationType: NARRATION_TYPE_MAP.visualDescription, subKind: reaction });
+  assert.equal(slot.maxWordCount, 8);
+  const result = assembleNarration({
+    narrationType: NARRATION_TYPE_MAP.visualDescription, subKind: reaction,
+    rawSlotMap: { description: '9시에 96건으로 가장 많은 시간대별 문의 접수량 그래프' },
+  });
+  assert.equal(result?.text, '이미지 제시, 9시에 96건으로 가장 많은 시간대별 문의 접수량 그래프');
+});
