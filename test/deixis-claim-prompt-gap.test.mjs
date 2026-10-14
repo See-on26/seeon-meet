@@ -45,7 +45,8 @@ test('변화·비교 해설의 값 칸은 항목 둘과 값이 들어가게 6어
 // "특히 장비가 크게 늘었습니다"는 "이전 값이 없어 변화의 근거 값을 못 댐" 10/10.
 test('지시어로만 가리킨 대상은 성질을 말해도 (가)가 아니고, 발화 모사는 화면에 없어도 된다고 알린다', () => {
   const prompt = buildGroundingPrompt({ utterance: '', maxChars: 60, subKind: 'complete' });
-  assert.match(prompt, /가리킨 대상이 무엇인지\(이름·항목\)와 거기 적힌 내용까지/);
+  assert.match(prompt, /이름 글자가 발화에 없으면 청자는 대상이 어느 것인지 모른다/);
+  assert.match(prompt, /\(가\) ②에서 대상의 이름 글자가 발화에 그대로 나왔고/);
   assert.match(prompt, /지시어\("여기·이·이쪽·이 지역"\)로만 대상을 가리켰다면/);
   assert.match(prompt, /발화 모사.*화면에 없어도 된다/);
 });
@@ -54,6 +55,8 @@ test('변화 수치는 바뀐 뒤 값만 있어도 그 값을 근거로 쓰고, 
   const prompt = buildInterpretationPrompt({ utterance: '가입자가 크게 늘었습니다.', subKind: 'claim_to_value' });
   assert.match(prompt, /바뀐 뒤 값만 있으면 그 값을 근거로 쓴다/);
   assert.match(prompt, /이전 값이 없다는 이유로 "NONE"을 내지 않는다/);
+  assert.match(prompt, /관련된 숫자가 하나라도 있으면 "NONE"을 내지 않는다/);
+  assert.doesNotMatch(prompt, /양쪽 수치/);
   const valueSlot = getSlotList({ narrationType: 'interpretation', subKind: 'claim_to_value' }).find((slot) => slot.key === 'value');
   assert.match(valueSlot.label, /바뀐 뒤 값만 있으면 그 값/);
 });
