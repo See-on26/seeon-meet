@@ -156,9 +156,10 @@ const NARRATION_SLOT_MAP = {
       { key: 'value', label: '발화에 나온 단순 수치 (예: 73%)', minWordCount: 1, maxWordCount: 2, mustContainValue: true },
       { key: 'frame', label: '값의 해석틀 — 화면에서 찾은 대상·기준 (예: 작년 대비 A사 기업가치 성장률)', minWordCount: 3, maxWordCount: 5, isPhrase: true },
     ],
+    // 발화 표현을 칸에 넣으면 "…빨라졌습니다를 의미"처럼 발화가 그대로 붙는다. 대상과 근거 값만 화면에서 읽는다.
     [INTERPRETATION_KIND_MAP.claimToValue]: [
-      { key: 'value', label: '화면에서 찾은 구체적 근거 값 — 반드시 수치 (예: 80%, 25세, 3단계)', minWordCount: 1, maxWordCount: 2, mustContainValue: true },
-      { key: 'frame', label: '발화의 변화·비교·결론 표현', minWordCount: 3, maxWordCount: 5, isPhrase: true },
+      { key: 'target', label: '변화·비교의 대상 — 화면에 적힌 항목 이름 (예: 첫 응답 시간, 4분기 매출)', minWordCount: 1, maxWordCount: 4, isPhrase: true },
+      { key: 'value', label: '화면에서 찾은 근거 값 — 반드시 수치. 변화면 바뀌기 전 값에서 바뀐 뒤 값, 비교면 두 대상과 각 값 (예: 9.2시간에서 3.1시간, 도심 33.8도 교외 29.1도)', minWordCount: 1, maxWordCount: 5, mustContainValue: true },
     ],
   },
   [NARRATION_TYPE_MAP.visualDescription]: {
@@ -256,10 +257,14 @@ function hasValuelessSlot({ slotList, slotMap }) {
 
 const CONNECTIVE_ENDING_LIST = ['며', '고', '서', '면서', '거나', '지만', '는데', '어서', '아서'];
 const SITUATION_FALLBACK_TAIL = '설명함';
+// 가리켰다는 사실은 청자에게 정보가 아니다(지시 프롬프트 규칙 5). 모사할 동사가 없을 때 쓰는 "확인 중"으로 둔다.
+const POINTING_SITUATION_PATTERN = /가리키|가리킴|가리켜/;
+const POINTING_SITUATION_REPLACEMENT = '확인 중';
 
 function completeSituationSlot({ situation }) {
   const text = String(situation || '').trim();
   if (!text) return text;
+  if (POINTING_SITUATION_PATTERN.test(text)) return POINTING_SITUATION_REPLACEMENT;
   const last = text.split(/\s+/).pop();
   const isConnective = CONNECTIVE_ENDING_LIST.some((ending) => last.endsWith(ending));
   return isConnective ? `${text} ${SITUATION_FALLBACK_TAIL}` : text;
@@ -299,10 +304,7 @@ const NARRATION_ASSEMBLE_MAP = {
       `${attachJosa({ text: slotMap.value, withFinal: '은', withoutFinal: '는' })} `
       + `${attachJosa({ text: slotMap.frame, withFinal: '을', withoutFinal: '를' })} 의미`
     ),
-    [INTERPRETATION_KIND_MAP.claimToValue]: ({ slotMap }) => (
-      `${attachJosa({ text: slotMap.value, withFinal: '은', withoutFinal: '는' })} `
-      + `${attachJosa({ text: slotMap.frame, withFinal: '을', withoutFinal: '를' })} 의미`
-    ),
+    [INTERPRETATION_KIND_MAP.claimToValue]: ({ slotMap }) => `${slotMap.target}, ${slotMap.value}`,
   },
   [NARRATION_TYPE_MAP.visualDescription]: {
     [VISUAL_DESCRIPTION_KIND_MAP.reaction]: ({ slotMap }) => (
