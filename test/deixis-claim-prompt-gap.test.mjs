@@ -40,3 +40,20 @@ test('변화·비교 해설의 값 칸은 항목 둘과 값이 들어가게 6어
   assert.equal(assemble({ target: '설치 장비', value: 'RSU 79개와 WAVE 단말기 3,000개' }), '설치 장비, RSU 79개와 WAVE 단말기 3,000개');
   assert.equal(assemble({ target: '인력', value: '개발자 120명, 디자이너 30명, 기획자 10명' }), '인력, 개발자 120명, 디자이너 30명, 기획자 10명');
 });
+
+// 실제 VLM 거절 이유(10/15): 제주를 가리켜도 "시범 사업에 들어가 있다는 내용을 이미 말함 → (가)" 10/10,
+// "특히 장비가 크게 늘었습니다"는 "이전 값이 없어 변화의 근거 값을 못 댐" 10/10.
+test('지시어로만 가리킨 대상은 성질을 말해도 (가)가 아니고, 발화 모사는 화면에 없어도 된다고 알린다', () => {
+  const prompt = buildGroundingPrompt({ utterance: '', maxChars: 60, subKind: 'complete' });
+  assert.match(prompt, /가리킨 대상이 무엇인지\(이름·항목\)와 거기 적힌 내용까지/);
+  assert.match(prompt, /지시어\("여기·이·이쪽·이 지역"\)로만 대상을 가리켰다면/);
+  assert.match(prompt, /발화 모사.*화면에 없어도 된다/);
+});
+
+test('변화 수치는 바뀐 뒤 값만 있어도 그 값을 근거로 쓰고, 이전 값이 없다는 이유로 거절하지 않게 한다', () => {
+  const prompt = buildInterpretationPrompt({ utterance: '가입자가 크게 늘었습니다.', subKind: 'claim_to_value' });
+  assert.match(prompt, /바뀐 뒤 값만 있으면 그 값을 근거로 쓴다/);
+  assert.match(prompt, /이전 값이 없다는 이유로 "NONE"을 내지 않는다/);
+  const valueSlot = getSlotList({ narrationType: 'interpretation', subKind: 'claim_to_value' }).find((slot) => slot.key === 'value');
+  assert.match(valueSlot.label, /바뀐 뒤 값만 있으면 그 값/);
+});
