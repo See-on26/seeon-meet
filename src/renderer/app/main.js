@@ -62,6 +62,7 @@ import {
 import { judgeScreenDependency, SCREEN_DEPENDENCY_REASON_MAP } from '../core/trigger/screen-dependency.js';
 import { PointingLocator, describeDirection } from '../core/trigger/pointing-locator.js';
 import { SlideHistogramGate } from '../core/trigger/slide-histogram-gate.js';
+import { createSlideCandidateGate } from '../core/trigger/slide-candidate-gate.js';
 import { SlideEmbeddingRegistry } from '../core/trigger/slide-embedding-registry.js';
 import { SlideDwellGate, DWELL_STATE_MAP } from '../core/trigger/slide-dwell-gate.js';
 import { computeGridEmbedding } from '../core/trigger/frame-embedding.js';
@@ -599,6 +600,7 @@ function isSpeculativeMode() {
   return Boolean(getModePolicy({ mode: getCurrentMode() })?.isSpeculative);
 }
 let isConfirmingSlide = false;
+const slideCandidateGate = createSlideCandidateGate();
 let hasWarnedLocalEmbedding = false;
 let lastGateLogAt = 0;
 let pointingSampleTimer = null;
@@ -699,11 +701,12 @@ function detectSlideTransition({ imageData, ts }) {
     console.log(`[slide][gate] ff=${histogramGate.lastFrameToFrame.toFixed(3)} cvr=${histogramGate.lastChangeVsRef.toFixed(3)} state=${histogramGate.state} still=${histogramGate.stillCount} (motion≥${histogramGate.motionDistance}, still≤${histogramGate.stillDistance}, region=${region})`);
   }
 
-  if (ts < roiChangeSuppressUntil) return;
-  if (!verdict.isTransition && !verdict.isFirst) return;
-  if (isConfirmingSlide) return;
+  const candidate = slideCandidateGate.decide({
+    verdict, ts, suppressUntil: roiChangeSuppressUntil, isConfirming: isConfirmingSlide,
+  });
+  if (!candidate.shouldConfirm) return;
   isConfirmingSlide = true;
-  confirmSlideCandidate({ isFirst: verdict.isFirst, imageData })
+  confirmSlideCandidate({ isFirst: candidate.isFirst, imageData })
     .catch((error) => console.warn('[slide] 전환 확정 오류', error))
     .finally(() => { isConfirmingSlide = false; });
 }
@@ -1900,6 +1903,7 @@ async function attemptStartExperiment() {
     lastScreenGeneration = 0;
     roiChangeSuppressUntil = 0;
     histogramGate.reset();
+    slideCandidateGate.reset();
     slideRegistry.reset();
     slideEventVideoTimeMap.clear();
     slideTransitionWallTsMap.clear();
@@ -1977,7 +1981,7 @@ function stopExperiment() {
       if (speakerPollTimer) { clearInterval(speakerPollTimer); speakerPollTimer = null; }
     }],
     ['포인팅 로컬라이저', () => pointingLocator.reset()],
-    ['슬라이드 히스토그램 게이트', () => histogramGate.reset()],
+    ['슬라이드 히스토그램 게이트', () => { histogramGate.reset(); slideCandidateGate.reset(); }],
     ['슬라이드 레지스트리', () => {
       slideRegistry.reset(); slideEventVideoTimeMap.clear(); slideTransitionWallTsMap.clear(); transitionOrderGate.reset();
       slideTransitionRequestTsMap.clear(); pendingTransitions.reset();
