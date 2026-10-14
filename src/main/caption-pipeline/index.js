@@ -508,7 +508,7 @@ function registerPipeline({ getViewerView, meetingArchive = null }) {
       if (!result.narration) {
         await appendRecord({
           kind: RECORD_KIND_MAP.pageTransition, ts, slideLabel, screenType: result.screenType,
-          narration: '', skipReason: 'incomplete_description',
+          narration: '', skipReason: result.rejectedReason === 'han' ? 'han_character' : 'incomplete_description',
           rejectedDescription: result.rejectedDescription,
           rejectedRawDescription: result.rejectedRawDescription,
           displayNumber, pageNumber: result.pageNumber, pageTopic: result.pageTopic,
@@ -517,7 +517,7 @@ function registerPipeline({ getViewerView, meetingArchive = null }) {
         markDebug({
           stage: DEBUG_STAGE_MAP.vlm, verdict: DEBUG_VERDICT_MAP.skip, ts,
           narrationType: NARRATION_TYPE_MAP.pageTransition,
-          reason: '묘사가 완결되지 않아 고지하지 않음',
+          reason: result.rejectedReason === 'han' ? '묘사에 한자가 섞여 고지하지 않음' : '묘사가 완결되지 않아 고지하지 않음',
           detail: `화면유형=${result.screenType} 슬라이드=${slideLabel} 절삭후="${result.rejectedDescription}" 원문="${result.rejectedRawDescription}"`,
         });
         return { isOk: true, narration: '', isEmitted: false };
