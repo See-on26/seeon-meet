@@ -4,6 +4,7 @@ import { createRequire } from 'node:module';
 import {
   createFeatureToggleStore, FEATURE_KEY_LIST, FEATURE_KEY_MAP, FEATURE_TOGGLE_STORAGE_KEY,
   readFeatureKeyFromDigit, listDisabledNarrationClass, listDisabledFeatureLabel, isFeatureLockedDuringCapture,
+  describeDisabledFeatureBadge,
 } from '../src/renderer/core/mode/feature-toggle-store.js';
 import { NarrationQueue, QUEUE_DROP_REASON_MAP } from '../src/renderer/core/audio-renderer/narration-queue.js';
 
@@ -164,4 +165,16 @@ test('꺼진 기능 이름을 설정 순서대로 돌려준다 — 캡처 시작
   store.set(FEATURE_KEY_MAP.meetingSummary, false);
   store.set(FEATURE_KEY_MAP.pageTransition, false);
   assert.deepEqual(listDisabledFeatureLabel({ store }), ['페이지 전환 안내', '회의 요약']);
+});
+
+// 시작 안내는 로그 한 줄이라 뒤 로그에 묻힌다. 꺼진 기능은 캡처 전부터 머리줄 배지로 계속 보여 준다.
+test('꺼진 기능이 있으면 머리줄 배지 문구를, 모두 켜져 있으면 빈 문구를 돌려준다', () => {
+  const store = createFeatureToggleStore({ storage: createMemoryStorage() });
+  assert.equal(describeDisabledFeatureBadge({ store }), '');
+  store.set(FEATURE_KEY_MAP.speakerIdentity, false);
+  store.set(FEATURE_KEY_MAP.pageTransition, false);
+  assert.equal(describeDisabledFeatureBadge({ store }), '꺼진 기능: 페이지 전환 안내 · 화자 안내');
+  store.set(FEATURE_KEY_MAP.pageTransition, true);
+  store.set(FEATURE_KEY_MAP.speakerIdentity, true);
+  assert.equal(describeDisabledFeatureBadge({ store }), '');
 });
