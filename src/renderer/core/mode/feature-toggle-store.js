@@ -95,6 +95,12 @@ export function listDisabledFeatureLabel({ store }) {
   return FEATURE_KEY_LIST.filter((key) => !store.isOn(key)).map((key) => FEATURE_LABEL_MAP[key]);
 }
 
+// 머리줄 배지 문구. 모두 켜져 있으면 빈 문구(배지를 숨긴다).
+export function describeDisabledFeatureBadge({ store }) {
+  const labelList = listDisabledFeatureLabel({ store });
+  return labelList.length ? `꺼진 기능: ${labelList.join(' · ')}` : '';
+}
+
 export function listDisabledNarrationClass({ store }) {
   return FEATURE_KEY_LIST
     .filter((key) => NARRATION_CLASS_BY_FEATURE_MAP[key] && !store.isOn(key))

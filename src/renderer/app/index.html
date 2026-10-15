@@ -54,6 +54,12 @@
       color: var(--ink-80); border: 1px solid var(--hairline-strong);
     }
     .ghost-btn.on { background: var(--parchment); }
+    /* 꺼진 기능을 캡처 전부터 보여 준다 — 시작 안내 한 줄은 뒤 로그에 묻힌다. */
+    .feature-off-badge {
+      padding: 4px 9px; border-radius: 8px; font-size: 12px; font-weight: 600; white-space: nowrap;
+      color: var(--danger); border: 1px solid var(--danger); background: rgba(224,52,43,.06);
+    }
+    .feature-off-badge[hidden] { display: none; }
 
     .header-spacer { flex: 1 1 auto; }
 
@@ -230,6 +236,7 @@
       <button class="ghost-btn" id="meetReloadBtn" type="button" title="Meet 화면 새로고침 — 회의 밖이면 Meet 첫 화면으로 (Ctrl/Cmd+R)" aria-label="Meet 화면 새로고침, 회의 밖이면 Meet 첫 화면으로 돌아가요, 단축키 Ctrl 또는 Cmd R">Meet 새로고침</button>
       <button class="ghost-btn" id="archiveBtn" type="button" title="지난 회의 요약·스크립트 보기" aria-haspopup="dialog">지난 회의</button>
       <span class="live-state" id="meetHint"></span>
+      <span class="feature-off-badge" id="featureOffBadge" title="설정 패널이나 Ctrl+Shift+1~3으로 켤 수 있어요" hidden></span>
 
       <div class="header-spacer"></div>
 

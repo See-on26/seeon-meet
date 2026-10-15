@@ -13,6 +13,7 @@ import { CONTEXT_TOKEN_BUDGET } from '../core/mode/context-budget.js';
 import {
   createFeatureToggleStore, FEATURE_KEY_MAP, FEATURE_KEY_LIST, FEATURE_LABEL_MAP,
   readFeatureKeyFromDigit, listDisabledNarrationClass, listDisabledFeatureLabel, isFeatureLockedDuringCapture,
+  describeDisabledFeatureBadge,
 } from '../core/mode/feature-toggle-store.js';
 import {
   createMeetingLanguageStore, MEETING_LANGUAGE_LIST, MEETING_LANGUAGE_LABEL_MAP, isMeetingLanguageLocked,
@@ -1301,6 +1302,15 @@ function syncFeatureToggleUi() {
     button.setAttribute('aria-disabled', String(isFeatureLockedNow(button.dataset.feature)));
     button.textContent = isOn ? '켜짐' : '꺼짐';
   }
+  syncFeatureOffBadge();
+}
+
+function syncFeatureOffBadge() {
+  const badge = $('featureOffBadge');
+  if (!badge) return;
+  const text = describeDisabledFeatureBadge({ store: featureToggleStore });
+  badge.textContent = text;
+  badge.hidden = !text;
 }
 
 featureToggleStore.subscribe(({ key, isOn }) => {
