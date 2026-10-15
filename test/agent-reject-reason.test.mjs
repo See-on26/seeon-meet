@@ -14,7 +14,7 @@ const { createSilenceNarrator, SILENCE_RESULT_MAP } = require('../src/main/capti
 const { createSilenceNarrationGate } = require('../src/main/caption-pipeline/orchestrator/silence-gate.js');
 
 const deixisSimple = { narrationType: 'deixis', subKind: 'simple', maxChars: 60, maxWordCount: 8 };
-const REASON = '(가) 발화가 대상의 내용까지 말했다 — 시범 사업에 들어갔다는 것을 이미 말함';
+const REASON = '(가) 가리킨 대상을 화면에서 특정할 수 없다 — 가리킨 곳에 읽을 글자가 없음';
 
 test('에이전트가 "NONE: 이유"로 거절하면 이유를 읽어 둔다', () => {
   const result = parseSlotCaption({ content: `NONE: ${REASON}`, ...deixisSimple });
@@ -50,6 +50,9 @@ test('출력 형식 안내는 거절할 때 "NONE: (거절 이유)" 꼴로 이�
   const instruction = buildSlotOutputInstruction({ narrationType: 'deixis', subKind: 'simple' });
   assert.match(instruction, /NONE: \(거절 이유\)/);
   assert.match(instruction, /"NONE만 출력한다"도 이 꼴/);
+  // 공백 판단은 라우터 몫이므로 거절 근거로 발화 판단을 적게 하지 않는다.
+  assert.doesNotMatch(instruction, /발화에서 판단/);
+  assert.match(instruction, /화면에서 본 것/);
 });
 
 test('기록·흐름 창에 쓸 거절 설명: 이유가 있으면 그 이유, 형식 오류·한자는 원문을 함께 보인다', () => {

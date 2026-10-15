@@ -7,14 +7,31 @@ const { buildGroundingPrompt } = require('../src/main/caption-pipeline/prompts/d
 const { buildInterpretationPrompt } = require('../src/main/caption-pipeline/prompts/interpretive-bridge.js');
 const { getSlotList, assembleNarration } = require('../src/main/caption-pipeline/agents/shared/narration-format.js');
 
-// 10/15 실시간 시연: "여기 이 지역도 시범사업 들어가 있습니다" + 제주를 가리킴 → 판단·라우터는 통과했는데
-// 지시 대상 에이전트가 "발화가 내용까지 말했다"로 보고 NONE. 빠진 정보는 "어느 지역인지(이름)"였다.
-test('지시 대상 프롬프트는 성질·상태만 말하고 대상이 무엇인지 말하지 않은 발화를 버리지 않게 한다', () => {
+// 라우터(판단 LLM)가 발화를 보고 공백 O 로 넘긴 문장을 에이전트가 같은 발화로 다시 판단하면,
+// 둘의 기준이 어긋날 때마다 AD 가 버려진다("여기 이 지역도 시범사업 들어가 있습니다" + 제주 → "내용까지 말함"으로 NONE).
+// 발화가 이미 다 말한 문장은 라우터가 X 로 거르므로, 에이전트는 화면 근거로만 거절한다.
+test('지시 대상 프롬프트는 발화를 다시 판단하지 않고 화면 근거로만 거절한다', () => {
   for (const subKind of ['simple', 'complete']) {
     const prompt = buildGroundingPrompt({ utterance: '', maxChars: 60, subKind });
-    assert.match(prompt, /이름만 말한 것은 \(가\)가 아니다/);
-    assert.match(prompt, /성질·상태만 말하고 대상이 무엇인지 말하지 않은 것도 \(가\)가 아니다/, subKind);
-    assert.match(prompt, /화면에서 대상 이름을 읽어/, subKind);
+    assert.match(prompt, /발화가 무엇을 말했는지 다시 따지지 말고/, subKind);
+    assert.match(prompt, /가리킨 대상을 화면에서 특정할 수 없다/, subKind);
+    assert.match(prompt, /"이미 안내된" 목록에 같은 대상/, subKind);
+    assert.match(prompt, /대상의 이름.*화면에서 읽어 반드시 밝힌다/, subKind);
+    assert.match(prompt, /발화 모사.*화면에 없어도 된다/, subKind);
+    assert.doesNotMatch(prompt, /발화가 대상의 내용까지|이름 글자가 발화에|진행 발화|문장이 끊겼|\(다\)/, subKind);
+  }
+});
+
+test('지시 대상 프롬프트는 슬라이드 주제만 안내된 것을 대상과 겹친다고 보지 않는다', () => {
+  const prompt = buildGroundingPrompt({ utterance: '', maxChars: 60, subKind: 'simple', describedElementList: ['슬라이드 1: 지점 현황'] });
+  assert.match(prompt, /목록이 슬라이드 주제만 말했다면 그 안의 대상은 아직 안내되지 않은 것이다/);
+});
+
+test('수치 프롬프트는 발표자가 이미 말했다는 이유로 거절하지 않는다', () => {
+  for (const subKind of ['claim_to_value', 'value_to_meaning']) {
+    const prompt = buildInterpretationPrompt({ utterance: '크게 늘었습니다.', subKind });
+    assert.match(prompt, /발화가 무엇을 말했는지 다시 따지지 말고/, subKind);
+    assert.doesNotMatch(prompt, /이미 말로 밝힌/, subKind);
   }
 });
 
@@ -41,16 +58,7 @@ test('변화·비교 해설의 값 칸은 항목 둘과 값이 들어가게 6어
   assert.equal(assemble({ target: '인력', value: '개발자 120명, 디자이너 30명, 기획자 10명' }), '인력, 개발자 120명, 디자이너 30명, 기획자 10명');
 });
 
-// 실제 VLM 거절 이유(10/15): 제주를 가리켜도 "시범 사업에 들어가 있다는 내용을 이미 말함 → (가)" 10/10,
-// "특히 장비가 크게 늘었습니다"는 "이전 값이 없어 변화의 근거 값을 못 댐" 10/10.
-test('지시어로만 가리킨 대상은 성질을 말해도 (가)가 아니고, 발화 모사는 화면에 없어도 된다고 알린다', () => {
-  const prompt = buildGroundingPrompt({ utterance: '', maxChars: 60, subKind: 'complete' });
-  assert.match(prompt, /이름 글자가 발화에 없으면 청자는 대상이 어느 것인지 모른다/);
-  assert.match(prompt, /\(가\) ②에서 대상의 이름 글자가 발화에 그대로 나왔고/);
-  assert.match(prompt, /지시어\("여기·이·이쪽·이 지역"\)로만 대상을 가리켰다면/);
-  assert.match(prompt, /발화 모사.*화면에 없어도 된다/);
-});
-
+// 실제 VLM 거절 이유(10/15): "특히 장비가 크게 늘었습니다"는 "이전 값이 없어 변화의 근거 값을 못 댐" 10/10.
 test('변화 수치는 바뀐 뒤 값만 있어도 그 값을 근거로 쓰고, 이전 값이 없다는 이유로 거절하지 않게 한다', () => {
   const prompt = buildInterpretationPrompt({ utterance: '가입자가 크게 늘었습니다.', subKind: 'claim_to_value' });
   assert.match(prompt, /바뀐 뒤 값만 있으면 그 값을 근거로 쓴다/);

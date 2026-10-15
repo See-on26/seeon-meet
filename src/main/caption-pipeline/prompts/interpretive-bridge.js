@@ -1,6 +1,6 @@
 const { NARRATION_TYPE_MAP, INTERPRETATION_KIND_MAP } = require('../contracts/narration-types');
 const {
-  GROUNDING_NONE_TOKEN, computeMaxChars, buildSlotOutputInstruction,
+  GROUNDING_NONE_TOKEN, computeMaxChars, buildSlotOutputInstruction, SPEECH_GAP_DECIDED_RULE,
 } = require('../agents/shared/caption-parser');
 
 const DEFAULT_INTERPRETATION_MIN_WORD_COUNT = 6;
@@ -51,6 +51,7 @@ function buildInterpretationPrompt({ utterance, recentTranscript = '', subKind =
       : '',
     '',
     '청자는 화면을 볼 수 없다.',
+    SPEECH_GAP_DECIDED_RULE,
     ...ruleList,
     '',
     buildSlotOutputInstruction({
@@ -61,8 +62,7 @@ function buildInterpretationPrompt({ utterance, recentTranscript = '', subKind =
     '규칙:',
     '(1) 화면에 실제로 보이는 값·문구만 쓴다. **추정하거나 지어내지 않는다.**',
     `(2) 화면에서 근거를 찾을 수 없으면 "${GROUNDING_NONE_TOKEN}"만 출력한다.`,
-    `(3) 발표자가 이미 말로 밝힌 내용이면 반복하지 말고 "${GROUNDING_NONE_TOKEN}"만 출력한다.`,
-    '(4) 발화 문장을 그대로 옮기지 마라. **핵심만 짧은 명사구로 간추린다.**',
+    '(3) 발화 문장을 그대로 옮기지 마라. **핵심만 짧은 명사구로 간추린다.**',
     '    "이 상태가 달라집니다" → "준비 상태에 따른 차이"',
     '    지시어("이·그·저·여기·이런")는 넣지 않는다 — 청자는 그것을 볼 수 없다.',
     `(참고: 조립 후 총 ${minWordCount}~${maxWordCount}어절, 최대 ${effectiveMaxChars}자 분량이다.)`,
