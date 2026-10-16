@@ -59,8 +59,8 @@ function computeMaxChars({ maxWordCount }) {
   return Math.max(DEFAULT_GROUNDING_MAX_CHARS, Math.round(maxWordCount * CHARS_PER_WORD_ESTIMATE));
 }
 
-function buildSlotOutputInstruction({ narrationType, subKind, origin = null, extraFieldList = [] }) {
-  const slotList = getSlotList({ narrationType, subKind, origin });
+function buildSlotOutputInstruction({ narrationType, subKind, origin = null, extraFieldList = [], hasSecondClaim = false }) {
+  const slotList = getSlotList({ narrationType, subKind, origin, hasSecondClaim });
   if (!slotList) return '';
   return [
     '출력 형식 — JSON 한 줄만. 각 필드는 **그 어절 수를 지켜라**(고정 문구는 시스템이 붙이므로 넣지 마라).',
@@ -121,7 +121,8 @@ function parseSlotCaption(option) {
     ? buildRejection({ rejectKind: REJECT_KIND_MAP.han, content: option.content }) : result;
 }
 
-function parseSlotCaptionContent({ content, narrationType, subKind, origin = null, index = '', maxChars, maxWordCount }) {
+function parseSlotCaptionContent({ content, narrationType, subKind, origin = null, index = '', maxChars, maxWordCount,
+  hasSecondClaim = false }) {
   if (typeof content !== 'string') return buildRejection({ rejectKind: REJECT_KIND_MAP.format });
   const cleaned = content.replace(/```(?:json)?/g, '').trim();
 
@@ -133,7 +134,7 @@ function parseSlotCaptionContent({ content, narrationType, subKind, origin = nul
   if (jsonMatch) {
     try {
       const assembled = assembleNarration({
-        narrationType, subKind, rawSlotMap: JSON.parse(jsonMatch[0]), index, origin,
+        narrationType, subKind, rawSlotMap: JSON.parse(jsonMatch[0]), index, origin, hasSecondClaim, maxWordCount,
       });
       if (assembled) return { ...assembled, isGrounded: true };
 
@@ -143,7 +144,9 @@ function parseSlotCaptionContent({ content, narrationType, subKind, origin = nul
   if (isSlotJsonAttempt({ text: cleaned })) {
     const salvagedSlotMap = salvageSlotMap({ text: cleaned });
     const assembled = salvagedSlotMap
-      && assembleNarration({ narrationType, subKind, rawSlotMap: salvagedSlotMap, index, origin });
+      && assembleNarration({
+        narrationType, subKind, rawSlotMap: salvagedSlotMap, index, origin, hasSecondClaim, maxWordCount,
+      });
     if (assembled) return { ...assembled, isGrounded: true };
     return buildRejection({ rejectKind: REJECT_KIND_MAP.format, content });
   }
