@@ -11,6 +11,7 @@ const { DEBUG_STAGE_MAP, DEBUG_VERDICT_MAP } = require('./contracts/debug-events
 const { createAgentFieldMap } = require('./agents');
 const { createUnifiedRouter, ROUTER_MODE_MAP, resolveNarrationEventVideoTimeMs } = require('./router/unified-router');
 const { createSpeechTrigger, TRIGGER_TYPE_LABEL_MAP } = require('./trigger/speech-trigger');
+const { createBoundaryTrigger } = require('./trigger/boundary-trigger');
 const { createKiwiTokenizer } = require('./trigger/kiwi-tokenizer');
 const { resolveKiwiModelDir } = require('./trigger/kiwi-model');
 const { createDeixisJudgeClient } = require('./router/deixis-judge');
@@ -107,6 +108,7 @@ function registerPipeline({ getViewerView, meetingArchive = null }) {
     modelDir: resolveKiwiModelDir({ isPackaged: Boolean(electronApp?.isPackaged), resourcesPath: process.resourcesPath }),
   });
   const speechTrigger = createSpeechTrigger({ tokenizer: kiwiTokenizer });
+  const boundaryTrigger = createBoundaryTrigger({ detect: speechTrigger.detect });
   setImmediate(() => {
     kiwiTokenizer.load()
       .then(({ elapsedMs }) => console.log(`[pipeline] 트리거 형태소 분석기(Kiwi) 준비 (${elapsedMs}ms)`))
@@ -360,6 +362,7 @@ function registerPipeline({ getViewerView, meetingArchive = null }) {
     narrationHistory.reset();
     silenceGate.reset();
     slideTextStore.reset();
+    boundaryTrigger.reset();
     const meetingLanguage = applySessionMeetingLanguage({ asrLanguageSession, asrLanguage });
     sessionSlideTextBackend = resolveSlideTextBackend({ requested: slideTextBackend, fallback: config.slideTextBackend });
     const { sessionId } = sessionStore.startSession({ mode, asrLanguage: meetingLanguage });
@@ -826,11 +829,12 @@ function registerPipeline({ getViewerView, meetingArchive = null }) {
       }
 
       if (result.text) {
-        const trigger = speechTrigger.detect({ text: result.text });
+        const trigger = boundaryTrigger.detect({ text: result.text, startTs, endTs });
         if (trigger.candidateList.length) {
           markDebug({
             stage: DEBUG_STAGE_MAP.router, verdict: DEBUG_VERDICT_MAP.info, ts: startTs,
-            reason: `트리거 후보 ${trigger.candidateList.length}개 (${trigger.analyzer})`,
+            reason: `트리거 후보 ${trigger.candidateList.length}개 (${trigger.analyzer})`
+              + `${trigger.boundaryCount ? ` · 경계 트리거 후보 ${trigger.boundaryCount}개(앞 조각 꼬리와 이어 찾음)` : ''}`,
             detail: `${formatTriggerCandidateList(trigger.candidateList)} · 전사="${truncateForLog(result.text, 80)}"`,
           });
         }
