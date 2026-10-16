@@ -68,3 +68,20 @@ test('변화 수치는 바뀐 뒤 값만 있어도 그 값을 근거로 쓰고, 
   const valueSlot = getSlotList({ narrationType: 'interpretation', subKind: 'claim_to_value' }).find((slot) => slot.key === 'value');
   assert.match(valueSlot.label, /바뀐 뒤 값만 있으면 그 값/);
 });
+
+// 출력 칸 설명이 "화면에 적힌 항목 이름"만 말하면 VLM 은 본문의 "묶음 이름을 쓴다"보다 칸 설명을 따라,
+// 대상 칸에 항목 이름을 넣고 값 칸에 또 써서 "RSU, WAVE 단말기, RSU 79개, …"처럼 이름이 되풀이됐다(10회 중 7회).
+test('변화·비교 대상 칸 설명은 묶음 이름을 쓰라는 본문과 맞춘다', () => {
+  const targetSlot = getSlotList({ narrationType: 'interpretation', subKind: 'claim_to_value' }).find((slot) => slot.key === 'target');
+  assert.match(targetSlot.label, /여러 항목을 묶어 부른 말.*그 묶음 이름/);
+  assert.match(targetSlot.label, /인력/);
+});
+
+test('대상 칸의 이름이 모두 값 칸에 나오면 대상 칸을 빼고 값만 읽는다', () => {
+  const assemble = (rawSlotMap) => assembleNarration({ narrationType: 'interpretation', subKind: 'claim_to_value', rawSlotMap })?.text ?? null;
+  assert.equal(assemble({ target: 'RSU, WAVE 단말기', value: 'RSU 79개, WAVE 단말기 3,000개' }), 'RSU 79개, WAVE 단말기 3,000개');
+  assert.equal(assemble({ target: 'RSU 및 WAVE 단말기', value: 'RSU 79개, WAVE 단말기 3,000개' }), 'RSU 79개, WAVE 단말기 3,000개');
+  assert.equal(assemble({ target: '첫 응답 시간', value: '9.2시간에서 3.1시간' }), '첫 응답 시간, 9.2시간에서 3.1시간');
+  assert.equal(assemble({ target: '시간', value: '9.2시간에서 3.1시간' }), '시간, 9.2시간에서 3.1시간');
+  assert.equal(assemble({ target: '설치 장비', value: 'RSU 79개와 WAVE 단말기 3,000개' }), '설치 장비, RSU 79개와 WAVE 단말기 3,000개');
+});
