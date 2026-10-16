@@ -9,6 +9,12 @@ const DEFAULT_SILENCE_CUT_MS = 400;
 
 const DEFAULT_MIN_SEGMENT_MS = 2500;
 
+// 조각 길이가 찼을 때 말하는 도중이면 강제로 자르지 않는다. 잘린 음절은 Whisper 가 버려
+// ("…크게 늘" | "다른 지역도…" — "었습니다"가 사라짐) 트리거가 통째로 빠진다.
+// 길이를 넘긴 뒤에는 낱말 사이 짧은 쉼에서 자르고, 쉼이 없어도 이만큼 넘으면 자른다.
+export const DEFAULT_MAX_EXTEND_MS = 1500;
+export const DEFAULT_EXTEND_SILENCE_CUT_MS = 200;
+
 export function isSegmentVoiced({ voicedMs, minVoicedMs }) {
   return voicedMs >= minVoicedMs;
 }
@@ -17,16 +23,27 @@ export function isSegmentCutReady({ elapsedMs, silenceMs, minSegmentMs, silenceC
   return elapsedMs >= minSegmentMs && silenceMs >= silenceCutMs;
 }
 
+export function shouldCutSegment({ elapsedMs, silenceMs, voicedMs, segmentMs, minSegmentMs, silenceCutMs, minVoicedMs,
+  hasVad = true, maxExtendMs = DEFAULT_MAX_EXTEND_MS, extendSilenceCutMs = DEFAULT_EXTEND_SILENCE_CUT_MS }) {
+  if (!hasVad) return elapsedMs >= segmentMs;
+  if (elapsedMs >= segmentMs + maxExtendMs) return true;
+  const hasSpeech = voicedMs >= minVoicedMs;
+  if (hasSpeech && isSegmentCutReady({ elapsedMs, silenceMs, minSegmentMs, silenceCutMs })) return true;
+  if (elapsedMs < segmentMs) return false;
+  return !hasSpeech || silenceMs >= extendSilenceCutMs;
+}
+
 export class AsrSegmenter {
   constructor({ onSegment, onError = null, segmentMs = ASR_SEGMENT_MS,
     getVoiceLevel = null, voiceThreshold = DEFAULT_VOICE_LEVEL_THRESHOLD,
     minVoicedMs = DEFAULT_MIN_VOICED_MS, onSkip = null,
-    silenceCutMs = DEFAULT_SILENCE_CUT_MS, minSegmentMs = DEFAULT_MIN_SEGMENT_MS }) {
+    silenceCutMs = DEFAULT_SILENCE_CUT_MS, minSegmentMs = DEFAULT_MIN_SEGMENT_MS, maxExtendMs = DEFAULT_MAX_EXTEND_MS }) {
     this.onSegment = onSegment;
     this.onError = onError;
     this.segmentMs = segmentMs;
     this.silenceCutMs = silenceCutMs;
     this.minSegmentMs = minSegmentMs;
+    this.maxExtendMs = maxExtendMs;
     this.getVoiceLevel = getVoiceLevel;
     this.voiceThreshold = voiceThreshold;
     this.minVoicedMs = minVoicedMs;
@@ -89,9 +106,10 @@ export class AsrSegmenter {
         }
         silenceMs += VAD_SAMPLE_MS;
 
-        const isCutReady = voicedMs >= this.minVoicedMs && isSegmentCutReady({
-          elapsedMs: Date.now() - startTs, silenceMs,
-          minSegmentMs: this.minSegmentMs, silenceCutMs: this.silenceCutMs,
+        const isCutReady = shouldCutSegment({
+          elapsedMs: Date.now() - startTs, silenceMs, voicedMs,
+          segmentMs: this.segmentMs, minSegmentMs: this.minSegmentMs, silenceCutMs: this.silenceCutMs,
+          minVoicedMs: this.minVoicedMs, maxExtendMs: this.maxExtendMs,
         });
         if (isCutReady && recorder.state !== 'inactive') recorder.stop();
       }, VAD_SAMPLE_MS);
@@ -116,8 +134,9 @@ export class AsrSegmenter {
     };
     recorder.start();
     this.recorder = recorder;
+    // 말소리 측정이 있으면 길이가 찬 뒤 판단은 위 측정 주기가 하고, 이 타이머는 늘린 상한에서만 자른다.
     this.stopTimer = setTimeout(() => {
       if (recorder.state !== 'inactive') recorder.stop();
-    }, this.segmentMs);
+    }, this.getVoiceLevel ? this.segmentMs + this.maxExtendMs : this.segmentMs);
   }
 }
