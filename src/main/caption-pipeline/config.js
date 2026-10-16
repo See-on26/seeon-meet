@@ -64,6 +64,11 @@ function readSlideTextBackend({ env }) {
   return DEFAULT_SLIDE_TEXT_BACKEND;
 }
 
+// 설정 화면에서 고른 값(회의마다 넘어온다)을 쓰고, 없거나 모르는 값이면 .env 로 정한 값을 쓴다.
+function resolveSlideTextBackend({ requested, fallback }) {
+  return SLIDE_TEXT_BACKEND_LIST.includes(requested) ? requested : fallback;
+}
+
 function readGapSource({ env }) {
   const source = env.SEEON_GAP_SOURCE;
   if (source === undefined || source === '') return DEFAULT_GAP_SOURCE;
@@ -132,5 +137,5 @@ function readPipelineConfig(env = process.env) {
 
 module.exports = {
   readPipelineConfig, DEFAULT_JUDGE_GPU_URL, DEFAULT_JUDGE_GPU_MODEL, ASR_LANGUAGE_LIST, DEFAULT_ASR_LANGUAGE, isAsrLanguage, JUDGE_BACKEND_LIST, DEFAULT_JUDGE_BACKEND,
-  SLIDE_TEXT_BACKEND_LIST, DEFAULT_SLIDE_TEXT_BACKEND, GAP_SOURCE_LIST, DEFAULT_GAP_SOURCE,
+  SLIDE_TEXT_BACKEND_LIST, DEFAULT_SLIDE_TEXT_BACKEND, resolveSlideTextBackend, GAP_SOURCE_LIST, DEFAULT_GAP_SOURCE,
 };

@@ -19,6 +19,9 @@ import {
   createMeetingLanguageStore, MEETING_LANGUAGE_LIST, MEETING_LANGUAGE_LABEL_MAP, isMeetingLanguageLocked,
   describeNonDefaultMeetingLanguage,
 } from '../core/mode/meeting-language-store.js';
+import {
+  createSlideTextBackendStore, SLIDE_TEXT_BACKEND_OPTION_LIST, SLIDE_TEXT_BACKEND_LABEL_MAP,
+} from '../core/mode/slide-text-backend-store.js';
 
 import { DelayBuffer, isCaptionDroppable, EXCESS_DROP_MS } from '../core/audio-renderer/delay-buffer.js';
 import { StreamDelaySource } from '../core/audio-renderer/stream-delay-source.js';
@@ -120,6 +123,7 @@ function readLocalStorage() {
 
 const featureToggleStore = createFeatureToggleStore({ storage: readLocalStorage() });
 const meetingLanguageStore = createMeetingLanguageStore({ storage: readLocalStorage() });
+const slideTextBackendStore = createSlideTextBackendStore({ storage: readLocalStorage() });
 const isNarrationEntryEnabled = (entry) => featureToggleStore.isClassOn(entry.narrationClass);
 
 // Orchestrator → TTS → 전달 Layer: TTS 는 Orchestrator 를 통과한 해설만 만든다. 재생 차례가 가까운 2개는 미리 만들어
@@ -1409,6 +1413,70 @@ meetingLanguageStore.subscribe(({ language }) => {
 
 buildMeetingLanguageSelect();
 
+// 화면 글자 읽기(VLM·OCR)도 회의 언어처럼 캡처를 시작할 때 main 에 넘겨 그 회의 동안 쓴다.
+// 고른 적이 없으면 main 의 .env 값(SEEON_SLIDE_TEXT_BACKEND)을 보여 주고, 그 값으로 읽는다.
+let slideTextBackendDefault = null;
+
+function readShownSlideTextBackend() {
+  return slideTextBackendStore.get() || slideTextBackendDefault || SLIDE_TEXT_BACKEND_OPTION_LIST[0];
+}
+
+function announceSlideTextBackendLocked() {
+  announce('화면 글자 읽기 방법은 회의 캡처를 시작하기 전에만 바꿀 수 있어요');
+}
+
+function blockLockedSlideTextBackendInput(event) {
+  if (!captureSource.isActive) return;
+  if (event.type === 'keydown' && !MEETING_LANGUAGE_OPEN_KEY_LIST.includes(event.key)) return;
+  event.preventDefault();
+  announceSlideTextBackendLocked();
+}
+
+function handleChangeSlideTextBackend() {
+  const select = $('slideTextBackendSelect');
+  if (captureSource.isActive) {
+    select.value = readShownSlideTextBackend();
+    announceSlideTextBackendLocked();
+    return;
+  }
+  slideTextBackendStore.set(select.value);
+}
+
+function buildSlideTextBackendSelect() {
+  const select = $('slideTextBackendSelect');
+  if (!select) return;
+  select.replaceChildren(...SLIDE_TEXT_BACKEND_OPTION_LIST.map((backend) => {
+    const option = document.createElement('option');
+    option.value = backend;
+    option.textContent = SLIDE_TEXT_BACKEND_LABEL_MAP[backend];
+    return option;
+  }));
+  select.addEventListener('mousedown', blockLockedSlideTextBackendInput);
+  select.addEventListener('keydown', blockLockedSlideTextBackendInput);
+  select.addEventListener('change', handleChangeSlideTextBackend);
+  syncSlideTextBackendUi();
+}
+
+function syncSlideTextBackendUi() {
+  const select = $('slideTextBackendSelect');
+  if (!select) return;
+  select.value = readShownSlideTextBackend();
+  select.setAttribute('aria-disabled', String(Boolean(captureSource.isActive)));
+}
+
+slideTextBackendStore.subscribe(({ backend }) => {
+  showNotice(`화면 글자 읽기 ${SLIDE_TEXT_BACKEND_LABEL_MAP[backend]} — 다음 회의 캡처부터 적용돼요`);
+  syncSlideTextBackendUi();
+});
+
+buildSlideTextBackendSelect();
+window.seeon.getSlideTextBackendDefault?.()
+  .then(({ backend } = {}) => {
+    slideTextBackendDefault = backend || null;
+    syncSlideTextBackendUi();
+  })
+  .catch(() => {});
+
 // 지난 회의: 사용자 문서 폴더(SEEON 회의 기록)에 날짜별로 남긴 요약·대화 스크립트를 앱 안에서 읽는다.
 function setArchiveStatus(text) {
   $('archiveStatus').textContent = text;
@@ -1878,7 +1946,7 @@ async function attemptStartExperiment() {
     if (startNoticeList.length) announce(startNoticeList.join(' '));
 
     const sessionResult = await window.seeon.startPipelineSession({
-      mode: getCurrentMode(), asrLanguage: meetingLanguageStore.get(),
+      mode: getCurrentMode(), asrLanguage: meetingLanguageStore.get(), slideTextBackend: slideTextBackendStore.get(),
     }).catch(() => null);
     currentSessionId = sessionResult?.sessionId || null;
     gapSource = sessionResult?.gapSource === GAP_CANDIDATE_SOURCE_MAP.audio
@@ -1954,6 +2022,7 @@ async function attemptStartExperiment() {
     setToggleUi(true);
     syncFeatureToggleUi();
     syncMeetingLanguageUi();
+    syncSlideTextBackendUi();
     renderModeButtons();
 
     if (!audioTrack) {
@@ -2035,6 +2104,7 @@ function stopExperiment() {
   setToggleUi(false);
   syncFeatureToggleUi();
   syncMeetingLanguageUi();
+  syncSlideTextBackendUi();
   renderModeButtons();
   markDebug({
     stage: DEBUG_STAGE_MAP.session, verdict: DEBUG_VERDICT_MAP.info,
@@ -2242,6 +2312,7 @@ function setSettingsPanelOpen(isOpen) {
   placeSettingsPanel();
   syncFeatureToggleUi();
   syncMeetingLanguageUi();
+  syncSlideTextBackendUi();
 }
 
 $('settingsBtn').addEventListener('click', () => setSettingsPanelOpen($('settingsPanel').hidden));
