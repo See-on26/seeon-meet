@@ -160,7 +160,7 @@ const NARRATION_SLOT_MAP = {
     ],
     // 발화 표현을 칸에 넣으면 "…빨라졌습니다를 의미"처럼 발화가 그대로 붙는다. 대상과 근거 값만 화면에서 읽는다.
     [INTERPRETATION_KIND_MAP.claimToValue]: [
-      { key: 'target', label: '변화·비교의 대상 — 화면에 적힌 항목 이름 (예: 첫 응답 시간, 4분기 매출)', minWordCount: 1, maxWordCount: 4, isPhrase: true },
+      { key: 'target', label: '변화·비교의 대상 — 화면에 적힌 항목 이름. 발표자가 여러 항목을 묶어 부른 말이면 그 묶음 이름 (예: 첫 응답 시간, 4분기 매출, 인력)', minWordCount: 1, maxWordCount: 4, isPhrase: true },
       { key: 'value', label: '화면에서 찾은 근거 값 — 반드시 수치. 변화면 바뀌기 전 값에서 바뀐 뒤 값(바뀐 뒤 값만 있으면 그 값), 비교면 두 대상과 각 값, 묶음 이름이면 항목 2개까지 각 이름과 값 (예: 9.2시간에서 3.1시간, 도심 33.8도 교외 29.1도, 개발자 120명과 디자이너 30명)', minWordCount: 1, maxWordCount: 6, mustContainValue: true },
     ],
   },
@@ -294,6 +294,16 @@ function dropRepeatedWordAtSeam({ text }) {
   return keptList.join(' ');
 }
 
+// 대상 칸 이름이 값 칸에 모두 나오면("RSU, WAVE 단말기" + "RSU 79개, WAVE 단말기 3,000개") 이름이 두 번 읽힌다.
+// 이름은 낱말 첫머리에서 나와야 같은 것으로 본다("시간"은 "9.2시간"에 든 것이 아니다).
+const TARGET_ITEM_SEPARATOR = /\s*[,·]\s*|\s+및\s+/;
+
+function isTargetRepeatedInValue({ target, value }) {
+  const itemList = String(target || '').split(TARGET_ITEM_SEPARATOR).map((item) => item.trim()).filter(Boolean);
+  const spacedValue = ` ${String(value || '')}`;
+  return itemList.length > 0 && itemList.every((item) => spacedValue.includes(` ${item}`));
+}
+
 function hasEmptyRequiredSlot({ slotList, slotMap }) {
   return slotList.some((slot) => {
     if (slot.isDiagnostic || slot.minWordCount <= 0) return false;
@@ -322,7 +332,9 @@ const NARRATION_ASSEMBLE_MAP = {
       `${attachJosa({ text: slotMap.value, withFinal: '은', withoutFinal: '는' })} `
       + `${attachJosa({ text: slotMap.frame, withFinal: '을', withoutFinal: '를' })} 의미`
     ),
-    [INTERPRETATION_KIND_MAP.claimToValue]: ({ slotMap }) => `${slotMap.target}, ${slotMap.value}`,
+    [INTERPRETATION_KIND_MAP.claimToValue]: ({ slotMap }) => (
+      isTargetRepeatedInValue(slotMap) ? slotMap.value : `${slotMap.target}, ${slotMap.value}`
+    ),
   },
   [NARRATION_TYPE_MAP.visualDescription]: {
     [VISUAL_DESCRIPTION_KIND_MAP.reaction]: ({ slotMap }) => (
