@@ -15,7 +15,8 @@ const OCR_BYPASS_MS = 60000;
 const SLIDE_TEXT_SOURCE_MAP = { ocr: 'ocr', vlm: 'vlm' };
 const OCR_FALLBACK_REASON_MAP = { lowScore: 'low_score', verticalText: 'vertical_text', bypass: 'ocr_bypass' };
 
-function createSlideTextAgent({ config, ocrClient = null, now = Date.now }) {
+// getBackend: 지금 회의의 전사 백엔드. 설정 화면에서 고른 값이 회의 시작 때 바뀌므로 읽을 때마다 묻는다.
+function createSlideTextAgent({ config, ocrClient = null, now = Date.now, getBackend = () => config.slideTextBackend }) {
   let ocrBypassUntil = 0;
 
   async function transcribeWithVlm({ jpegBuffer }) {
@@ -60,7 +61,7 @@ function createSlideTextAgent({ config, ocrClient = null, now = Date.now }) {
   }
 
   async function transcribe({ jpegBuffer }) {
-    if (config.slideTextBackend === SLIDE_TEXT_SOURCE_MAP.ocr) return transcribeWithOcr({ jpegBuffer });
+    if (getBackend() === SLIDE_TEXT_SOURCE_MAP.ocr) return transcribeWithOcr({ jpegBuffer });
     return transcribeWithVlm({ jpegBuffer });
   }
 
