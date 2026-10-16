@@ -222,6 +222,89 @@ test('모든 포트를 다른 터널이 쓰고 있으면 SSH 연결 없이 exter
   assert.ok(logList.some((line) => line.startsWith('[gpu-tunnel]')));
 });
 
+async function waitFor(isReady, { timeoutMs = 2000 } = {}) {
+  const startedAt = Date.now();
+  while (!isReady()) {
+    if (Date.now() - startedAt > timeoutMs) throw new Error('기다린 상태가 오지 않음');
+    await new Promise((resolve) => setTimeout(resolve, 10));
+  }
+}
+
+const closeServer = (server) => new Promise((resolve) => server.close(resolve));
+
+// 제품·실험실 앱을 같이 켜면 나중 앱은 먼저 앱의 포트를 빌려 쓴다(external). 먼저 앱을 끄면 포트가 비는데,
+// 다시 열어 보지 않으면 나중 앱은 껐다 켤 때까지 GPU 를 못 부른다.
+test('다른 터널이 쓰던 포트가 비면 3초 뒤 넘겨받아 자기 SSH 로 잇는다', async () => {
+  const blockerA = await occupyPort();
+  const blockerB = await occupyPort();
+  const portA = blockerA.address().port;
+  const portB = blockerB.address().port;
+  const { tunnel, clientList, timer } = makeTunnel({
+    forwardList: [{ localPort: portA, remotePort: 8801 }, { localPort: portB, remotePort: 8805 }],
+  });
+  await tunnel.start();
+  assert.equal(tunnel.getStatus().status, TUNNEL_STATUS_MAP.external);
+  assert.equal(clientList.length, 0);
+
+  await closeServer(blockerA);
+  await closeServer(blockerB);
+  assert.equal(timer.runNext(), 3000);
+  await waitFor(() => clientList.length === 1);
+  assert.equal(tunnel.getStatus().status, TUNNEL_STATUS_MAP.connecting);
+  clientList[0].emit('ready');
+  assert.equal(tunnel.getStatus().status, TUNNEL_STATUS_MAP.connected);
+
+  const socket = connectLocal(portB);
+  await once(socket, 'connect');
+  socket.end('judge');
+  assert.equal(await readUntilClose(socket), 'judge');
+  assert.deepEqual(clientList[0].forwardCallList.map(({ dstPort }) => dstPort), [8805]);
+  assert.equal(timer.pendingList.filter((entry) => !entry.isCleared).length, 0);
+});
+
+test('포트가 아직 쓰이고 있으면 연결하지 않고 3초 뒤 다시 본다', async () => {
+  const blocker = await occupyPort();
+  cleanupList.push(() => closeServer(blocker));
+  const { tunnel, clientList, timer } = makeTunnel({ forwardList: [{ localPort: blocker.address().port, remotePort: 8801 }] });
+  await tunnel.start();
+  timer.runNext();
+  await waitFor(() => timer.pendingList.length === 1);
+  assert.equal(timer.pendingList[0].delayMs, 3000);
+  assert.equal(tunnel.getStatus().status, TUNNEL_STATUS_MAP.external);
+  assert.equal(clientList.length, 0);
+});
+
+test('일부 포트만 건너뛰었으면 비었을 때 그 포트만 더 열고 SSH 연결은 그대로 쓴다', async () => {
+  const blocker = await occupyPort();
+  const busyPort = blocker.address().port;
+  const freePort = await findFreePort();
+  const { tunnel, clientList, timer } = makeTunnel({
+    forwardList: [{ localPort: busyPort, remotePort: 8801 }, { localPort: freePort, remotePort: 8805 }],
+  });
+  await tunnel.start();
+  clientList[0].emit('ready');
+  await closeServer(blocker);
+  timer.runNext();
+  await waitFor(() => timer.pendingList.length === 0 || timer.pendingList.every((entry) => entry.isCleared));
+
+  const socket = connectLocal(busyPort);
+  await once(socket, 'connect');
+  socket.end('vlm');
+  assert.equal(await readUntilClose(socket), 'vlm');
+  assert.equal(clientList.length, 1);
+  assert.deepEqual(clientList[0].forwardCallList.map(({ dstPort }) => dstPort), [8801]);
+  assert.equal(tunnel.getStatus().status, TUNNEL_STATUS_MAP.connected);
+});
+
+test('stop 하면 포트 넘겨받기도 멈춘다', async () => {
+  const blocker = await occupyPort();
+  cleanupList.push(() => closeServer(blocker));
+  const { tunnel, timer } = makeTunnel({ forwardList: [{ localPort: blocker.address().port, remotePort: 8801 }] });
+  await tunnel.start();
+  await tunnel.stop();
+  assert.ok(timer.pendingList.every((entry) => entry.isCleared));
+});
+
 test('끊기면 reconnecting(2초 뒤) → 다시 붙으면 connected, 붙은 뒤에는 간격이 처음부터', async () => {
   const localPort = await findFreePort();
   const { tunnel, clientList, statusList, timer } = makeTunnel({ forwardList: [{ localPort, remotePort: 8802 }] });
