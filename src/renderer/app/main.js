@@ -61,6 +61,7 @@ import {
 } from '../core/trigger/deixis-candidate-scheduler.js';
 import { judgeScreenDependency, SCREEN_DEPENDENCY_REASON_MAP } from '../core/trigger/screen-dependency.js';
 import { PointingLocator, describeDirection } from '../core/trigger/pointing-locator.js';
+import { createRecentPointingMemory } from '../core/trigger/recent-pointing.js';
 import { SlideHistogramGate } from '../core/trigger/slide-histogram-gate.js';
 import { createSlideCandidateGate } from '../core/trigger/slide-candidate-gate.js';
 import { SlideEmbeddingRegistry } from '../core/trigger/slide-embedding-registry.js';
@@ -567,6 +568,7 @@ let currentSessionId = null;
 let deixisFrameSeq = 0;
 
 const pointingLocator = new PointingLocator({ rowCount: 18, colCount: 32, cellChangeThreshold: 4 });
+const recentPointingMemory = createRecentPointingMemory();
 
 const LOCAL_EMBED_MATCH_THRESHOLD = 0.02;
 const histogramGate = new SlideHistogramGate({});
@@ -676,6 +678,7 @@ function syncRoiGeneration({ ts }) {
   lastScreenGeneration = generation;
   histogramGate.reset();
   pointingLocator.reset();
+  recentPointingMemory.reset();
   lastPointingMotionAt = -Infinity;
   slideDwellGate.reset();
   roiChangeSuppressUntil = ts + ROI_CHANGE_SUPPRESS_MS;
@@ -963,7 +966,7 @@ const SUBMIT_RESULT_LABEL_MAP = {
 const candidateScheduler = new DeixisCandidateScheduler({ onDecide: runDeixisDecision, getLastSpeechWallTs });
 const deixisDetector = new DeixisDetector({
   onDeixis: ({ text, trigger, candidateList, captureTs, eventWallTs }) => {
-    const { region, pointingOrderHint } = getPointingSequence();
+    const { region, pointingOrderHint } = resolveDeixisPointing({ eventWallTs: eventWallTs ?? captureTs, trigger });
     const nowVideoTimeMs = captureSource.videoTimeMs;
     const nowTs = performance.now();
     const submitResult = candidateScheduler.submit({
@@ -977,6 +980,16 @@ const deixisDetector = new DeixisDetector({
   },
 });
 
+// 직전 창에 영역이 없으면, 트리거 발화보다 앞서 같은 슬라이드에서 가리킨 영역을 붙인다(말하면서 가리킨 경우).
+function resolveDeixisPointing({ eventWallTs, trigger }) {
+  const sequence = getPointingSequence();
+  if (sequence.region) return sequence;
+  const recalled = recentPointingMemory.recall({ eventWallTs, slideLabel: slideRegistry.currentLabel() });
+  if (!recalled) return sequence;
+  console.log(`[deixis] ✍ 직전 창에 영역 없음 → 발화 전 가리킨 영역을 붙임 트리거="${trigger}"`);
+  return recalled;
+}
+
 function attachPointingMotion() {
   const now = performance.now();
   const motion = pointingLocator.locate({ nowTs: now });
@@ -984,6 +997,9 @@ function attachPointingMotion() {
   if (now - lastPointingMotionAt < POINTING_MOTION_DEBOUNCE_MS) return;
   lastPointingMotionAt = now;
   const { region, pointingOrderHint } = getPointingSequence();
+  recentPointingMemory.remember({
+    region: region || motion.rect, pointingOrderHint, wallTs: Date.now(), slideLabel: slideRegistry.currentLabel(),
+  });
   saveAnnotationSnapshot();
   const isAttached = candidateScheduler.attachPointing({
     region: region || motion.rect, pointingOrderHint,
@@ -1847,6 +1863,7 @@ function resumeExperiment() {
   startNarrationPlayer({ stream });
   delayBuffer?.release();
   pointingLocator.reset();
+  recentPointingMemory.reset();
   silenceTrigger.reset({ nowPerf: performance.now() });
 
   lastPointingMotionAt = -Infinity;
@@ -1918,6 +1935,7 @@ async function attemptStartExperiment() {
     silenceTrigger.reset({ nowPerf: performance.now() });
     candidateScheduler.reset();
     pointingLocator.reset();
+    recentPointingMemory.reset();
     lastPointingMotionAt = -Infinity;
 
     roiStore.reset();
@@ -2001,7 +2019,7 @@ function stopExperiment() {
     ['발화자 폴링', () => {
       if (speakerPollTimer) { clearInterval(speakerPollTimer); speakerPollTimer = null; }
     }],
-    ['포인팅 로컬라이저', () => pointingLocator.reset()],
+    ['포인팅 로컬라이저', () => { pointingLocator.reset(); recentPointingMemory.reset(); }],
     ['슬라이드 히스토그램 게이트', () => { histogramGate.reset(); slideCandidateGate.reset(); }],
     ['슬라이드 레지스트리', () => {
       slideRegistry.reset(); slideEventVideoTimeMap.clear(); slideTransitionWallTsMap.clear(); transitionOrderGate.reset();
