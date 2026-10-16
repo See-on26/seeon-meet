@@ -10,6 +10,8 @@ const {
 const KEEPALIVE_INTERVAL_MS = 15000;
 const KEEPALIVE_COUNT_MAX = 4;
 const READY_TIMEOUT_MS = 10000;
+// 다른 앱·외부 터널이 쓰던 로컬 포트를 이 간격으로 다시 열어 본다. 그 터널이 꺼지면 이 앱이 넘겨받는다.
+const PORT_TAKEOVER_INTERVAL_MS = 3000;
 
 const LOCAL_HOST = '127.0.0.1';
 // 서버는 앱 키에 127.0.0.1:<포트> 로만 전달을 허용한다(permitopen).
@@ -42,6 +44,8 @@ function createGpuTunnel({
   const socketSet = new Set();
   let snapshot = { status: TUNNEL_STATUS_MAP.connecting, reason: null, retryInMs: null };
   let openedForwardList = [];
+  let skippedForwardList = [];
+  let takeoverTimer = null;
   let currentClient = null;
   let activeClient = null;
   let reconnectTimer = null;
@@ -181,6 +185,39 @@ function createGpuTunnel({
     }
   }
 
+  // 건너뛴 포트 중 비어 있는 것을 연다. SSH 가 아직 없으면(모든 포트를 빌려 쓰던 경우) 이때 연결한다.
+  async function takeOverFreedPorts() {
+    takeoverTimer = null;
+    if (isStopped) return;
+    const triedList = skippedForwardList;
+    const serverByForwardList = await Promise.all(triedList.map(async (forward) => ({
+      forward, server: await listenLocalPort(forward),
+    })));
+    const takenList = serverByForwardList.filter(({ server }) => server);
+    serverList.push(...takenList.map(({ server }) => server));
+    if (isStopped) {
+      await closeServerList();
+      return;
+    }
+    skippedForwardList = serverByForwardList.filter(({ server }) => !server).map(({ forward }) => forward);
+    if (takenList.length) {
+      openedForwardList = [...openedForwardList, ...takenList.map(({ forward }) => forward)];
+      log(`[gpu-tunnel] 다른 터널이 놓은 로컬 ${formatForwardList(takenList.map(({ forward }) => forward))} 포트를 넘겨받았습니다`);
+      if (!currentClient && !reconnectTimer) {
+        setStatus({ status: TUNNEL_STATUS_MAP.connecting, detail: `${target} → 로컬 ${formatForwardList(openedForwardList)}` });
+        connect();
+      }
+    }
+    scheduleTakeover();
+  }
+
+  function scheduleTakeover() {
+    if (isStopped || takeoverTimer || !skippedForwardList.length) return;
+    takeoverTimer = setTimer(() => {
+      takeOverFreedPorts().catch((error) => log(`[gpu-tunnel] 포트 넘겨받기 실패(다시 시도): ${error.message}`));
+    }, PORT_TAKEOVER_INTERVAL_MS);
+  }
+
   async function start() {
     if (isStarted) return;
     isStarted = true;
@@ -206,22 +243,24 @@ function createGpuTunnel({
       return;
     }
     openedForwardList = openedList.map(({ forward }) => forward);
-    const skippedForwardList = serverByForwardList.filter(({ server }) => !server).map(({ forward }) => forward);
+    skippedForwardList = serverByForwardList.filter(({ server }) => !server).map(({ forward }) => forward);
 
     if (openedForwardList.length === 0) {
       setStatus({
         status: TUNNEL_STATUS_MAP.external,
         detail: forwardList.length
-          ? `로컬 ${formatForwardList(skippedForwardList)} 포트를 이미 다른 터널이 쓰고 있어 연결하지 않습니다`
+          ? `로컬 ${formatForwardList(skippedForwardList)} 포트를 이미 다른 터널이 쓰고 있어 그 터널을 씁니다(비면 넘겨받음)`
           : '로컬 포트로 부르는 GPU 서비스가 없습니다',
       });
+      scheduleTakeover();
       return;
     }
     if (skippedForwardList.length) {
-      log(`[gpu-tunnel] 로컬 ${formatForwardList(skippedForwardList)} 포트는 이미 쓰이고 있어 건너뜁니다(외부 터널)`);
+      log(`[gpu-tunnel] 로컬 ${formatForwardList(skippedForwardList)} 포트는 이미 쓰이고 있어 건너뜁니다(외부 터널, 비면 넘겨받음)`);
     }
     setStatus({ status: TUNNEL_STATUS_MAP.connecting, detail: `${target} → 로컬 ${formatForwardList(openedForwardList)}` });
     connect();
+    scheduleTakeover();
   }
 
   async function closeServerList() {
@@ -235,6 +274,8 @@ function createGpuTunnel({
     const hasOpened = serverList.length > 0 || Boolean(currentClient);
     if (reconnectTimer) clearTimer(reconnectTimer);
     reconnectTimer = null;
+    if (takeoverTimer) clearTimer(takeoverTimer);
+    takeoverTimer = null;
     const client = currentClient;
     currentClient = null;
     activeClient = null;
