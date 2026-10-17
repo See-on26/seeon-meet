@@ -70,8 +70,9 @@ test('동시 모드: 해설이 실제로 시작될 때 onPlayStart 를 부른다
   assert.deepEqual(infoList.map((info) => [info.entry.text, info.durationMs, info.wallMs]), [['지시', 2500, 5020]]);
 });
 
-test('교차 모드: 디코딩 중에 끊긴 해설은 알리지 않고 실제로 튼 답만 알린다', async () => {
-  const { context } = createFakeAudioContext();
+// 질문 답은 합성 중인 자동 해설도 끊지 않는다(QA N4). 실제로 튼 순서대로 알린다.
+test('교차 모드: 합성 중인 해설도 끊지 않고, 해설 → 답 순서로 실제로 튼 것만 알린다', async () => {
+  const { context, sourceList } = createFakeAudioContext();
   const infoList = [];
   const narrator = new CaptionNarrator({
     getLiveVideo: createVideo, createAudioContext: () => context, isCatchupDelegated: () => true,
@@ -81,7 +82,10 @@ test('교차 모드: 디코딩 중에 끊긴 해설은 알리지 않고 실제�
   narrator.queueCaption(makeEntry({ id: '지시' }));
   narrator.queueCaption(makeEntry({ id: '답', narrationClass: 'user_command' }));
   await flush();
-  assert.deepEqual(infoList.map((info) => info.entry.text), ['답']);
+  assert.deepEqual(infoList.map((info) => info.entry.text), ['지시']);
+  sourceList[0].onended();
+  await flush();
+  assert.deepEqual(infoList.map((info) => info.entry.text), ['지시', '답']);
 });
 
 test('알림을 받는 쪽이 실패해도 해설 재생은 계속된다', async () => {
