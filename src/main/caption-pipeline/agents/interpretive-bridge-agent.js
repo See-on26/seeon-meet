@@ -13,20 +13,20 @@ function createInterpretiveBridgeAgent({ config }) {
   async function generate({ jpegBuffer, utterance, recentTranscript = '',
     subKind = null, minWordCount = DEFAULT_INTERPRETATION_MIN_WORD_COUNT,
     maxWordCount = DEFAULT_INTERPRETATION_MAX_WORD_COUNT,
-    describedElementList = [], mergedAnchorList = [] }) {
+    describedElementList = [], mergedAnchorList = [], mergedClaimList = [] }) {
     const effectiveMaxChars = computeMaxChars({ maxWordCount });
     const content = await requestVlmContent({
       config, jpegBuffer, label: AGENT_LABEL, maxTokens: SLOT_AGENT_MAX_TOKENS,
       prompt: buildInterpretationPrompt({
         utterance, recentTranscript, subKind, minWordCount, maxWordCount,
-        maxChars: effectiveMaxChars, describedElementList, mergedAnchorList,
+        maxChars: effectiveMaxChars, describedElementList, mergedAnchorList, mergedClaimList,
       }),
     });
     return parseSlotCaption({
       content,
       narrationType: NARRATION_TYPE_MAP.interpretation,
       subKind: subKind || INTERPRETATION_KIND_MAP.valueToMeaning,
-      maxChars: effectiveMaxChars, maxWordCount,
+      maxChars: effectiveMaxChars, maxWordCount, hasSecondClaim: mergedClaimList.length > 0,
     });
   }
 

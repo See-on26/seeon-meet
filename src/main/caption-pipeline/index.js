@@ -40,6 +40,7 @@ const { createSessionStore } = require('./instrumentation/session-store');
 const { requestVlmContent, setVlmFallbackListener } = require('./agents/shared/vlm-gateway');
 const { createSlideTextAgent } = require('./agents/slide-text-agent');
 const { describeAgentRejection } = require('./agents/shared/caption-parser');
+const { assembleNarration } = require('./agents/shared/narration-format');
 const { createOcrClient } = require('./agents/shared/ocr-client');
 const { createSlideTextStore } = require('./orchestrator/slide-text-store');
 const { verifyValuePresence, VALUE_PRESENCE_VERDICT_MAP } = require('./orchestrator/value-presence');
@@ -988,6 +989,7 @@ function registerPipeline({ getViewerView, meetingArchive = null }) {
         minWordCount: wordBudget?.minWordCount, maxWordCount: wordBudget?.maxWordCount,
         subKind: selectedCandidate?.subKind || null,
         mergedAnchorList: selectedCandidate?.mergedAnchorList || [],
+        mergedClaimList: selectedCandidate?.mergedClaimList || [],
       };
 
       const extraArgByTypeMap = {
@@ -998,10 +1000,11 @@ function registerPipeline({ getViewerView, meetingArchive = null }) {
       };
       const agent = agentFieldMap[narrationType] || agentFieldMap[NARRATION_TYPE_MAP.deixis];
       const {
-        text, isGrounded, slotMap, rejectKind = null, rejectReason = '', rawContent = '',
+        text: generatedText, isGrounded, slotMap, rejectKind = null, rejectReason = '', rawContent = '',
       } = await agent.generate({
         ...generatorArgs, ...(extraArgByTypeMap[narrationType] || {}),
       });
+      let text = generatedText;
       await appendRecord({
         kind: RECORD_KIND_MAP.deixis, ts, utterance, caption: text, isGrounded, judgeReason, slideLabel,
         routerMode: config.routerMode, narrationType, subKind: selectedCandidate?.subKind || null,
@@ -1019,13 +1022,14 @@ function registerPipeline({ getViewerView, meetingArchive = null }) {
       }
       if (narrationType === NARRATION_TYPE_MAP.interpretation && slotMap?.value) {
         const slideText = slideTextStore.get(slideLabel);
-        const valueVerdict = await verifyValuePresence({
-          value: slotMap.value, slideText: slideText.text, slideTextStatus: slideText.status,
+        const verifyValueOnSlide = (value) => verifyValuePresence({
+          value, slideText: slideText.text, slideTextStatus: slideText.status,
           utterance, contextText: [beforeText, afterText].filter(Boolean).join(' '),
           subKind: selectedCandidate?.subKind || INTERPRETATION_KIND_MAP.valueToMeaning,
           // 값이 없다고 나오면 지금 화면을 OCR 과 다른 엔진(VLM)으로 다시 읽어, 클릭으로 나타난 값과 OCR 오독을 함께 거른다.
           retranscribe: () => slideTextAgent.transcribeWithVlm({ jpegBuffer: Buffer.from(buffer) }),
         });
+        const valueVerdict = await verifyValueOnSlide(slotMap.value);
         const verdictByValueMap = {
           [VALUE_PRESENCE_VERDICT_MAP.present]: DEBUG_VERDICT_MAP.pass,
           [VALUE_PRESENCE_VERDICT_MAP.absent]: DEBUG_VERDICT_MAP.skip,
@@ -1043,6 +1047,21 @@ function registerPipeline({ getViewerView, meetingArchive = null }) {
             narrationType, subKind: selectedCandidate?.subKind || null, skipReason: 'value-absent',
           });
           return { isOk: true, isGrounded: false };
+        }
+        // 둘째 변화의 값이 화면에 없으면 둘째 쌍만 빼고 첫 쌍으로 읽는다.
+        if (slotMap.value2 && text.includes(slotMap.value2)) {
+          const secondVerdict = await verifyValueOnSlide(slotMap.value2);
+          if (secondVerdict.verdict === VALUE_PRESENCE_VERDICT_MAP.absent) {
+            const firstPair = assembleNarration({
+              narrationType, subKind: selectedCandidate?.subKind, rawSlotMap: { ...slotMap, target2: '', value2: '' },
+            });
+            markDebug({
+              stage: DEBUG_STAGE_MAP.valueCheck, verdict: DEBUG_VERDICT_MAP.skip, ts, narrationType,
+              reason: '둘째 값 존재 검사 absent — 첫 쌍만 읽음',
+              detail: `값="${slotMap.value2}"${secondVerdict.reason ? ` · ${secondVerdict.reason}` : ''} → "${firstPair?.text || text}"`,
+            });
+            text = firstPair?.text || text;
+          }
         }
       }
       markDebug({
@@ -1062,7 +1081,9 @@ function registerPipeline({ getViewerView, meetingArchive = null }) {
         rationale: {
           utterance,
           subKind: selectedCandidate?.subKind || null,
-          summary: `근거 표현=${[selectedCandidate?.anchor, ...(selectedCandidate?.mergedAnchorList || [])].filter(Boolean).join(', ') || '(없음)'}`
+          summary: `근거 표현=${[
+            selectedCandidate?.anchor, ...(selectedCandidate?.mergedAnchorList || []), ...(selectedCandidate?.mergedClaimList || []),
+          ].filter(Boolean).join(', ') || '(없음)'}`
             + `${hasPointingRegion ? ' · 필기/포인터 영역 있음' : ''}`,
         },
       });

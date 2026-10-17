@@ -85,6 +85,20 @@ function resolveCandidateList({ candidateList, nowTs = Date.now() }) {
       .map((candidate) => (isAbsorber({ candidate }) ? { ...candidate, mergedAnchorList } : candidate));
   }
 
+  // 변화·비교 후보가 둘 이상이면 첫 후보로 해설 하나를 만들되, 나머지 표현을 넘겨 대상이 다르면 그 값까지 담게 한다
+  // ("응답 속도가 빨라졌습니다. 만족도도 올랐습니다"에서 만족도 값이 버려지지 않게).
+  const claimList = survivorList.filter((candidate) => isClaimToValue({ candidate }));
+  if (claimList.length > 1) {
+    const [firstClaim, ...restClaimList] = claimList;
+    const mergedClaimList = restClaimList
+      .map((candidate) => candidate.anchor)
+      .filter((anchor) => typeof anchor === 'string' && anchor.trim());
+    for (const candidate of restClaimList) drop({ candidate, skipReason: SKIP_REASON_MAP.mergedIntoOther });
+    survivorList = survivorList
+      .filter((candidate) => !restClaimList.includes(candidate))
+      .map((candidate) => (candidate === firstClaim ? { ...candidate, mergedClaimList } : candidate));
+  }
+
   const resolvedList = [...survivorList].sort((left, right) => (
     readOrder({ candidate: left }) - readOrder({ candidate: right }) || left.ts - right.ts
   ));
