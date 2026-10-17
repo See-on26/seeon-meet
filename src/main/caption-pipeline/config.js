@@ -25,8 +25,6 @@ const DEFAULT_SUMMARY_MODEL_ID = 'anthropic.claude-opus-4-7';
 
 const DEFAULT_GAP_QUALITY_MODEL_ID = 'anthropic.claude-opus-4-7';
 
-// GPU VLM 이 응답하지 못할 때 같은 프롬프트·이미지를 보낼 Bedrock 모델. ensureUsPrefix 가 us. 를 붙인다.
-const DEFAULT_VLM_FALLBACK_MODEL_ID = 'anthropic.claude-haiku-4-5-20251001-v1:0';
 
 // ASR 전사 언어. auto 는 GPU 서버가 ko·en 중 감지 확률이 높은 쪽으로 전사한다.
 const ASR_LANGUAGE_LIST = ['ko', 'en', 'auto'];
@@ -110,7 +108,8 @@ function readPipelineConfig(env = process.env) {
     bedrockModelId,
     bedrockApiKey: env.AWS_BEARER_TOKEN_BEDROCK || '',
     judgeModelId,
-    // 판정 GPU LLM 은 VLM 과 따로 띄운 경량 모델(Qwen3.5-9B)에 글만 보낸다. Bedrock judgeModelId 는 GPU 실패 때 폴백이다.
+    // 판정 GPU LLM 은 VLM 과 따로 띄운 경량 모델(Qwen3.5-9B)에 글만 보낸다. 실패해도 Bedrock 으로 넘기지 않는다.
+    // judgeModelId 는 판정 백엔드를 bedrock 으로 골랐을 때와 균형 모드 삽입 위치 추론에 쓴다.
     judgeBackend: readJudgeBackend({ env }),
     judgeGpuUrl: env.SEEON_JUDGE_GPU_URL || DEFAULT_JUDGE_GPU_URL,
     judgeGpuModel: env.SEEON_JUDGE_GPU_MODEL || DEFAULT_JUDGE_GPU_MODEL,
@@ -126,8 +125,6 @@ function readPipelineConfig(env = process.env) {
     routerMode: env.SEEON_ROUTER_MODE || DEFAULT_ROUTER_MODE,
     // 추상적 척도 해설(화면에 보이는 대상의 정도)은 기본으로 켠다. 'false' 로 두면 척도 후보를 생성하지 않는다.
     isScaleEnabled: env.SEEON_ROUTER_SCALE_ENABLED !== 'false',
-    isVlmFallbackEnabled: env.SEEON_VLM_FALLBACK_ENABLED !== 'false',
-    vlmFallbackModelId: env.SEEON_BEDROCK_VLM_FALLBACK_MODEL_ID || DEFAULT_VLM_FALLBACK_MODEL_ID,
     hasBedrockCredentials:
       Boolean(env.AWS_BEARER_TOKEN_BEDROCK)
       || Boolean(env.AWS_ACCESS_KEY_ID && env.AWS_SECRET_ACCESS_KEY)

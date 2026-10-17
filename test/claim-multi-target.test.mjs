@@ -8,7 +8,6 @@ const { resolveNarrationEventVideoTimeMs, toNarrationCandidateList } = require('
 const { buildInterpretationPrompt } = require('../src/main/caption-pipeline/prompts/interpretive-bridge.js');
 const { assembleNarration } = require('../src/main/caption-pipeline/agents/shared/narration-format.js');
 const { createInterpretiveBridgeAgent } = require('../src/main/caption-pipeline/agents/interpretive-bridge-agent.js');
-const { resetVlmCircuit } = require('../src/main/caption-pipeline/agents/shared/vlm-gateway.js');
 
 // 한 결정(조각을 합친 한 발화)에 변화·비교 후보가 둘이면 첫 번째만 해설되고 둘째는 버려졌다.
 // 실험실 A-2 "응답 속도는 작년보다 훨씬 빨라졌습니다. 만족도도 꽤 많이 올랐습니다." 13회 모두 만족도 값이 빠짐.
@@ -67,7 +66,7 @@ test('두 쌍이 어절 예산을 넘으면 첫 쌍만 읽는다', () => {
 
 const vlmConfig = { vlmUrl: 'http://x', vlmModel: 'm', bedrockApiKey: '' };
 const originalFetch = globalThis.fetch;
-afterEach(() => { globalThis.fetch = originalFetch; resetVlmCircuit(); });
+afterEach(() => { globalThis.fetch = originalFetch; });
 
 test('수치 에이전트는 둘째 변화를 프롬프트·칸에 싣고 두 쌍 해설을 돌려준다', async () => {
   const requestBodyList = [];

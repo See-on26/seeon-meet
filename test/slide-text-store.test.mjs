@@ -5,7 +5,6 @@ import { createRequire } from 'node:module';
 const require = createRequire(import.meta.url);
 const { createSlideTextStore, SLIDE_TEXT_STATUS_MAP } = require('../src/main/caption-pipeline/orchestrator/slide-text-store.js');
 const { createSlideTextAgent } = require('../src/main/caption-pipeline/agents/slide-text-agent.js');
-const { resetVlmCircuit } = require('../src/main/caption-pipeline/agents/shared/vlm-gateway.js');
 
 const jpegBuffer = Buffer.from('x');
 
@@ -86,7 +85,7 @@ test('빈 라벨은 무시하고, reset 하면 비운다', async () => {
 });
 
 const originalFetch = globalThis.fetch;
-afterEach(() => { globalThis.fetch = originalFetch; resetVlmCircuit(); });
+afterEach(() => { globalThis.fetch = originalFetch; });
 
 function mockVlm(content) {
   globalThis.fetch = async () => ({ ok: true, status: 200, json: async () => ({ choices: [{ message: { content } }] }) });

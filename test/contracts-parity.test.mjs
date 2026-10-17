@@ -26,9 +26,9 @@ test('디버그 단계 enum 은 main 과 렌더러가 같다', () => {
   assert.deepEqual(rendererConstants.DEBUG_STAGE_MAP, mainDebugEvents.DEBUG_STAGE_MAP);
 });
 
-test('값 검사·VLM 폴백 디버그 단계가 있다', () => {
+test('값 검사 디버그 단계가 있고, 없앤 VLM 폴백 단계는 없다', () => {
   assert.equal(mainDebugEvents.DEBUG_STAGE_MAP.valueCheck, 'value_check');
-  assert.equal(mainDebugEvents.DEBUG_STAGE_MAP.vlmFallback, 'vlm_fallback');
+  assert.equal(mainDebugEvents.DEBUG_STAGE_MAP.vlmFallback, undefined);
 });
 
 test('컨텍스트·질문 디버그 단계가 있다', () => {
