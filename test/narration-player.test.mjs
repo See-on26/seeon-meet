@@ -79,33 +79,36 @@ test('동시 모드: 재생 중에 순위 높은 자동 해설이 와도 끊지 
   assert.deepEqual(startedIdList(sourceList), ['화자', '전환', '무발화']);
 });
 
-test('동시 모드: 질문 답이 오면 재생 중인 자동 해설을 멈추고 답을 바로 재생한다', async () => {
+// QA: 수동 AD 가 오면 재생 중인 자동 AD 는 끝까지 들려주고, 그다음 수동 AD 를 바로 낸다(끊어서 겹쳐 들리지 않게).
+test('동시 모드: 질문 답이 와도 재생 중인 자동 해설을 끊지 않고, 끝나면 대기 중인 자동 해설보다 먼저 답을 재생한다', async () => {
   const { mixer, sourceList, dropList } = createMixer();
   mixer.queueCaption(makeEntry({ id: '지시' }));
   await flush();
   mixer.queueCaption(makeEntry({ id: '대기 발화', narrationClass: 'speech_based' }));
   mixer.queueCaption(makeEntry({ id: '답', narrationClass: 'user_command' }));
   await flush();
-
-  assert.equal(sourceList[0].isStopped, true);
-  assert.deepEqual(startedIdList(sourceList), ['지시', '답']);
-  assert.deepEqual(dropList.map((drop) => [drop.entry.text, drop.reason]), [['지시', QUEUE_DROP_REASON_MAP.interrupted]]);
+  assert.equal(sourceList[0].isStopped, false);
+  assert.deepEqual(startedIdList(sourceList), ['지시']);
 
   sourceList[0].onended();
   await flush();
-  assert.deepEqual(startedIdList(sourceList), ['지시', '답'], '멈춘 해설의 ended 는 다음 재생을 부르지 않는다');
+  assert.deepEqual(startedIdList(sourceList), ['지시', '답']);
 
   sourceList[1].onended();
   await flush();
   assert.deepEqual(startedIdList(sourceList), ['지시', '답', '대기 발화']);
+  assert.deepEqual(dropList, []);
 });
 
-test('동시 모드: 디코딩 중에 끊긴 해설은 시작하지 않는다', async () => {
+test('동시 모드: 합성·디코딩 중인 자동 해설도 끊지 않고 답은 그 뒤에 재생한다', async () => {
   const { mixer, sourceList } = createMixer();
   mixer.queueCaption(makeEntry({ id: '지시' }));
   mixer.queueCaption(makeEntry({ id: '답', narrationClass: 'user_command' }));
   await flush();
-  assert.deepEqual(startedIdList(sourceList), ['답']);
+  assert.deepEqual(startedIdList(sourceList), ['지시']);
+  sourceList[0].onended();
+  await flush();
+  assert.deepEqual(startedIdList(sourceList), ['지시', '답']);
 });
 
 test('동시 모드: 대기 줄이 비면 회의 소리 덕킹을 푼다', async () => {
@@ -183,21 +186,24 @@ test('교차 모드: 질문 답은 회의 영상을 멈추지 않고 소리만 �
   assert.equal(narrator.getSicState().isInserting, false);
 });
 
-test('교차 모드: 자동 해설 중 질문 답이 오면 해설을 끊고 영상을 다시 틀어 소리를 줄인 채 답한다', async () => {
+test('교차 모드: 자동 해설 중 질문 답이 오면 해설을 끝까지 들려준 뒤 영상을 다시 틀어 소리를 줄인 채 답한다', async () => {
   const { narrator, context, sourceList, video, dropList } = createNarrator({ isCatchupDelegated: false });
   narrator.queueCaption(makeEntry({ id: '지시', durationSec: 3 }));
   await flush();
-  assert.equal(video.paused, true);
-
-  context.currentTime = 1.02;
   narrator.queueCaption(makeEntry({ id: '답', narrationClass: 'user_command' }));
   await flush();
-  assert.equal(sourceList[0].isStopped, true);
+  assert.equal(sourceList[0].isStopped, false);
+  assert.deepEqual(startedIdList(sourceList), ['지시']);
+  assert.equal(video.paused, true);
+
+  context.currentTime = 3.02;
+  sourceList[0].onended();
+  await flush();
   assert.deepEqual(startedIdList(sourceList), ['지시', '답']);
   assert.equal(video.paused, false);
   assert.ok(video.volume < 0.3);
-  assert.ok(video.playbackRate > 1.0, '멈췄던 1초를 따라잡는다');
-  assert.deepEqual(dropList.map((drop) => [drop.entry.text, drop.reason]), [['지시', QUEUE_DROP_REASON_MAP.interrupted]]);
+  assert.ok(video.playbackRate > 1.0, '해설로 멈췄던 3초를 따라잡는다');
+  assert.deepEqual(dropList, []);
   narrator.stop();
 });
 
@@ -235,13 +241,16 @@ test('동시 모드: 한꺼번에 넣은 해설은 첫 항목부터 틀지 않�
   assert.deepEqual(startedIdList(sourceList), ['전환']);
 });
 
-test('교차 모드: 한꺼번에 넣은 해설 안에 질문 답이 있으면 재생 중인 자동 해설을 끊는다', async () => {
+test('교차 모드: 한꺼번에 넣은 해설 안에 질문 답이 있어도 재생 중인 자동 해설을 끊지 않고 답을 다음에 재생한다', async () => {
   const { narrator, sourceList } = createNarrator();
   narrator.queueCaption(makeEntry({ id: '지시' }));
   await flush();
   narrator.queueCaptionList([makeEntry({ id: '발화', narrationClass: 'speech_based' }), makeEntry({ id: '답', narrationClass: 'user_command' })]);
   await flush();
-  assert.equal(sourceList[0].isStopped, true);
+  assert.equal(sourceList[0].isStopped, false);
+  assert.deepEqual(startedIdList(sourceList), ['지시']);
+  sourceList[0].onended();
+  await flush();
   assert.deepEqual(startedIdList(sourceList), ['지시', '답']);
 });
 
