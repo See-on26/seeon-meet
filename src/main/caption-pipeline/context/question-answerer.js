@@ -9,6 +9,8 @@ const {
 const NOT_FOUND_TEXT = '화면과 발화에 없는 내용이에요';
 const NO_IMAGE_TEXT = '그 화면의 그림 정보는 남아 있지 않아요';
 const SPEAKER_UNKNOWN_TEXT = '지금 말하는 사람을 확인하지 못했어요';
+// 회의와 관계없는 질문(정치·날씨·일반 상식 등)은 화면·발화를 뒤지지 않고 이 문구로 답한다.
+const OFF_TOPIC_TEXT = '회의와 관련된 질문에만 답할 수 있어요';
 
 const ANSWER_MAX_TOKENS = 300;
 const SPEAKER_WINDOW_MS = 10 * 60 * 1000;
@@ -155,10 +157,11 @@ function createQuestionAnswerer({ requestText, requestImage, readImage, contextS
     }
     if (route === QUESTION_ROUTE_MAP.narrationReplay) return answerNarrationReplay({ questionText, heardVideoTimeMs });
     if (route === QUESTION_ROUTE_MAP.meetingFlow) return answerMeetingFlow({ questionText, wordBudget });
+    if (route === QUESTION_ROUTE_MAP.none) return { text: OFF_TOPIC_TEXT, isGrounded: true, isImageUsed: false };
     return notFound();
   }
 
   return { answer };
 }
 
-module.exports = { createQuestionAnswerer, NOT_FOUND_TEXT, NO_IMAGE_TEXT, SPEAKER_UNKNOWN_TEXT };
+module.exports = { createQuestionAnswerer, NOT_FOUND_TEXT, NO_IMAGE_TEXT, SPEAKER_UNKNOWN_TEXT, OFF_TOPIC_TEXT };
