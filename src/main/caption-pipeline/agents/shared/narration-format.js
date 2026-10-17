@@ -279,8 +279,9 @@ function dropValuelessTailItem({ text }) {
   return itemList.join(', ');
 }
 
+// 끝 문장부호("…막대 그래프.")는 떼고 본다. 붙은 채 보면 받을 수 있는 길이의 묘사도 미완결로 버려진다.
 function hasCompleteTailNoun({ text, tailNounList = DESCRIPTION_TAIL_NOUN_LIST }) {
-  const last = String(text || '').trim().split(/\s+/).pop() || '';
+  const last = String(text || '').trim().replace(TRAILING_PUNCTUATION_PATTERN, '').split(/\s+/).pop() || '';
   return tailNounList.some((noun) => last.endsWith(noun));
 }
 
