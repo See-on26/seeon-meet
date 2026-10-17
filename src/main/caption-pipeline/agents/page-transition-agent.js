@@ -1,6 +1,6 @@
 const { NARRATION_TYPE_MAP, PAGE_TRANSITION_KIND_MAP } = require('../contracts/narration-types');
 const {
-  getSlotList, truncateSlot, normalizeSlotMap, DESCRIPTION_TAIL_NOUN_LIST, hasCompleteTailNoun,
+  getSlotList, truncateSlot, normalizeSlotMap, DESCRIPTION_TAIL_NOUN_LIST, hasCompleteTailNoun, countWord,
 } = require('./shared/narration-format');
 const { truncateToWordCount, containsHanCharacter } = require('./shared/caption-parser');
 const { requestVlmContent } = require('./shared/vlm-gateway');
@@ -76,17 +76,41 @@ function parsePageTransitionText(text) {
   return null;
 }
 
+// 묘사가 길면 자료 명사 앞에서 잘려 버려진다. 그때만 앞 답을 보여 주고 한 번 짧게 다시 묻는다.
+function buildRetryLine({ rawDescription, maxWordCount }) {
+  return `앞 답의 묘사 "${rawDescription}"는 ${countWord({ text: rawDescription })}어절로 길다.`
+    + ` 같은 화면을 ${maxWordCount}어절 이내로, 자료 명사(슬라이드·그래프·표·지도 등)로 끝나게 다시 써라.`;
+}
+
 function createPageTransitionAgent({ config }) {
-  async function generate({ jpegBuffer, ts, minWordCount, maxWordCount }) {
+  async function requestNarration({ jpegBuffer, ts, prompt }) {
     const content = await requestVlmContent({
-      config, jpegBuffer, label: AGENT_LABEL, maxTokens: PAGE_TRANSITION_MAX_TOKENS,
-      prompt: buildPageTransitionPrompt({ minWordCount, maxWordCount }),
+      config, jpegBuffer, label: AGENT_LABEL, maxTokens: PAGE_TRANSITION_MAX_TOKENS, prompt,
     });
     const narration = parsePageTransitionText(content);
     if (!narration) throw new Error(`VLM(${AGENT_LABEL}) 응답 파싱 실패 (ts=${ts})`);
+    return narration;
+  }
+
+  async function generate({ jpegBuffer, ts, minWordCount, maxWordCount }) {
+    const prompt = buildPageTransitionPrompt({ minWordCount, maxWordCount });
+    const first = await requestNarration({ jpegBuffer, ts, prompt });
+    let narration = first;
+    let isRetried = false;
+    if (first.rejectedReason === 'incomplete' && first.rejectedRawDescription) {
+      const retryLine = buildRetryLine({
+        rawDescription: first.rejectedRawDescription, maxWordCount: maxWordCount ?? DEFAULT_TRANSITION_MAX_WORD_COUNT,
+      });
+      const retried = await requestNarration({ jpegBuffer, ts, prompt: `${prompt}\n\n${retryLine}` }).catch(() => null);
+      if (retried?.narration) {
+        narration = retried;
+        isRetried = true;
+      }
+    }
 
     return {
       ...narration,
+      isRetried,
       pageTopic: truncateToWordCount({ text: narration.pageTopic, maxWordCount }),
     };
   }
