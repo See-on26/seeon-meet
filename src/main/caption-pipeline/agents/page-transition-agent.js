@@ -11,6 +11,11 @@ const {
 const AGENT_LABEL = '전환';
 const PAGE_TRANSITION_MAX_TOKENS = 220;
 
+function includesScreenForm({ description, screenForm }) {
+  const wordList = String(screenForm || '').split(/\s+/).filter((word) => word.length >= 2);
+  return !wordList.length || wordList.some((word) => description.includes(word));
+}
+
 function normalizePageTransition(parsed) {
   const description = typeof parsed?.description === 'string' && parsed.description.trim()
     ? parsed.description : parsed?.narration;
@@ -45,9 +50,11 @@ function normalizePageTransition(parsed) {
     rejectedRawDescription: isUsable ? '' : description.trim(),
     rejectedReason: hasHan ? 'han' : (isTailComplete ? null : 'incomplete'),
     subKind,
-    narration: !isUsable ? '' : (subKind === PAGE_TRANSITION_KIND_MAP.slide
+    // 머리말("슬라이드 N:"·"페이지:")은 orchestrator 가 붙인다. PPT 가 아닌 화면은 묘사가 화면 형태로 끝나게 지시하지만,
+    // 형태를 빠뜨리면("…논문 본문") 형태를 앞에 붙여 무슨 화면인지 잃지 않게 한다.
+    narration: !isUsable ? '' : (subKind === PAGE_TRANSITION_KIND_MAP.slide || includesScreenForm({ description: descriptionText, screenForm })
       ? descriptionText
-      : [screenForm, descriptionText].filter(Boolean).join(', ')),
+      : `${screenForm}, ${descriptionText}`),
     describedElementList: Array.isArray(parsed.describedElementList)
       ? parsed.describedElementList.filter((element) => typeof element === 'string' && element.trim())
       : [],

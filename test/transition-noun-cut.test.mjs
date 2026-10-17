@@ -56,5 +56,5 @@ test('문서형 전환 고지가 잘린 묘사로 만들어진다', () => {
     screenType: 'doc', screenForm: 'PDF 문서', pageTopic: '연봉 조정', description: BODY_GRAPH_TEXT,
   }));
   assert.equal(result.description, '반기와 수시 연봉 조정 방식을 설명한 본문');
-  assert.equal(result.narration, 'PDF 문서, 반기와 수시 연봉 조정 방식을 설명한 본문');
+  assert.equal(result.narration, 'PDF 문서, 반기와 수시 연봉 조정 방식을 설명한 본문', '묘사에 형태가 없으면 형태를 앞에 붙인다');
 });

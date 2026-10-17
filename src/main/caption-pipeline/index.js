@@ -24,7 +24,7 @@ const { selectGeneratableCandidate } = require('./orchestrator/candidate-selecto
 const { createDescribedStore } = require('./orchestrator/described-store');
 const { createScreenRegistry, SCREEN_TYPE_MAP } = require('./orchestrator/screen-registry');
 const { createSlideTopicRegistry, SLIDE_TOPIC_VERDICT_MAP } = require('./orchestrator/slide-topic-registry');
-const { buildTransitionNarration, buildRevisitNarration } = require('./orchestrator/slide-transition-text');
+const { buildTransitionNarration, buildRevisitNarration, resolveHeardSlideNumber } = require('./orchestrator/slide-transition-text');
 const { createSpeakerRegistry } = require('./orchestrator/speaker-registry');
 const { createNarrationHistory } = require('./orchestrator/narration-history');
 const {
@@ -472,9 +472,10 @@ function registerPipeline({ getViewerView, meetingArchive = null }) {
         topic: result.pageTopic, description: result.description, pageNumber: visiblePageNumber,
         isSlide: isSlideScreen,
       });
-      // 임베딩 라벨(slideLabel)은 OS 화면까지 세는 내부 번호라 들려주는 번호로 쓰지 않는다.
-      const displayNumber = slideTopicRegistry.resolveDisplayNumber({ entry: slideEntry })
-        || visiblePageNumber || null;
+      // 임베딩 라벨(slideLabel)은 OS 화면까지 세는 내부 번호라 들려주는 번호로 쓰지 않는다. 들려주는 번호는 PPT 에만 있다.
+      const displayNumber = resolveHeardSlideNumber({
+        isSlide: isSlideScreen, registryNumber: slideTopicRegistry.resolveDisplayNumber({ entry: slideEntry }), visiblePageNumber,
+      });
       markDebug({
         stage: DEBUG_STAGE_MAP.slide, verdict: DEBUG_VERDICT_MAP.info, ts,
         narrationType: NARRATION_TYPE_MAP.pageTransition,
