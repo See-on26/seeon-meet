@@ -37,7 +37,7 @@ const { createTtsClient } = require('./output/tts-client');
 const { createGapInferenceAgent, countGapCandidateSource } = require('./output/gap-inference-agent');
 const { createRecordStore, RECORD_KIND_MAP } = require('./instrumentation/record-store');
 const { createSessionStore } = require('./instrumentation/session-store');
-const { requestVlmContent, setVlmFallbackListener } = require('./agents/shared/vlm-gateway');
+const { requestVlmContent } = require('./agents/shared/vlm-gateway');
 const { createSlideTextAgent } = require('./agents/slide-text-agent');
 const { describeAgentRejection } = require('./agents/shared/caption-parser');
 const { assembleNarration } = require('./agents/shared/narration-format');
@@ -126,7 +126,7 @@ function registerPipeline({ getViewerView, meetingArchive = null }) {
   const silenceNarrator = createSilenceNarrator({ gate: silenceGate, judge: createSilenceJudge({ config }) });
   console.log(`[pipeline] 발화 축 판정 경로: ${config.routerMode}`);
   console.log(`[pipeline] 탐지 판정 LLM: ${config.judgeBackend === 'gpu'
-    ? `GPU ${config.judgeGpuModel} → 실패하면 Bedrock ${config.judgeModelId}` : `Bedrock ${config.judgeModelId}`}`);
+    ? `GPU ${config.judgeGpuModel} (실패하면 판정 없이 넘어감)` : `Bedrock ${config.judgeModelId}`}`);
   console.log(`[pipeline] ASR 언어: 회의 ${config.asrLanguage} · 질문 ${config.questionAsrLanguage}`);
 
   const contextFile = createContextFileWriter({ outDir: CONTEXT_DIR });
@@ -138,7 +138,7 @@ function registerPipeline({ getViewerView, meetingArchive = null }) {
   let lastContextSnapshot = null;
   // 라벨 요청이 정지·재시작 뒤에 도착하면 새 세션의 같은 번호 슬라이드에 붙는다. 세대가 바뀌었으면 버린다.
   let contextGeneration = 0;
-  // 라벨링·질문 라우팅은 이미지 없이 GPU VLM 을 부르고, GPU 가 실패하면 Haiku 로 폴백한다.
+  // 라벨링·질문 라우팅은 이미지 없이 GPU VLM 을 부른다.
   const requestText = ({ prompt, label, maxTokens }) => requestVlmContent({
     config, prompt, label, maxTokens, temperature: 0,
   });
@@ -212,19 +212,6 @@ function registerPipeline({ getViewerView, meetingArchive = null }) {
     appendRecord({ kind: RECORD_KIND_MAP.debug, ...entry }).catch(() => {});
     getViewerView()?.webContents.send('pipeline-event', { type: 'debug', ...entry });
   }
-
-  setVlmFallbackListener(({ label, reason, isBypass, isSucceeded, elapsedMs, errorMessage }) => {
-    const situation = isBypass ? 'GPU 우회 중' : reason;
-    console.warn(`[pipeline] VLM 폴백(${config.vlmFallbackModelId}) [${label}] ${situation}`
-      + ` → ${isSucceeded ? '성공' : `실패: ${errorMessage}`} (${elapsedMs}ms)`);
-    markDebug({
-      stage: DEBUG_STAGE_MAP.vlmFallback,
-      verdict: isSucceeded ? DEBUG_VERDICT_MAP.info : DEBUG_VERDICT_MAP.fail,
-      reason: `${isBypass ? 'GPU 우회 중' : 'GPU VLM 실패'} — Bedrock 폴백 ${isSucceeded ? '성공' : '실패'}`,
-      detail: `${label} · ${situation}${isSucceeded ? '' : ` · ${errorMessage}`}`
-        + ` · ${elapsedMs}ms · 모델=${config.vlmFallbackModelId}`,
-    });
-  });
 
   // 화면 글자 읽기 방법은 설정 화면에서 고른 값이 회의마다 넘어온다. 넘어오지 않으면 .env 값이다.
   let sessionSlideTextBackend = config.slideTextBackend;

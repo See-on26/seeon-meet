@@ -7,14 +7,13 @@ const {
   createSlideTextAgent, OCR_MIN_MEAN_SCORE, OCR_MAX_VERTICAL_BOX_RATIO, OCR_BYPASS_MS,
 } = require('../src/main/caption-pipeline/agents/slide-text-agent.js');
 const { OcrRequestError } = require('../src/main/caption-pipeline/agents/shared/ocr-client.js');
-const { resetVlmCircuit } = require('../src/main/caption-pipeline/agents/shared/vlm-gateway.js');
 
 const jpegBuffer = Buffer.from('x');
 const vlmConfig = { vlmUrl: 'http://x', vlmModel: 'm', bedrockApiKey: '' };
 const originalFetch = globalThis.fetch;
 let vlmCallCount = 0;
 
-afterEach(() => { globalThis.fetch = originalFetch; resetVlmCircuit(); vlmCallCount = 0; });
+afterEach(() => { globalThis.fetch = originalFetch; vlmCallCount = 0; });
 
 function mockVlm(content) {
   globalThis.fetch = async () => {

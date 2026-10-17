@@ -5,7 +5,6 @@ import { createRequire } from 'node:module';
 const require = createRequire(import.meta.url);
 const { hasCompleteTailNoun } = require('../src/main/caption-pipeline/agents/shared/narration-format.js');
 const { createPageTransitionAgent, parsePageTransitionText } = require('../src/main/caption-pipeline/agents/page-transition-agent.js');
-const { resetVlmCircuit } = require('../src/main/caption-pipeline/agents/shared/vlm-gateway.js');
 
 // 실험실 전환 351개 중 14개가 "묘사가 완결되지 않아" 버려졌다. 3개는 끝 마침표 때문("…막대 그래프."),
 // 11개는 묘사가 12~19어절로 길어 자료 명사 앞에서 잘렸다(시나리오 D 첫 장 4번).
@@ -18,7 +17,7 @@ test('끝 문장부호가 붙어도 자료 명사로 끝난 묘사는 완결로 
 
 const vlmConfig = { vlmUrl: 'http://x', vlmModel: 'm', bedrockApiKey: '' };
 const originalFetch = globalThis.fetch;
-afterEach(() => { globalThis.fetch = originalFetch; resetVlmCircuit(); });
+afterEach(() => { globalThis.fetch = originalFetch; });
 
 const LONG = '2014년부터 인프라 구축을 위한 시범 사업 및 실증 사업 시행 중 현황을 정리한 슬라이드';
 
