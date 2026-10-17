@@ -1,12 +1,14 @@
 const path = require('path');
 const { LAB_MODE_LABEL_MAP } = require('../lab-mode');
+const { GAP_REQUEST_BY_MODE_MAP } = require('../../caption-pipeline/output/gap-inference-agent');
 
 // 모델 이름과 엔드포인트만 남긴다. 토큰·키 같은 비밀값은 목록에 없어서 실리지 않는다.
 // 판단 LLM 은 VLM 과 따로 띄운 GPU 서버(judgeGpuUrl)가 답한다. judgeModelId 는 판정 백엔드를 bedrock 으로 골랐을 때만 판정에 쓴다.
+// 삽입 위치 추론도 같은 GPU 서버(judgeGpuModel)가 답하고, 모드별 사고 여부·한도·시간은 gapRequestByModeMap 에 남긴다.
 const MODEL_CONFIG_KEY_LIST = [
   'vlmUrl', 'vlmModel', 'asrUrl', 'ttsUrl', 'ttsLongUrl', 'embedUrl', 'bedrockRegion', 'bedrockModelId',
   'judgeBackend', 'judgeGpuUrl', 'judgeGpuModel', 'judgeModelId',
-  'summaryModelId', 'summaryRewriteModelId', 'gapModelByModeMap', 'routerMode', 'isScaleEnabled', 'hasBedrockCredentials',
+  'summaryModelId', 'summaryRewriteModelId', 'gapRequestByModeMap', 'routerMode', 'isScaleEnabled', 'hasBedrockCredentials',
 ];
 
 const ENDPOINT_KEY_LIST = ['vlmUrl', 'asrUrl', 'ttsUrl', 'ttsLongUrl', 'embedUrl', 'judgeGpuUrl'];
@@ -23,8 +25,9 @@ function toEndpointUrl(value) {
   return `${url.protocol}//${url.host}${url.pathname}`;
 }
 
+// 삽입 위치 추론의 모드별 설정은 파이프라인 설정이 아니라 에이전트 상수라 여기서 붙인다.
 function pickModelConfig(config) {
-  const source = config || {};
+  const source = { gapRequestByModeMap: GAP_REQUEST_BY_MODE_MAP, ...(config || {}) };
   return Object.fromEntries(MODEL_CONFIG_KEY_LIST.filter((key) => key in source).map((key) => [
     key, ENDPOINT_KEY_LIST.includes(key) ? toEndpointUrl(source[key]) : source[key],
   ]));
