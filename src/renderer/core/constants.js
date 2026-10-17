@@ -106,7 +106,6 @@ export const DEBUG_STAGE_MAP = {
   tts: 'tts',
   asr: 'asr',
   valueCheck: 'value_check',
-  vlmFallback: 'vlm_fallback',
   context: 'context',
   question: 'question',
   silence: 'silence',

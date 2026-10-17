@@ -9,7 +9,6 @@ const {
 const { createDeixisResolutionAgent } = require('../src/main/caption-pipeline/agents/deixis-resolution-agent.js');
 const { createInterpretiveBridgeAgent } = require('../src/main/caption-pipeline/agents/interpretive-bridge-agent.js');
 const { createVisualDescriptionAgent } = require('../src/main/caption-pipeline/agents/visual-description-agent.js');
-const { resetVlmCircuit } = require('../src/main/caption-pipeline/agents/shared/vlm-gateway.js');
 const { createSilenceNarrator, SILENCE_RESULT_MAP } = require('../src/main/caption-pipeline/orchestrator/silence-narrator.js');
 const { createSilenceNarrationGate } = require('../src/main/caption-pipeline/orchestrator/silence-gate.js');
 
@@ -70,7 +69,7 @@ test('기록·흐름 창에 쓸 거절 설명: 이유가 있으면 그 이유, �
 const vlmConfig = { vlmUrl: 'http://x', vlmModel: 'm', bedrockApiKey: '' };
 const originalFetch = globalThis.fetch;
 let requestBodyList = [];
-afterEach(() => { globalThis.fetch = originalFetch; resetVlmCircuit(); requestBodyList = []; });
+afterEach(() => { globalThis.fetch = originalFetch; requestBodyList = []; });
 
 function mockVlm(content) {
   globalThis.fetch = async (_url, option) => {

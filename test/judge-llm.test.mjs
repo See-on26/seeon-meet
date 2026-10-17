@@ -3,9 +3,8 @@ import assert from 'node:assert/strict';
 import { createRequire } from 'node:module';
 
 const require = createRequire(import.meta.url);
-const {
-  createJudgeLlm, toChatMessageList, JUDGE_SOURCE_MAP, GPU_JUDGE_BYPASS_MS,
-} = require('../src/main/caption-pipeline/agents/shared/judge-llm.js');
+const judgeLlmModule = require('../src/main/caption-pipeline/agents/shared/judge-llm.js');
+const { createJudgeLlm, toChatMessageList, JUDGE_SOURCE_MAP } = judgeLlmModule;
 const { readPipelineConfig } = require('../src/main/caption-pipeline/config.js');
 
 const gpuConfig = {
@@ -69,48 +68,32 @@ test('GPU 백엔드면 GPU LLM 에 추론 없이(enable_thinking false) 온도 0
   assert.ok(call.hasSignal);
 });
 
-test('GPU 가 실패하면 같은 판정을 Bedrock(judgeModelId)으로 보내고, 잠시 GPU 를 건너뛴다', async () => {
-  let nowMs = 1000;
-  const gpu = createGpuFetch({ error: new Error('connect ECONNREFUSED') });
-  const converse = createConverse({ text: '{"cue":false}' });
-  const judgeLlm = createJudgeLlm({
-    config: gpuConfig, fetchImpl: gpu.fetchImpl, requestConverse: converse.requestConverse, now: () => nowMs, log: () => {},
-  });
-  assert.deepEqual(await judgeLlm.requestText(request), { text: '{"cue":false}', source: JUDGE_SOURCE_MAP.bedrock });
-  assert.equal(converse.callList[0].modelId, gpuConfig.judgeModelId);
-  assert.equal(converse.callList[0].systemPrompt, '판정 규칙');
-  assert.equal(converse.callList[0].messageList, fewShotMessageList);
-
-  nowMs += GPU_JUDGE_BYPASS_MS - 1;
-  await judgeLlm.requestText(request);
-  assert.equal(gpu.callList.length, 1, '우회 창 안에서는 GPU 를 부르지 않는다');
-
-  nowMs += 2;
-  await judgeLlm.requestText(request);
-  assert.equal(gpu.callList.length, 2, '우회 창이 지나면 다시 GPU 를 먼저 부른다');
-});
-
-test('GPU 가 빈 답이나 HTTP 오류를 내도 Bedrock 으로 넘긴다', async () => {
-  for (const gpu of [createGpuFetch({ content: '   ' }), createGpuFetch({ status: 503 })]) {
-    const converse = createConverse({ text: '{"cue":true}' });
-    const judgeLlm = createJudgeLlm({ config: gpuConfig, fetchImpl: gpu.fetchImpl, requestConverse: converse.requestConverse, log: () => {} });
-    assert.equal((await judgeLlm.requestText(request)).source, JUDGE_SOURCE_MAP.bedrock);
+// QA: GPU 판정(9B)이 실패할 때 Claude(Bedrock)로 넘기던 폴백을 없애고 GPU 서버만 쓴다.
+test('GPU 백엔드는 GPU 가 실패하거나 빈 답을 내면 Bedrock 키가 있어도 Claude 로 넘기지 않고 오류를 던진다', async () => {
+  for (const gpu of [createGpuFetch({ error: new Error('connect ECONNREFUSED') }), createGpuFetch({ content: '   ' }), createGpuFetch({ status: 503 })]) {
+    const converse = createConverse();
+    const judgeLlm = createJudgeLlm({ config: gpuConfig, fetchImpl: gpu.fetchImpl, requestConverse: converse.requestConverse });
+    await assert.rejects(judgeLlm.requestText(request), /ECONNREFUSED|빈 응답|HTTP 503/);
+    assert.equal(converse.callList.length, 0);
   }
 });
 
-test('Bedrock 키가 없으면 GPU 실패를 그대로 던진다', async () => {
-  const judgeLlm = createJudgeLlm({
-    config: { ...gpuConfig, bedrockApiKey: '' }, fetchImpl: createGpuFetch({ status: 500 }).fetchImpl, log: () => {},
-  });
-  await assert.rejects(judgeLlm.requestText(request), /HTTP 500/);
-});
-
-test('GPU·Bedrock 둘 다 실패하면 두 오류를 함께 담아 던진다', async () => {
-  const judgeLlm = createJudgeLlm({
-    config: gpuConfig, fetchImpl: createGpuFetch({ status: 500 }).fetchImpl,
-    requestConverse: createConverse({ error: new Error('Bedrock 403') }).requestConverse, log: () => {},
-  });
-  await assert.rejects(judgeLlm.requestText(request), /HTTP 500.*Bedrock 403/);
+test('GPU 판정이 한 번 실패해도 다음 판정은 바로 GPU 로 간다(건너뛰는 창이 없다)', async () => {
+  let isDown = true;
+  const callList = [];
+  const fetchImpl = async (url, init) => {
+    callList.push(url);
+    if (isDown) throw new Error('connect ECONNREFUSED');
+    return { ok: true, status: 200, json: async () => ({ choices: [{ message: { content: '{"cue":true}' } }] }) };
+  };
+  const converse = createConverse();
+  const judgeLlm = createJudgeLlm({ config: gpuConfig, fetchImpl, requestConverse: converse.requestConverse });
+  await assert.rejects(judgeLlm.requestText(request));
+  isDown = false;
+  assert.deepEqual(await judgeLlm.requestText(request), { text: '{"cue":true}', source: JUDGE_SOURCE_MAP.gpu });
+  assert.equal(callList.length, 2);
+  assert.equal(converse.callList.length, 0);
+  assert.equal('GPU_JUDGE_BYPASS_MS' in judgeLlmModule, false);
 });
 
 test('bedrock 백엔드거나 백엔드가 지정되지 않은 설정은 GPU 를 부르지 않는다', async () => {
