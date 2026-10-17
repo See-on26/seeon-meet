@@ -1,6 +1,6 @@
 import {
   FLOW_TYPE_OPTION_LIST, OUTCOME_OPTION_LIST, OUTCOME_LABEL_MAP, VERDICT_MARK_MAP,
-  formatClock, truncateText, filterFlowList, buildTimelineItemList, isNearBottom, createNodeCache, planNodeListUpdate,
+  formatClock, truncateText, describeOutcomeReason, filterFlowList, buildTimelineItemList, isNearBottom, createNodeCache, planNodeListUpdate,
 } from './flow-view.js';
 
 const $ = (id) => document.getElementById(id);
@@ -69,7 +69,7 @@ function renderCaptionOutcomeList(captionList) {
   const list = createElement('div', 'caption-outcome-list');
   list.append(...captionList.map((caption) => {
     const row = createElement('div', 'caption-outcome');
-    const text = `"${caption.text}"${caption.reason ? ` (${caption.reason})` : ''}`;
+    const text = `"${caption.text}"${caption.reason ? ` (${describeOutcomeReason(caption.reason)})` : ''}`;
     row.title = text;
     row.append(
       createElement('span', `badge outcome-${caption.kind}`, OUTCOME_LABEL_MAP[caption.kind] || caption.kind),
@@ -94,7 +94,7 @@ function renderClock(flow) {
 function renderFlowCard(flow) {
   const card = createElement('div', `card outcome-${flow.outcome.kind}`);
   const head = createElement('div', 'card-head');
-  const outcomeText = [flow.outcome.text ? `"${flow.outcome.text}"` : '', flow.outcome.reason ? `(${flow.outcome.reason})` : '']
+  const outcomeText = [flow.outcome.text ? `"${flow.outcome.text}"` : '', flow.outcome.reason ? `(${describeOutcomeReason(flow.outcome.reason)})` : '']
     .filter(Boolean).join(' ');
   const outcomeElement = createElement('span', 'outcome-text', outcomeText);
   outcomeElement.title = outcomeText;
