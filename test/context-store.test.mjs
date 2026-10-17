@@ -125,13 +125,15 @@ test('라벨을 붙이면 색인이 라벨을 쓰고, 없으면 주제·묘사�
   ]);
 });
 
-test('질문·답을 쌓고 마지막 것을 돌려준다', () => {
+test('질문·답을 쌓고 이번 회의 것을 모두 돌려준다', () => {
   const store = createContextStore();
-  assert.equal(store.getLastQa(), null);
+  assert.deepEqual(store.getQaList(), []);
   store.addQa({ ts: 1, question: 'q1', answer: 'a1', route: 'past_slide', slideMajorList: [3] });
-  store.addQa({ ts: 2, question: 'q2', answer: 'a2', route: 'speaker', slideMajorList: [], isFollowUp: true });
-  assert.equal(store.getLastQa().question, 'q2');
-  assert.equal(store.getLastQa().isFollowUp, true);
+  store.addQa({ ts: 2, question: 'q2', answer: 'a2', route: 'speaker', slideMajorList: [] });
+  const qaList = store.getQaList();
+  assert.deepEqual(qaList.map((qa) => qa.question), ['q1', 'q2']);
+  qaList[0].slideMajorList.push(9);
+  assert.deepEqual(store.getQaList()[0].slideMajorList, [3], '돌려준 목록을 고쳐도 저장소는 그대로다');
 });
 
 test('변경마다 onChange 를 부르고, 알림 오류가 저장을 막지 않는다', () => {

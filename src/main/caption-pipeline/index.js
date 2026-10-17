@@ -50,9 +50,10 @@ const { createContextFileWriter } = require('./context/context-file');
 const { buildTranscriptScript, buildScriptFileName } = require('./context/transcript-script');
 const { pickMeetingTitle } = require('../archive/meeting-archive');
 const { classifyQuestion, QUESTION_ROUTE_MAP } = require('./context/question-classifier');
-const { createQuestionRouter, selectFollowUpQa } = require('./context/question-router');
+const { createQuestionRouter } = require('./context/question-router');
+const { formatQaHistory, buildPresetQa } = require('./context/qa-history');
+const { buildCurrentScreenContextText } = require('./context/current-screen-context');
 const { createQuestionAnswerer, NOT_FOUND_TEXT } = require('./context/question-answerer');
-const { buildSlideEvidence } = require('./prompts/question-answer');
 const { OUT_DIR, CONTEXT_DIR } = require('../paths');
 
 const ASR_DRAIN_TIMEOUT_MS = 8000;
@@ -152,14 +153,6 @@ function registerPipeline({ getViewerView, meetingArchive = null }) {
     }),
     readImage: (filePath) => fs.promises.readFile(filePath).catch(() => null),
   });
-
-  function buildCurrentSlideContextText(major) {
-    const slide = major === null ? null : contextStore.getSlide(major);
-    if (!slide) return '';
-    return buildSlideEvidence({
-      slide, utteranceList: [], narrationList: [], startedAt: contextStore.getSessionInfo().startedAt,
-    });
-  }
 
   function appendRecord(record) {
     try {
@@ -1090,7 +1083,7 @@ function registerPipeline({ getViewerView, meetingArchive = null }) {
   });
 
   ipcMain.handle('pipeline-command', async (_event, { ts, buffer, command = null,
-    questionText = null, recentTranscript = '', wordBudget, eventVideoTimeMs = null }) => {
+    questionText = null, questionLabel = '', recentTranscript = '', wordBudget, eventVideoTimeMs = null }) => {
     const stage = PIPELINE_STAGE_MAP.vlm;
     const startedAt = Date.now();
     const subKind = command || 'free_question';
@@ -1109,6 +1102,12 @@ function registerPipeline({ getViewerView, meetingArchive = null }) {
         return { isOk: true, isGrounded: false };
       }
       console.log(`[pipeline] 응답 (${Date.now() - startedAt}ms) ${subKind} → "${truncateForLog(text)}"`);
+      // 프리셋 답도 다음 질문의 '앞서 오간 질문과 답'에 들어가게 쌓는다.
+      if (command) {
+        contextStore.addQa(buildPresetQa({
+          ts, command, questionLabel, text, currentSlideMajor: contextStore.getCurrentSlideMajor(),
+        }));
+      }
       markDebug({
         stage: DEBUG_STAGE_MAP.vlm, verdict: DEBUG_VERDICT_MAP.pass, ts,
         narrationType: NARRATION_TYPE_MAP.userCommand,
@@ -1133,12 +1132,12 @@ function registerPipeline({ getViewerView, meetingArchive = null }) {
     }
   });
 
-  ipcMain.handle('pipeline-question', async (_event, { ts, buffer, questionText, recentTranscript = '',
+  ipcMain.handle('pipeline-question', async (_event, { ts, buffer, questionText,
     wordBudget, currentSlideLabel = null, speakerHintNow = null, inputSource = 'typed',
     eventVideoTimeMs = null, heardWallTs = null, heardVideoTimeMs = null }) => {
     const startedAt = Date.now();
     const currentSlideMajor = toSlideMajor(currentSlideLabel) ?? contextStore.getCurrentSlideMajor();
-    const followUpQa = selectFollowUpQa({ lastQa: contextStore.getLastQa(), now: Date.now() });
+    const qaList = contextStore.getQaList();
     try {
       const ruled = classifyQuestion(questionText);
       const ruledMajor = ruled?.route === QUESTION_ROUTE_MAP.pastSlide
@@ -1147,7 +1146,7 @@ function registerPipeline({ getViewerView, meetingArchive = null }) {
       const routed = isRuledUsable
         ? { route: ruled.route, slideMajorList: ruledMajor === null ? [] : [ruledMajor], source: 'rule', reason: '' }
         : await questionRouter.route({
-          questionText, currentSlideMajor, index: contextStore.buildIndex(), followUpQa,
+          questionText, currentSlideMajor, index: contextStore.buildIndex(), qaList,
           startedAt: contextStore.getSessionInfo().startedAt,
         });
       markDebug({
@@ -1155,13 +1154,14 @@ function registerPipeline({ getViewerView, meetingArchive = null }) {
         narrationType: NARRATION_TYPE_MAP.userCommand,
         reason: `질문 갈래 ${routed.route} (${routed.source})`,
         detail: `"${questionText}" 입력=${inputSource} 대상=[${routed.slideMajorList.join(', ')}]`
-          + `${followUpQa ? ` 직전질문="${followUpQa.question}"` : ''}${routed.reason ? ` · ${routed.reason}` : ''}`,
+          + `${qaList.length ? ` 앞 질문 ${qaList.length}개` : ''}${routed.reason ? ` · ${routed.reason}` : ''}`,
       });
 
       const result = routed.route === QUESTION_ROUTE_MAP.currentScreen
         ? await agentFieldMap[NARRATION_TYPE_MAP.userCommand].generate({
-          jpegBuffer: Buffer.from(buffer), questionText, recentTranscript,
-          contextText: buildCurrentSlideContextText(currentSlideMajor),
+          jpegBuffer: Buffer.from(buffer), questionText,
+          contextText: buildCurrentScreenContextText({ contextStore, major: currentSlideMajor }),
+          qaHistoryText: formatQaHistory({ qaList, startedAt: contextStore.getSessionInfo().startedAt }),
           minWordCount: wordBudget?.minWordCount, maxWordCount: wordBudget?.maxWordCount,
         })
         : await questionAnswerer.answer({
@@ -1169,10 +1169,8 @@ function registerPipeline({ getViewerView, meetingArchive = null }) {
           heardWallTs, heardVideoTimeMs,
         });
       const text = result.isGrounded && result.text ? result.text : NOT_FOUND_TEXT;
-      // 직전 Q&A 를 실제로 라우터에 넣었을 때만 되묻기로 친다. 규칙으로 처리한 질문은 다음 되묻기를 막지 않는다.
       contextStore.addQa({
-        ts, question: questionText, answer: text, route: routed.route,
-        slideMajorList: routed.slideMajorList, isFollowUp: Boolean(followUpQa) && routed.source !== 'rule',
+        ts, question: questionText, answer: text, route: routed.route, slideMajorList: routed.slideMajorList,
       });
       await appendRecord({
         kind: RECORD_KIND_MAP.deixis, ts, utterance: questionText, caption: text,

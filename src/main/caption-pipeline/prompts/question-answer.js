@@ -1,6 +1,7 @@
 const { formatElapsed } = require('../context/clock-format');
 const { buildAnswerLengthRule } = require('./answer-length-rule');
 const { formatHeardSlideTag } = require('../context/slide-tag');
+const { keepNewestWithinChars } = require('../context/newest-within-chars');
 
 const NEED_IMAGE_TOKEN = 'NEED_IMAGE';
 const SLIDE_TEXT_EVIDENCE_LIMIT = 1500;
@@ -20,24 +21,36 @@ function buildAnswerRuleList({ minWordCount, maxWordCount, notFoundToken = 'NONE
   ];
 }
 
-function buildSlideEvidence({ slide, utteranceList, narrationList, startedAt }) {
+// 앞서 오간 질문과 답. 이어서 묻는 질문("그거 더 자세히")을 앞 대화에 이어 답하게 한다.
+function buildQaHistoryLineList({ qaHistoryText }) {
+  return qaHistoryText ? ['', '앞서 오간 질문과 답 (이어서 묻는 질문이면 참고한다):', qaHistoryText] : [];
+}
+
+function buildSlideEvidence({ slide, utteranceList, narrationList, startedAt,
+  utteranceLimit = UTTERANCE_PER_SLIDE_LIMIT, utteranceMaxChars = Infinity }) {
+  const utteranceLineList = keepNewestWithinChars({
+    lineList: utteranceList.slice(-utteranceLimit).map((utterance) => formatUtteranceLine({ utterance, startedAt })),
+    maxChars: utteranceMaxChars,
+  });
   return [
     `[${formatHeardSlideTag({ displayNumber: slide.displayNumber })}] ${slide.label?.title || slide.pageTopic || ''}`.trim(),
     slide.pageTopic ? `화면 주제: ${slide.pageTopic}` : '',
     slide.description ? `화면 묘사: ${slide.description}` : '',
     slide.slideText ? `화면 글자: ${slide.slideText.slice(0, SLIDE_TEXT_EVIDENCE_LIMIT)}` : '',
-    utteranceList.length ? '이 화면에서 오간 말 (화자는 화면 표시로 추정):' : '',
-    ...utteranceList.slice(-UTTERANCE_PER_SLIDE_LIMIT).map((utterance) => formatUtteranceLine({ utterance, startedAt })),
+    utteranceLineList.length ? '이 화면에서 오간 말 (화자는 화면 표시로 추정):' : '',
+    ...utteranceLineList,
     narrationList.length ? `들려준 해설: ${narrationList.map((narration) => narration.text).join(' / ')}` : '',
   ].filter(Boolean).join('\n');
 }
 
 // 저장 이미지가 있으면 글자 기록에서 못 찾은 답을 그림에서 다시 찾는다(텍스트 우선, 모자라면 이미지).
-function buildPastSlideAnswerPrompt({ questionText, evidenceText, minWordCount, maxWordCount, hasImage = false }) {
+function buildPastSlideAnswerPrompt({ questionText, evidenceText, minWordCount, maxWordCount, hasImage = false,
+  qaHistoryText = '' }) {
   return [
     '시각장애인 사용자가 회의 중에 지나간 화면에 대해 물었다. 아래는 그 화면에 대해 저장해 둔 기록이다.',
     '',
     evidenceText,
+    ...buildQaHistoryLineList({ qaHistoryText }),
     '',
     `질문: "${questionText}"`,
     '',
@@ -48,12 +61,13 @@ function buildPastSlideAnswerPrompt({ questionText, evidenceText, minWordCount, 
   ].join('\n');
 }
 
-function buildImageAnswerPrompt({ questionText, evidenceText, minWordCount, maxWordCount }) {
+function buildImageAnswerPrompt({ questionText, evidenceText, minWordCount, maxWordCount, qaHistoryText = '' }) {
   return [
     '이 이미지는 회의에서 앞서 공유된 화면이다. 시각장애인 사용자가 이 화면에 대해 물었다.',
     '',
     '참고 기록:',
     evidenceText,
+    ...buildQaHistoryLineList({ qaHistoryText }),
     '',
     `질문: "${questionText}"`,
     '',
@@ -61,12 +75,13 @@ function buildImageAnswerPrompt({ questionText, evidenceText, minWordCount, maxW
   ].join('\n');
 }
 
-function buildSpeakerAnswerPrompt({ questionText, utteranceText, minWordCount, maxWordCount }) {
+function buildSpeakerAnswerPrompt({ questionText, utteranceText, minWordCount, maxWordCount, qaHistoryText = '' }) {
   return [
     '시각장애인 사용자가 회의에서 누가 무슨 말을 했는지 물었다. 아래는 발언 기록이다.',
     '화자는 회의 화면의 표시로 추정한 것이다. 화자가 적히지 않은 발언은 누가 했는지 말하지 않는다.',
     '',
     utteranceText || '(발언 기록 없음)',
+    ...buildQaHistoryLineList({ qaHistoryText }),
     '',
     `질문: "${questionText}"`,
     '',
@@ -74,12 +89,13 @@ function buildSpeakerAnswerPrompt({ questionText, utteranceText, minWordCount, m
   ].join('\n');
 }
 
-function buildNarrationReplayPrompt({ questionText, narrationList }) {
+function buildNarrationReplayPrompt({ questionText, narrationList, qaHistoryText = '' }) {
   const lastIndex = narrationList.length - 1;
   return [
     '시각장애인 사용자가 앞서 들려준 화면 해설을 다시 듣고 싶어 한다. 아래는 들려준 순서대로 정리한 해설 목록이다.',
     '',
     ...narrationList.map((narration, index) => `${index + 1}. ${narration.text}${index === lastIndex ? ' (가장 최근)' : ''}`),
+    ...buildQaHistoryLineList({ qaHistoryText }),
     '',
     `질문: "${questionText}"`,
     '',
@@ -89,11 +105,12 @@ function buildNarrationReplayPrompt({ questionText, narrationList }) {
   ].join('\n');
 }
 
-function buildMeetingFlowPrompt({ questionText, flowText, minWordCount, maxWordCount }) {
+function buildMeetingFlowPrompt({ questionText, flowText, minWordCount, maxWordCount, qaHistoryText = '' }) {
   return [
     '시각장애인 사용자가 지금까지의 회의 흐름에 대해 물었다. 아래는 화면에 나온 순서대로 정리한 기록이다.',
     '',
     flowText || '(기록 없음)',
+    ...buildQaHistoryLineList({ qaHistoryText }),
     '',
     `질문: "${questionText}"`,
     '',
@@ -102,6 +119,6 @@ function buildMeetingFlowPrompt({ questionText, flowText, minWordCount, maxWordC
 }
 
 module.exports = {
-  NEED_IMAGE_TOKEN, formatUtteranceLine, buildSlideEvidence, buildPastSlideAnswerPrompt,
+  NEED_IMAGE_TOKEN, formatUtteranceLine, buildSlideEvidence, buildQaHistoryLineList, buildPastSlideAnswerPrompt,
   buildImageAnswerPrompt, buildSpeakerAnswerPrompt, buildNarrationReplayPrompt, buildMeetingFlowPrompt,
 };
