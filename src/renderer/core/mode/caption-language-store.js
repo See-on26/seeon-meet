@@ -1,3 +1,5 @@
+import { defaultUiText } from '../i18n/ui-text.js';
+
 // 캡션 언어: 사용자에게 들리는 말(자동 AD·질문 답·고정 문구·TTS·회의 요약)과 앱 화면 글자의 언어.
 // main 의 캡션 언어(caption-pipeline/contracts/caption-language.js)와 같은 값이다. 회의 받아쓰기는 늘 자동(한·영)이다.
 export const CAPTION_LANGUAGE_LIST = ['ko', 'en'];
@@ -21,9 +23,10 @@ export function isCaptionLanguageLocked({ isCaptureActive }) {
 }
 
 // 고른 언어는 다음 실행에도 남는다. 한국어가 아니면 캡처 시작 때 알린다.
-export function describeNonDefaultCaptionLanguage({ language }) {
+// 언어 이름은 어느 화면 언어에서든 그 언어로 쓴 이름(한국어·English)이다.
+export function describeNonDefaultCaptionLanguage({ language, t = defaultUiText }) {
   if (!isCaptionLanguage(language) || language === DEFAULT_CAPTION_LANGUAGE) return '';
-  return `캡션 언어: ${CAPTION_LANGUAGE_LABEL_MAP[language]}`;
+  return t('captionLanguage.nonDefault', { language: CAPTION_LANGUAGE_LABEL_MAP[language] });
 }
 
 function readStoredLanguage({ storage }) {

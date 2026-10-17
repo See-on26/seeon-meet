@@ -13,18 +13,19 @@ import { CONTEXT_TOKEN_BUDGET } from '../core/mode/context-budget.js';
 import {
   createFeatureToggleStore, FEATURE_KEY_MAP, FEATURE_KEY_LIST, FEATURE_LABEL_MAP, FEATURE_SHORTCUT_MAP,
   readFeatureKeyFromCode, listDisabledNarrationClass, isFeatureLockedDuringCapture,
-  describeDisabledFeatureBadge, describeDisabledFeatureNotice,
+  describeDisabledFeatureBadge, describeDisabledFeatureNotice, readFeatureLabel,
 } from '../core/mode/feature-toggle-store.js';
 import {
-  createQuestionPresetStore, MAX_QUESTION_PRESET_COUNT, readQuestionPresetSlotFromKey,
+  createQuestionPresetStore, MAX_QUESTION_PRESET_COUNT, readQuestionPresetSlotFromKey, readQuestionPresetText,
 } from '../core/mode/question-preset-store.js';
 import {
   createCaptionLanguageStore, CAPTION_LANGUAGE_LIST, CAPTION_LANGUAGE_LABEL_MAP, isCaptionLanguageLocked,
   describeNonDefaultCaptionLanguage,
 } from '../core/mode/caption-language-store.js';
 import {
-  createSlideTextBackendStore, SLIDE_TEXT_BACKEND_OPTION_LIST, SLIDE_TEXT_BACKEND_LABEL_MAP,
+  createSlideTextBackendStore, SLIDE_TEXT_BACKEND_OPTION_LIST, readSlideTextBackendLabel,
 } from '../core/mode/slide-text-backend-store.js';
+import { createUiText, applyUiTextToDom } from '../core/i18n/ui-text.js';
 
 import { DelayBuffer, isCaptionDroppable, EXCESS_DROP_MS } from '../core/audio-renderer/delay-buffer.js';
 import { StreamDelaySource } from '../core/audio-renderer/stream-delay-source.js';
@@ -130,6 +131,10 @@ function readLocalStorage() {
 
 const featureToggleStore = createFeatureToggleStore({ storage: readLocalStorage() });
 const captionLanguageStore = createCaptionLanguageStore({ storage: readLocalStorage() });
+// 앱 화면 글자는 캡션 언어를 따른다. t 는 부를 때마다 지금 언어를 읽는다.
+const t = createUiText({ getLanguage: () => captionLanguageStore.get() });
+document.documentElement.lang = captionLanguageStore.get();
+applyUiTextToDom({ root: document, t });
 const slideTextBackendStore = createSlideTextBackendStore({ storage: readLocalStorage() });
 const questionPresetStore = createQuestionPresetStore({ storage: readLocalStorage() });
 const isNarrationEntryEnabled = (entry) => featureToggleStore.isClassOn(entry.narrationClass);
@@ -162,6 +167,7 @@ const narrator = new CaptionNarrator({
   prepareAudio: (entry) => narrationAudio.take(entry),
   getLiveVideo: getPlaybackVideo,
   onStatus: handleNarrationStatus,
+  t,
   onDrop: handleNarrationDrop,
   onPlayStart: reportNarrationPlayStart,
   isEntryEnabled: isNarrationEntryEnabled,
@@ -185,13 +191,13 @@ function markDebug({ stage, verdict, reason, detail = '', narrationType = null }
 }
 
 const LOG_TAG_MAP = {
-  'page-transition': { aid: 'A1', label: '페이지 전환' },
-  [NARRATION_TYPE_MAP.pageTransition]: { aid: 'A1', label: '페이지 전환' },
-  [NARRATION_TYPE_MAP.deixis]: { aid: 'A2', label: '지시 대상' },
-  [NARRATION_TYPE_MAP.interpretation]: { aid: 'A3', label: '수치 의미' },
-  [NARRATION_TYPE_MAP.visualDescription]: { aid: 'A4', label: '시각 정보' },
-  [NARRATION_TYPE_MAP.userCommand]: { aid: 'Q', label: '명령 응답' },
-  [NARRATION_TYPE_MAP.speakerIdentity]: { aid: 'S', label: '발화자' },
+  'page-transition': { aid: 'A1', labelKey: 'card.pageTransition' },
+  [NARRATION_TYPE_MAP.pageTransition]: { aid: 'A1', labelKey: 'card.pageTransition' },
+  [NARRATION_TYPE_MAP.deixis]: { aid: 'A2', labelKey: 'card.deixis' },
+  [NARRATION_TYPE_MAP.interpretation]: { aid: 'A3', labelKey: 'card.interpretation' },
+  [NARRATION_TYPE_MAP.visualDescription]: { aid: 'A4', labelKey: 'card.visualDescription' },
+  [NARRATION_TYPE_MAP.userCommand]: { aid: 'Q', labelKey: 'card.userCommand' },
+  [NARRATION_TYPE_MAP.speakerIdentity]: { aid: 'S', labelKey: 'card.speakerIdentity' },
 };
 
 const pad2 = (n) => String(n).padStart(2, '0');
@@ -213,7 +219,7 @@ function appendLogCard({ source, text, ts = Date.now() }) {
   const stream = $('logStream');
   if (!stream) return;
   clearStreamEmpty();
-  const tag = LOG_TAG_MAP[source] || { aid: '·', label: '화면 해설' };
+  const tag = LOG_TAG_MAP[source] || { aid: '·', labelKey: 'card.default' };
   const card = document.createElement('div');
   card.className = 'card';
   const meta = document.createElement('div');
@@ -223,7 +229,7 @@ function appendLogCard({ source, text, ts = Date.now() }) {
   const aid = document.createElement('span');
   aid.className = 'aid';
   aid.textContent = tag.aid;
-  tagEl.append(aid, document.createTextNode(tag.label));
+  tagEl.append(aid, document.createTextNode(t(tag.labelKey)));
   const time = document.createElement('span');
   time.className = 'card-time';
   time.textContent = formatClock(ts);
@@ -247,7 +253,7 @@ function appendAskBubble({ text, ts = Date.now() }) {
   bubble.textContent = text;
   const who = document.createElement('div');
   who.className = 'who';
-  who.textContent = `나 · ${formatClock(ts)}`;
+  who.textContent = t('stream.askWho', { clock: formatClock(ts) });
   ask.append(bubble, who);
   stream.append(ask);
   scrollStreamToBottom();
@@ -304,7 +310,7 @@ function startNarrationPlayer({ stream }) {
   const policy = getModePolicy({ mode: getCurrentMode() });
   if (policy?.isMixed) {
     narrationMixer = new NarrationMixer({
-      onStatus: handleNarrationStatus, onDrop: handleNarrationDrop, isEntryEnabled: isNarrationEntryEnabled,
+      onStatus: handleNarrationStatus, onDrop: handleNarrationDrop, isEntryEnabled: isNarrationEntryEnabled, t,
       onPlayStart: reportNarrationPlayStart,
       prepareAudio: (entry) => narrationAudio.take(entry), getPlaybackTimeMs: () => captureSource.videoTimeMs,
     });
@@ -328,7 +334,7 @@ function startDelayBufferIfNeeded({ fromTimeMs = null } = {}) {
   const policy = getModePolicy({ mode: getCurrentMode() });
 
   if (!IS_DELAY_BUFFER_ENABLED) {
-    $('stBuffer').textContent = '지연 기능 임시 해제';
+    $('stBuffer').textContent = t('status.delayDisabled');
     markDebug({
       stage: DEBUG_STAGE_MAP.session, verdict: DEBUG_VERDICT_MAP.info,
       reason: '지연 버퍼 임시 해제',
@@ -387,7 +393,7 @@ function handleDelaySourceError({ reason, detail }) {
     stage: DEBUG_STAGE_MAP.session, verdict: DEBUG_VERDICT_MAP.skip,
     reason, detail: `${detail} · 실시간 믹싱으로 내려간다`,
   });
-  showNotice('지연 버퍼에 문제가 생겨 실시간 믹싱으로 전환합니다');
+  showNotice(t('mode.delayBufferFallback'));
   stopDelayBuffer();
   currentMode = MODE_MAP.realtimeMix;
   renderModeButtons();
@@ -415,18 +421,18 @@ function stopDriftMonitor() {
 
 function handleDelayBufferChange({ isBuffering, remainingMs }) {
   if (!isBuffering) {
-    $('stBuffer').textContent = '재생 중';
+    $('stBuffer').textContent = t('status.playing');
     setPrepOverlay({ isVisible: false });
     return;
   }
   const remainingSec = Math.ceil(remainingMs / 1000);
-  $('stBuffer').textContent = `버퍼 채우는 중 ${remainingSec}초`;
+  $('stBuffer').textContent = t('status.buffering', { seconds: remainingSec });
   setPrepOverlay({ isVisible: true, remainingSec });
 }
 
 function setPrepOverlay({ isVisible, remainingSec = 0 }) {
   $('prepOverlay').hidden = !isVisible;
-  $('prepRemain').textContent = isVisible ? `${remainingSec}초 후 시작됩니다` : '';
+  $('prepRemain').textContent = isVisible ? t('prep.remaining', { seconds: remainingSec }) : '';
 }
 
 function stopDelayBuffer() {
@@ -493,18 +499,14 @@ function renderModeButtons() {
   }
 
   const note = $('modeNote');
-  if (note) {
-    note.textContent = '교차모드는 화면 해설 내레이션을 다듬어 조금 늦게, 동시모드는 회의와 겹쳐 바로 들려줍니다.'
-      + ' 품질·균형으로 바꾼 뒤에는 되돌릴 수 없습니다.';
-  }
+  if (note) note.textContent = t('mode.note');
 }
 
 function handleClickModeButton({ mode }) {
   if (mode === currentMode) return;
 
   if (captureSource.isActive && !canSwitchMode({ fromMode: currentMode, toMode: mode })) {
-    showNotice('품질·균형으로 바꾼 뒤에는 되돌릴 수 없습니다'
-      + ' (놓친 구간 없이 들려드리기 위해서입니다)');
+    showNotice(t('mode.cannotRevert'));
     return;
   }
   const previousMode = currentMode;
@@ -805,7 +807,7 @@ async function requestPageTransitionNarration(decision) {
   }
   const ts = Date.now();
   slideTransitionRequestTsMap.set(decision.label, ts);
-  showNotice(buildSlideTransitionNotice({ isRevisit: decision.isRevisit }));
+  showNotice(buildSlideTransitionNotice({ isRevisit: decision.isRevisit, t }));
 
   saveSlideFrameWithMark({
     slideLabel: decision.label, frameKind: 'base', buffer,
@@ -1248,21 +1250,33 @@ function isDuplicateCommand({ dedupeKey }) {
   return false;
 }
 
+// main 에 넘기는 질문 문구(questionLabel)는 한국어 그대로 둔다. 화면의 질문 말풍선만 캡션 언어로 보인다.
 const USER_COMMAND_LABEL_MAP = {
   [USER_COMMAND_MAP.screenMaterial]: '지금 화면에 무슨 자료가 있어?',
   [USER_COMMAND_MAP.pageSummary]: '지금 화면을 요약해줘',
   [USER_COMMAND_MAP.graphAxis]: '그래프 축이 뭐야?',
 };
 
+const USER_COMMAND_LABEL_KEY_MAP = {
+  [USER_COMMAND_MAP.screenMaterial]: 'command.screenMaterial',
+  [USER_COMMAND_MAP.pageSummary]: 'command.pageSummary',
+  [USER_COMMAND_MAP.graphAxis]: 'command.graphAxis',
+};
+
+function readUserCommandLabel(command) {
+  const key = USER_COMMAND_LABEL_KEY_MAP[command];
+  return key ? t(key) : '';
+}
+
 // 프리셋 커맨드(command)와 자유 자연어 질문(questionText)을 함께 처리한다.
 // 자유 질문이면 최근 발화(recentTranscript)를 근거로 붙인다 — 심화 질의응답 경로.
 async function askQuestion({ command = null, questionText = null, inputSource = 'typed', dedupeKey = command }) {
   if (dedupeKey && isDuplicateCommand({ dedupeKey })) return;
   if (!captureSource.isActive) {
-    announce('회의 캡처를 시작해야 질문할 수 있어요');
+    announce(t('question.notCapturing'));
     return;
   }
-  appendAskBubble({ text: questionText || USER_COMMAND_LABEL_MAP[command] || command });
+  appendAskBubble({ text: questionText || readUserCommandLabel(command) || command });
   // 답(수동 AD)이 나올 때까지 자동 해설을 보류한다(최대 20초). 재생 중인 해설은 끊지 않고 끝난 뒤 답을 바로 낸다.
   await holdDuringAnswer({ gate: narrationGate, task: () => requestAnswer({ command, questionText, inputSource }) });
 }
@@ -1270,7 +1284,7 @@ async function askQuestion({ command = null, questionText = null, inputSource = 
 async function requestAnswer({ command, questionText, inputSource }) {
   const buffer = await captureFrameJpeg();
   if (!buffer) {
-    announce('화면을 캡처하지 못해 질문하지 못했어요');
+    announce(t('question.captureFailed'));
     return;
   }
   const ts = Date.now();
@@ -1290,14 +1304,14 @@ async function requestAnswer({ command, questionText, inputSource }) {
     currentSlideLabel: slideRegistry.currentLabel(), speakerHintNow: getSpeakerHint(),
     eventVideoTimeMs: captureSource.videoTimeMs,
   }).catch(() => null);
-  if (!result?.isOk) announce('답을 만들지 못했어요');
+  if (!result?.isOk) announce(t('question.answerFailed'));
 }
 
 // 질문 프리셋(Ctrl+1~9·질문 버튼). 기본 문구는 전용 명령으로, 고치거나 넣은 문구는 자유 질문으로 묻는다.
 function askQuestionPreset({ slot }) {
   const preset = questionPresetStore.get(slot);
   if (!preset) {
-    announce(`Control ${slot}에 넣은 질문이 없어요. 설정의 질문 프리셋에서 넣을 수 있어요`);
+    announce(t('question.presetEmpty', { slot }));
     return;
   }
   if (preset.command) {
@@ -1319,7 +1333,7 @@ function isFeatureLockedNow(key) {
 
 function toggleFeature({ key, isFromSwitch = false }) {
   if (isFeatureLockedNow(key)) {
-    announce(`${FEATURE_LABEL_MAP[key]}는 회의 캡처를 시작하기 전에만 바꿀 수 있어요`);
+    announce(t('feature.lockedDuringCapture', { label: readFeatureLabel({ key, t }) }));
     return;
   }
   isSwitchToggle = isFromSwitch;
@@ -1342,18 +1356,19 @@ function buildFeatureToggleList() {
   if (!container) return;
   container.replaceChildren(...FEATURE_KEY_LIST.map((key) => {
     const shortcut = FEATURE_SHORTCUT_MAP[key];
+    const featureLabel = readFeatureLabel({ key, t });
     const row = document.createElement('div');
     row.className = 'set-row';
     const label = document.createElement('span');
     label.className = 'label';
-    label.textContent = `${FEATURE_LABEL_MAP[key]} (${shortcut.text})`;
+    label.textContent = `${featureLabel} (${shortcut.text})`;
     label.setAttribute('aria-hidden', 'true');
     const button = document.createElement('button');
     button.type = 'button';
     button.className = 'set-toggle';
     button.dataset.feature = key;
     button.setAttribute('role', 'switch');
-    button.setAttribute('aria-label', `${FEATURE_LABEL_MAP[key]}, 단축키 ${shortcut.spoken}`);
+    button.setAttribute('aria-label', t('feature.switchAriaLabel', { label: featureLabel, shortcut: shortcut.spoken }));
     button.addEventListener('click', () => toggleFeature({ key, isFromSwitch: true }));
     row.append(label, button);
     return row;
@@ -1369,7 +1384,7 @@ function syncFeatureToggleUi() {
     button.setAttribute('aria-checked', String(isOn));
     // 잠긴 스위치도 초점을 받아 눌렀을 때 왜 못 바꾸는지 들을 수 있게 disabled 대신 aria-disabled 를 쓴다.
     button.setAttribute('aria-disabled', String(isFeatureLockedNow(button.dataset.feature)));
-    button.textContent = isOn ? '켜짐' : '꺼짐';
+    button.textContent = t(isOn ? 'feature.on' : 'feature.off');
   }
   syncFeatureOffBadge();
 }
@@ -1377,18 +1392,18 @@ function syncFeatureToggleUi() {
 function syncFeatureOffBadge() {
   const badge = $('featureOffBadge');
   if (!badge) return;
-  const text = describeDisabledFeatureBadge({ store: featureToggleStore });
+  const text = describeDisabledFeatureBadge({ store: featureToggleStore, t });
   badge.textContent = text;
   badge.hidden = !text;
 }
 
 featureToggleStore.subscribe(({ key, isOn }) => {
-  const stateText = isOn ? '켜짐' : '꺼짐';
-  if (isSwitchToggle) showNotice(`${FEATURE_LABEL_MAP[key]} ${stateText}`);
-  else announce(`${FEATURE_LABEL_MAP[key]} ${stateText}`);
+  const changedText = t(isOn ? 'feature.turnedOn' : 'feature.turnedOff', { label: readFeatureLabel({ key, t }) });
+  if (isSwitchToggle) showNotice(changedText);
+  else announce(changedText);
   markDebug({
     stage: DEBUG_STAGE_MAP.toggle, verdict: DEBUG_VERDICT_MAP.info,
-    reason: '기능 토글', detail: `${FEATURE_LABEL_MAP[key]} ${stateText}`,
+    reason: '기능 토글', detail: `${FEATURE_LABEL_MAP[key]} ${isOn ? '켜짐' : '꺼짐'}`,
   });
   syncFeatureTogglesToMain();
   syncFeatureToggleUi();
@@ -1411,7 +1426,7 @@ function isCaptionLanguageLockedNow() {
 }
 
 function announceCaptionLanguageLocked() {
-  announce('캡션 언어는 회의 캡처를 시작하기 전에만 바꿀 수 있어요');
+  announce(t('captionLanguage.locked'));
 }
 
 // 잠긴 선택 상자는 펼치지 않는다. 그래도 값이 바뀌면(문자 입력 등) change 에서 되돌린다.
@@ -1454,9 +1469,25 @@ function syncCaptionLanguageUi() {
   select.setAttribute('aria-disabled', String(isCaptionLanguageLockedNow()));
 }
 
+// 캡션 언어가 바뀌면 화면 글자를 그 언어로 다시 입힌다. 고정 글자는 data-ui-text 로, 글자를 넣어 만든 부분은 다시 그린다.
+// 캡션 언어는 회의 캡처 중에는 바뀌지 않으므로 대기 상태 그대로 통째로 다시 그려도 된다.
+function applyCaptionLanguageToUi({ language }) {
+  document.documentElement.lang = language;
+  applyUiTextToDom({ root: document, t });
+  setToggleUi(captureSource.isActive);
+  setPauseUi(isExperimentPaused);
+  syncToggleAvailability();
+  renderModeButtons();
+  buildFeatureToggleList();
+  renderSlideTextBackendOptions();
+  buildQuestionPresetChips();
+  buildQuestionPresetEditor();
+}
+
 // 선택 상자는 스크린리더가 바뀐 값을 읽으므로 화면 알림만 띄운다.
 captionLanguageStore.subscribe(({ language }) => {
-  showNotice(`캡션 언어 ${CAPTION_LANGUAGE_LABEL_MAP[language]} — 다음 회의 캡처부터 적용돼요`);
+  applyCaptionLanguageToUi({ language });
+  showNotice(t('captionLanguage.changed', { language: CAPTION_LANGUAGE_LABEL_MAP[language] }));
   syncCaptionLanguageUi();
 });
 
@@ -1471,7 +1502,7 @@ function readShownSlideTextBackend() {
 }
 
 function announceSlideTextBackendLocked() {
-  announce('화면 글자 읽기 방법은 회의 캡처를 시작하기 전에만 바꿀 수 있어요');
+  announce(t('slideText.locked'));
 }
 
 function blockLockedSlideTextBackendInput(event) {
@@ -1491,19 +1522,26 @@ function handleChangeSlideTextBackend() {
   slideTextBackendStore.set(select.value);
 }
 
-function buildSlideTextBackendSelect() {
+// 선택지 이름은 캡션 언어가 바뀌면 다시 만든다. 이벤트는 buildSlideTextBackendSelect 에서 한 번만 단다.
+function renderSlideTextBackendOptions() {
   const select = $('slideTextBackendSelect');
   if (!select) return;
   select.replaceChildren(...SLIDE_TEXT_BACKEND_OPTION_LIST.map((backend) => {
     const option = document.createElement('option');
     option.value = backend;
-    option.textContent = SLIDE_TEXT_BACKEND_LABEL_MAP[backend];
+    option.textContent = readSlideTextBackendLabel({ backend, t });
     return option;
   }));
+  syncSlideTextBackendUi();
+}
+
+function buildSlideTextBackendSelect() {
+  const select = $('slideTextBackendSelect');
+  if (!select) return;
   select.addEventListener('mousedown', blockLockedSlideTextBackendInput);
   select.addEventListener('keydown', blockLockedSlideTextBackendInput);
   select.addEventListener('change', handleChangeSlideTextBackend);
-  syncSlideTextBackendUi();
+  renderSlideTextBackendOptions();
 }
 
 function syncSlideTextBackendUi() {
@@ -1514,7 +1552,7 @@ function syncSlideTextBackendUi() {
 }
 
 slideTextBackendStore.subscribe(({ backend }) => {
-  showNotice(`화면 글자 읽기 ${SLIDE_TEXT_BACKEND_LABEL_MAP[backend]} — 다음 회의 캡처부터 적용돼요`);
+  showNotice(t('slideText.changed', { backend: readSlideTextBackendLabel({ backend, t }) }));
   syncSlideTextBackendUi();
 });
 
@@ -1536,34 +1574,36 @@ async function showArchiveList() {
   const list = $('archiveList');
   list.hidden = false;
   list.replaceChildren();
-  setArchiveStatus('지난 회의를 불러오는 중이에요');
+  setArchiveStatus(t('archive.loading'));
   const result = await window.seeon.listMeetingArchive().catch(() => null);
   const meetingList = result?.isOk ? result.meetingList : [];
-  if (!result?.isOk) { setArchiveStatus('지난 회의를 불러오지 못했어요'); return; }
-  if (!meetingList.length) { setArchiveStatus('아직 저장된 회의가 없어요. 회의를 마치면 여기에 쌓여요'); return; }
+  if (!result?.isOk) { setArchiveStatus(t('archive.loadFailed')); return; }
+  if (!meetingList.length) { setArchiveStatus(t('archive.empty')); return; }
   for (const meeting of meetingList) {
     const item = document.createElement('li');
     const button = document.createElement('button');
     button.type = 'button';
-    button.textContent = formatMeetingLabel({ meeting });
+    button.textContent = formatMeetingLabel({ meeting, t });
     button.addEventListener('click', () => showArchiveMeeting({ id: meeting.id }));
     item.append(button);
     list.append(item);
   }
-  setArchiveStatus(`지난 회의 ${meetingList.length}개. 최신 회의부터 있어요`);
+  setArchiveStatus(t('archive.listReady', { count: meetingList.length }));
   list.querySelector('button')?.focus();
 }
 
 async function showArchiveMeeting({ id }) {
   const result = await window.seeon.readMeetingArchive({ id }).catch(() => null);
-  if (!result?.isOk) { setArchiveStatus(result?.message || '회의 기록을 읽지 못했어요'); return; }
+  if (!result?.isOk) { setArchiveStatus(result?.message || t('archive.readFailed')); return; }
   $('archiveList').hidden = true;
   $('archiveDetail').hidden = false;
   $('archiveDetail').dataset.meetingId = id;
-  $('archiveDetailTitle').textContent = formatMeetingLabel({ meeting: { ...result.meeting, hasSummary: Boolean(result.summaryText) } });
-  $('archiveSummary').textContent = result.summaryText || '요약이 없어요. 요약 기능이 꺼져 있었거나 요약을 만들지 못한 회의예요';
-  $('archiveScript').textContent = result.scriptText || '대화 스크립트가 없어요';
-  setArchiveStatus('회의 요약과 대화 스크립트를 열었어요');
+  $('archiveDetailTitle').textContent = formatMeetingLabel({
+    meeting: { ...result.meeting, hasSummary: Boolean(result.summaryText) }, t,
+  });
+  $('archiveSummary').textContent = result.summaryText || t('archive.noSummary');
+  $('archiveScript').textContent = result.scriptText || t('archive.noScript');
+  setArchiveStatus(t('archive.detailOpened'));
   $('archiveDetailTitle').focus();
 }
 
@@ -1582,15 +1622,15 @@ $('archiveBackBtn').addEventListener('click', () => showArchiveList());
 $('archiveFolderBtn').addEventListener('click', async () => {
   const id = $('archiveDetail').hidden ? null : $('archiveDetail').dataset.meetingId;
   const result = await window.seeon.openMeetingArchiveFolder({ id }).catch(() => null);
-  if (!result?.isOk) setArchiveStatus(result?.message || '폴더를 열지 못했어요');
+  if (!result?.isOk) setArchiveStatus(result?.message || t('archive.folderFailed'));
 });
 
 // 화면 공유가 검게 보일 때 Meet 화면만 다시 불러온다. 회의 중이었다면 다시 참여해야 한다.
 $('meetReloadBtn').addEventListener('click', () => {
-  window.seeon.reloadMeet().catch(() => showNotice('Meet 화면을 새로고침하지 못했어요'));
+  window.seeon.reloadMeet().catch(() => showNotice(t('meetReload.failed')));
 });
 window.seeon.onMeetReloaded(({ reason, target }) => {
-  const notice = buildMeetReloadNotice({ target, isCaptureActive: captureSource.isActive });
+  const notice = buildMeetReloadNotice({ target, isCaptureActive: captureSource.isActive, t });
   showNotice(notice);
   announce(notice);
   markDebug({
@@ -1933,18 +1973,18 @@ async function handleSilenceTrigger({ silenceMs }) {
 }
 
 function setToggleUi(isRunning) {
-  $('toggleBtn').textContent = isRunning ? '회의 캡처 정지' : '회의 캡처 시작';
+  $('toggleBtn').textContent = t(isRunning ? 'capture.stop' : 'capture.start');
   $('toggleBtn').classList.toggle('on', isRunning);
   $('live').classList.toggle('on', isRunning);
-  $('liveState').textContent = isRunning ? 'LIVE' : '대기 중';
-  const railLabel = isRunning ? '회의 캡처 중' : '대기 중';
+  $('liveState').textContent = isRunning ? 'LIVE' : t('capture.idle');
+  const railLabel = t(isRunning ? 'capture.railActive' : 'capture.idle');
   $('railLive').classList.toggle('on', isRunning);
   $('railLive').setAttribute('aria-label', railLabel);
   $('railLive').title = railLabel;
 }
 
 function setPauseUi(isPaused) {
-  $('pauseBtn').textContent = isPaused ? '재개' : '일시정지';
+  $('pauseBtn').textContent = t(isPaused ? 'capture.resume' : 'capture.pause');
   $('pauseBtn').classList.toggle('on', isPaused);
 }
 
@@ -1958,7 +1998,7 @@ function pauseExperiment() {
   if (speakerPollTimer) { clearInterval(speakerPollTimer); speakerPollTimer = null; }
   stopNarrationPlayer();
   setPauseUi(true);
-  $('stCapture').textContent = '일시정지';
+  $('stCapture').textContent = t('status.paused');
 }
 
 function resumeExperiment() {
@@ -1978,20 +2018,20 @@ function resumeExperiment() {
   asrSegmenter.start(stream);
   liveVideo?.play().catch(() => {});
   setPauseUi(false);
-  $('stCapture').textContent = '재생 중';
+  $('stCapture').textContent = t('status.playing');
 }
 
 async function attemptStartExperiment() {
   if (!isCaptureStartable() || captureSource.isActive) return;
   $('toggleBtn').disabled = true;
   try {
-    showNotice('회의 캡처를 시작했습니다 — 화면 해설이 곧 표시됩니다.');
+    showNotice(t('notice.captureStarted'));
     // 꺼 둔 기능과 고른 캡션 언어는 다음 실행에도 남는다. 모르고 회의를 듣지 않게 시작할 때 알린다.
     // 연달아 announce 하면 앞 문구가 스크린리더에서 묻히므로 한 번에 읽는다.
     const startNoticeList = [];
-    const languageNotice = describeNonDefaultCaptionLanguage({ language: captionLanguageStore.get() });
-    if (languageNotice) startNoticeList.push(`${languageNotice}. 캡처를 멈춘 뒤 설정에서 바꿀 수 있어요.`);
-    const disabledFeatureNotice = describeDisabledFeatureNotice({ store: featureToggleStore });
+    const languageNotice = describeNonDefaultCaptionLanguage({ language: captionLanguageStore.get(), t });
+    if (languageNotice) startNoticeList.push(t('captionLanguage.startNotice', { notice: languageNotice }));
+    const disabledFeatureNotice = describeDisabledFeatureNotice({ store: featureToggleStore, t });
     if (disabledFeatureNotice) startNoticeList.push(disabledFeatureNotice);
     if (startNoticeList.length) announce(startNoticeList.join(' '));
 
@@ -2028,7 +2068,7 @@ async function attemptStartExperiment() {
     const { audioTrack } = await captureSource.start();
     const { stream, liveVideo } = captureSource;
     const settings = stream.getVideoTracks()[0].getSettings();
-    $('stCapture').textContent = audioTrack ? '재생 중 (video+audio)' : '재생 중 (video만! audio track 없음)';
+    $('stCapture').textContent = t(audioTrack ? 'status.playingWithAudio' : 'status.playingVideoOnly');
     $('stRes').textContent = `${settings.width ?? liveVideo.videoWidth}×${settings.height ?? liveVideo.videoHeight}`;
 
     startDelayBufferIfNeeded();
@@ -2078,18 +2118,18 @@ async function attemptStartExperiment() {
 
     if (!audioTrack) {
       showModal({
-        title: '오디오 트랙 없음',
-        message: '영상은 재생되지만 오디오 트랙을 받지 못했습니다.\n오디오가 없는 파일이면 ASR·캡션이 동작하지 않습니다.',
-        buttons: [{ label: '닫기', secondary: true }],
+        title: t('modal.noAudioTitle'),
+        message: t('modal.noAudioMessage'),
+        buttons: [{ label: t('common.close'), secondary: true }],
       });
     }
   } catch (err) {
     stopExperiment();
-    $('stCapture').textContent = `실패: ${err.message}`;
+    $('stCapture').textContent = t('status.captureFailed', { message: err.message });
     showModal({
-      title: '회의 캡처 실패',
-      message: `왼쪽 Meet 창을 캡처하지 못했습니다.\n(${err.name}: ${err.message})\n회의에 참여한 상태인지 확인한 뒤 다시 시도해 주세요.`,
-      buttons: [{ label: '닫기', secondary: true }],
+      title: t('modal.captureFailedTitle'),
+      message: t('modal.captureFailedMessage', { errorName: err.name, errorMessage: err.message }),
+      buttons: [{ label: t('common.close'), secondary: true }],
     });
   } finally {
     $('toggleBtn').disabled = false;
@@ -2184,7 +2224,7 @@ function finalizeSession({ asrFinalFlushPromise }) {
 
 async function requestMeetingSummary() {
   if (!featureToggleStore.isOn(FEATURE_KEY_MAP.meetingSummary)) {
-    announce('회의 요약이 꺼져 있어 요약을 만들지 않았어요');
+    announce(t('summary.off'));
     markDebug({
       stage: DEBUG_STAGE_MAP.session, verdict: DEBUG_VERDICT_MAP.skip,
       reason: '회의 요약 꺼짐', detail: '사용자가 요약 기능을 껐습니다',
@@ -2199,13 +2239,13 @@ async function requestMeetingSummary() {
       stage: DEBUG_STAGE_MAP.session, verdict: DEBUG_VERDICT_MAP.fail,
       reason: '회의 요약 실패', detail: result?.message || '알 수 없는 오류',
     });
-    const failureMessage = result?.message || '알 수 없는 오류';
-    showNotice(`회의 요약 생성 실패 — ${failureMessage}`);
+    const failureMessage = result?.message || t('summary.unknownError');
+    showNotice(t('summary.failedNotice', { message: failureMessage }));
 
     showModal({
-      title: '회의 요약 실패',
-      message: `요약본을 만들지 못했습니다.\n${failureMessage}`,
-      buttons: [{ label: '닫기', secondary: true }],
+      title: t('modal.summaryFailedTitle'),
+      message: t('modal.summaryFailedMessage', { message: failureMessage }),
+      buttons: [{ label: t('common.close'), secondary: true }],
     });
     return;
   }
@@ -2215,9 +2255,7 @@ async function requestMeetingSummary() {
     detail: `${result.textFilePath}${result.audioFilePath ? ` · ${result.audioFilePath}` : ' (음성 없음)'}`
       + `${result.isTruncated ? ' (길이 제한으로 잘림)' : ''}`,
   });
-  showNotice(result.audioFilePath
-    ? '회의 요약본과 음성 파일이 저장되었습니다.'
-    : '회의 요약본이 저장되었습니다. 음성 파일은 만들지 못했습니다.');
+  showNotice(t(result.audioFilePath ? 'summary.savedWithAudio' : 'summary.savedTextOnly'));
 
   console.log(`[summary] 저장 완료 — ${result.textFilePath}`
     + `${result.audioFilePath ? ` · ${result.audioFilePath}` : ''}`);
@@ -2225,7 +2263,7 @@ async function requestMeetingSummary() {
 
 function handleCaptureEnded() {
   stopExperiment();
-  showNotice('회의 캡처가 종료되었습니다 — 회의를 나갔거나 Meet 창이 닫혔습니다.');
+  showNotice(t('notice.captureEnded'));
 }
 
 function isCaptureStartable() {
@@ -2236,8 +2274,8 @@ function syncToggleAvailability() {
   if (captureSource.isActive) return;
   $('toggleBtn').disabled = !isCaptureStartable();
   $('meetHint').textContent = isCaptureStartable()
-    ? `회의 참여 확인 (타일 ${latestMeetTileCount}개)`
-    : '왼쪽 Meet 창에서 회의에 참여하면 시작할 수 있습니다';
+    ? t('hint.meetJoined', { count: latestMeetTileCount })
+    : t('hint.joinToStart');
 }
 
 syncToggleAvailability();
@@ -2285,6 +2323,7 @@ const meetMicGuard = new MeetMicGuard({
   getSelfMicState: () => roiStore.getSelfMicState(),
   toggleMeetMic: () => window.seeon.toggleMeetMic().catch(() => ({ isOk: false })),
   notify: (text) => announce(text),
+  t,
 });
 
 async function beginMicQuestionSession() {
@@ -2304,14 +2343,14 @@ function askQuestionFromAudioWithinHold(event) {
 }
 
 async function askQuestionFromAudio({ buffer, startTs }) {
-  announce('질문을 듣고 있어요');
+  announce(t('mic.listening'));
   const result = await window.seeon.sendQuestionAudio({ buffer, startTs }).catch(() => null);
   if (!result?.isOk) {
-    announce('음성 인식 서버에 연결하지 못했어요');
+    announce(t('mic.asrUnavailable'));
     return;
   }
   if (!result.text) {
-    announce('질문을 알아듣지 못했어요');
+    announce(t('mic.notUnderstood'));
     return;
   }
   await askQuestion({ questionText: result.text, inputSource: 'mic' });
@@ -2331,18 +2370,22 @@ micQuestionController = new MicQuestionController({
   setUi: setMicUi,
   onQuestionAudio: askQuestionFromAudioWithinHold,
   onAnswerSettled: () => narrationGate.release(),
+  t,
 });
 
 $('cmdMic').addEventListener('click', () => { micQuestionController.toggle(); });
 window.seeon.onMicToggle(() => { micQuestionController.toggle(); });
 // 질문 버튼과 설정의 질문 프리셋 칸은 프리셋 저장소에서 만든다. 버튼 N 번째 = Ctrl+N.
+// 기본 프리셋은 캡션 언어의 이름으로, 사용자가 넣은 문구는 그대로 보인다(readQuestionPresetText).
 function buildQuestionPresetChips() {
-  $('cmdChips').replaceChildren(...questionPresetStore.list().map(({ slot, text }) => {
+  $('cmdChips').replaceChildren(...questionPresetStore.list().map((preset) => {
+    const { slot } = preset;
+    const text = readQuestionPresetText({ preset, t });
     const chip = document.createElement('button');
     chip.type = 'button';
     chip.className = 'chip';
     chip.title = `${text} (Ctrl+${slot})`;
-    chip.setAttribute('aria-label', `${text}, 단축키 Control ${slot}`);
+    chip.setAttribute('aria-label', t('preset.chipAriaLabel', { text, slot }));
     const keyMark = document.createElement('span');
     keyMark.className = 'chip-key';
     keyMark.textContent = String(slot);
@@ -2369,11 +2412,13 @@ function createPresetRow({ slot, text = '', isNew = false }) {
   input.value = text;
   input.dataset.presetSlot = String(slot);
   input.dataset.presetRole = 'input';
-  input.placeholder = isNew ? '새 질문 넣기' : '';
-  input.setAttribute('aria-label', isNew ? `새 질문 넣기, Control ${slot}` : `질문 프리셋 Control ${slot}`);
+  input.placeholder = isNew ? t('preset.newPlaceholder') : '';
+  input.setAttribute('aria-label', isNew ? t('preset.newAriaLabel', { slot }) : t('preset.inputAriaLabel', { slot }));
   // Enter 뒤에 change 가 한 번 더 올 수 있다. 새 칸은 한 번만 넣는다.
   let isAdded = false;
   const commit = () => {
+    // 기본 프리셋은 캡션 언어의 이름으로 보인다. 고치지 않은 채 넣으면 저장된 문구(전용 명령)를 그대로 둔다.
+    if (!isNew && input.value.trim() === text) return;
     if (!isNew) { questionPresetStore.setText(slot, input.value); return; }
     if (!isAdded) isAdded = questionPresetStore.add(input.value);
   };
@@ -2393,11 +2438,11 @@ function createPresetRow({ slot, text = '', isNew = false }) {
     removeButton.textContent = '×';
     removeButton.dataset.presetSlot = String(slot);
     removeButton.dataset.presetRole = 'remove';
-    removeButton.setAttribute('aria-label', `Control ${slot} 질문 지우기`);
+    removeButton.setAttribute('aria-label', t('preset.removeAriaLabel', { slot }));
     removeButton.addEventListener('click', () => {
       pendingPresetFocus = { slot, role: 'input' };
       questionPresetStore.remove(slot);
-      announce(`Control ${slot} 질문을 지웠어요`);
+      announce(t('preset.removed', { slot }));
     });
     row.append(removeButton);
   }
@@ -2415,7 +2460,7 @@ function buildQuestionPresetEditor() {
       ? { slot: Number(active.dataset.presetSlot), role: active.dataset.presetRole } : null);
   pendingPresetFocus = null;
   const presetList = questionPresetStore.list();
-  const rowList = presetList.map(({ slot, text }) => createPresetRow({ slot, text }));
+  const rowList = presetList.map((preset) => createPresetRow({ slot: preset.slot, text: readQuestionPresetText({ preset, t }) }));
   if (presetList.length < MAX_QUESTION_PRESET_COUNT) rowList.push(createPresetRow({ slot: presetList.length + 1, isNew: true }));
   container.replaceChildren(...rowList);
   if (!focusTarget) return;
@@ -2431,7 +2476,7 @@ questionPresetStore.subscribe(() => {
 });
 $('questionPresetResetBtn').addEventListener('click', () => {
   questionPresetStore.resetToDefault();
-  announce('질문 프리셋을 기본값으로 되돌렸어요');
+  announce(t('preset.resetDone'));
 });
 buildQuestionPresetChips();
 buildQuestionPresetEditor();

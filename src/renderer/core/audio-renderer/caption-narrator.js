@@ -4,6 +4,7 @@ import { isImmediateCaption } from './narration-entry.js';
 import {
   computeGainFromDecibel, createSidePanner, DEFAULT_DUCK_DB, NARRATION_PAN_X, buildPlayStartInfo,
 } from './narration-mixer.js';
+import { defaultUiText } from '../i18n/ui-text.js';
 
 const START_LEAD_SEC = 0.02;
 
@@ -14,8 +15,9 @@ export function computeCatchupRate({ pausedSec, minRate, maxRate, ratePerSec }) 
 export class CaptionNarrator {
   constructor({ getLiveVideo, onStatus = null, onDrop = null, onPlayStart = null, getRateRange = null, isCatchupDelegated = null,
     createAudioContext = () => new AudioContext(), now = () => performance.now(), wallNow = () => Date.now(),
-    isEntryEnabled = () => true, prepareAudio = readEntryAudio, getPlaybackTimeMs = () => null }) {
+    isEntryEnabled = () => true, prepareAudio = readEntryAudio, getPlaybackTimeMs = () => null, t = defaultUiText }) {
     this.getLiveVideo = getLiveVideo;
+    this.t = t;
     this.prepareAudio = prepareAudio;
     this.onStatus = onStatus || (() => {});
     this.onDrop = onDrop || (() => {});
@@ -64,7 +66,7 @@ export class CaptionNarrator {
         this.liveTapSource.connect(this.analyserNode);
       }
     } catch (error) {
-      this.onStatus(`파형 탭 실패(무시): ${error.message}`);
+      this.onStatus(this.t('narration.tapFailed', { message: error.message }));
     }
   }
 
@@ -150,10 +152,10 @@ export class CaptionNarrator {
       this.currentStartSec = this.audioContext.currentTime + START_LEAD_SEC;
       source.start(this.currentStartSec);
       this._notifyPlayStart({ entry, durationSec: this.currentNarrationSec });
-      this.onStatus(isAnswer ? '질문 답 재생 중(회의음 줄임)…' : '캡션 내레이션 재생 중…');
+      this.onStatus(this.t(isAnswer ? 'narration.answerPlaying' : 'narration.playing'));
     } catch (error) {
       if (token !== this.playToken) return;
-      this.onStatus(`내레이션 재생 실패: ${error.message}`);
+      this.onStatus(this.t('narration.playFailed', { message: error.message }));
       this.currentNarrationSec = 0;
       this._onNarrationEnded();
     }
@@ -229,7 +231,7 @@ export class CaptionNarrator {
     if (rate <= 1.0) { video.playbackRate = 1.0; this.onStatus(''); return; }
     video.playbackRate = rate;
     this.isCatchingUp = true;
-    this.onStatus(`x${rate.toFixed(2)} 따라잡기`);
+    this.onStatus(this.t('narration.catchup', { rate: rate.toFixed(2) }));
 
     const catchupMs = (pausedSec / (rate - 1)) * 1000;
     this.catchupTimer = setTimeout(() => {

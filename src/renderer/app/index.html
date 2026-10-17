@@ -228,7 +228,7 @@
   <div class="app">
 
     <header>
-      <button class="icon-btn" id="panelCollapseBtn" type="button" title="패널 접기 (Ctrl+B)" aria-label="SEEON 패널 접기, 단축키 Control B">
+      <button class="icon-btn" id="panelCollapseBtn" type="button" title="패널 접기 (Ctrl+B)" aria-label="SEEON 패널 접기, 단축키 Control B" data-ui-text-title="panel.collapseTitle" data-ui-text-aria-label="panel.collapseAriaLabel">
         <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M6 6l6 6-6 6M13 6l6 6-6 6"/></svg>
       </button>
       <div class="brand">
@@ -238,134 +238,134 @@
 
       <div class="live" id="live">
         <span class="live-dot"></span>
-        <span class="live-state" id="liveState">대기 중</span>
+        <span class="live-state" id="liveState" data-ui-text="capture.idle">대기 중</span>
       </div>
-      <button class="capture-btn" id="toggleBtn" disabled>회의 캡처 시작</button>
-      <button class="ghost-btn" id="pauseBtn" disabled>일시정지</button>
-      <button class="ghost-btn" id="meetReloadBtn" type="button" title="Meet 화면 새로고침 — 회의 밖이면 Meet 첫 화면으로 (Ctrl/Cmd+R)" aria-label="Meet 화면 새로고침, 회의 밖이면 Meet 첫 화면으로 돌아가요, 단축키 Ctrl 또는 Cmd R">Meet 새로고침</button>
-      <button class="ghost-btn" id="archiveBtn" type="button" title="지난 회의 요약·스크립트 보기" aria-haspopup="dialog">지난 회의</button>
+      <button class="capture-btn" id="toggleBtn" disabled data-ui-text="capture.start">회의 캡처 시작</button>
+      <button class="ghost-btn" id="pauseBtn" disabled data-ui-text="capture.pause">일시정지</button>
+      <button class="ghost-btn" id="meetReloadBtn" type="button" title="Meet 화면 새로고침 — 회의 밖이면 Meet 첫 화면으로 (Ctrl/Cmd+R)" aria-label="Meet 화면 새로고침, 회의 밖이면 Meet 첫 화면으로 돌아가요, 단축키 Ctrl 또는 Cmd R" data-ui-text="meetReload.button" data-ui-text-title="meetReload.buttonTitle" data-ui-text-aria-label="meetReload.buttonAriaLabel">Meet 새로고침</button>
+      <button class="ghost-btn" id="archiveBtn" type="button" title="지난 회의 요약·스크립트 보기" aria-haspopup="dialog" data-ui-text="archive.button" data-ui-text-title="archive.buttonTitle">지난 회의</button>
       <span class="live-state" id="meetHint"></span>
-      <span class="feature-off-badge" id="featureOffBadge" title="설정 패널이나 Ctrl+Q(페이지 전환)·Ctrl+W(화자)·Ctrl+0(요약)으로 켤 수 있어요" hidden></span>
+      <span class="feature-off-badge" id="featureOffBadge" title="설정 패널이나 Ctrl+Q(페이지 전환)·Ctrl+W(화자)·Ctrl+0(요약)으로 켤 수 있어요" data-ui-text-title="feature.offBadgeTitle" hidden></span>
 
       <div class="header-spacer"></div>
 
       <div class="mode-cluster">
         <div class="mode-field">
-          <span class="mode-label">삽입 방식</span>
-          <div class="toggle" id="modeToggle" data-axis="concurrent" role="group" aria-label="삽입 방식 전환">
-            <button class="opt" type="button" data-axis="delayed">교차</button>
-            <button class="opt active" type="button" data-axis="concurrent">동시</button>
+          <span class="mode-label" data-ui-text="mode.insertionLabel">삽입 방식</span>
+          <div class="toggle" id="modeToggle" data-axis="concurrent" role="group" aria-label="삽입 방식 전환" data-ui-text-aria-label="mode.insertionAriaLabel">
+            <button class="opt" type="button" data-axis="delayed" data-ui-text="mode.cross">교차</button>
+            <button class="opt active" type="button" data-axis="concurrent" data-ui-text="mode.concurrent">동시</button>
             <span class="thumb"></span>
           </div>
         </div>
         <div class="mode-field" id="segmentField" hidden>
-          <span class="mode-label">교차 프로필</span>
+          <span class="mode-label" data-ui-text="mode.crossProfileLabel">교차 프로필</span>
           <div class="segment" id="modeSegment">
-            <button type="button" data-mode="listening">품질</button>
-            <button type="button" data-mode="delayed">균형</button>
-            <button type="button" data-mode="realtime_sic">성능</button>
+            <button type="button" data-mode="listening" data-ui-text="mode.quality">품질</button>
+            <button type="button" data-mode="delayed" data-ui-text="mode.balanced">균형</button>
+            <button type="button" data-mode="realtime_sic" data-ui-text="mode.performance">성능</button>
           </div>
         </div>
       </div>
 
-      <button class="icon-btn" id="settingsBtn" title="사용자 설정" aria-label="사용자 설정" aria-expanded="false" aria-controls="settingsPanel">
+      <button class="icon-btn" id="settingsBtn" title="사용자 설정" aria-label="사용자 설정" aria-expanded="false" aria-controls="settingsPanel" data-ui-text-title="settings.title" data-ui-text-aria-label="settings.title">
         <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 1 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 1 1-2.83-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 1 1 2.83-2.83l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 1 1 2.83 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z"/></svg>
       </button>
     </header>
 
     <div class="stream" id="logStream">
       <div class="stream-empty" id="streamEmpty">
-        왼쪽 Meet 창에서 회의에 참여한 뒤 <b>회의 캡처 시작</b>을 누르세요.<br />
-        지금까지 나온 화면 해설과 내가 던진 질문이 여기에 실시간으로 쌓입니다.
+        <span data-ui-text="stream.emptyBefore">왼쪽 Meet 창에서 회의에 참여한 뒤</span> <b data-ui-text="capture.start">회의 캡처 시작</b><span data-ui-text="stream.emptyAfter">을 누르세요.</span><br />
+        <span data-ui-text="stream.emptyDetail">지금까지 나온 화면 해설과 내가 던진 질문이 여기에 실시간으로 쌓입니다.</span>
       </div>
     </div>
 
     <div class="composer">
-      <div class="chips" id="cmdChips" role="group" aria-label="질문 프리셋"></div>
+      <div class="chips" id="cmdChips" role="group" aria-label="질문 프리셋" data-ui-text-aria-label="question.chipsAriaLabel"></div>
       <div class="input-row">
         <div class="field">
-          <input type="text" id="cmdInput" placeholder='화면에 대해 무엇이든 물어보세요' />
-          <button class="mic" id="cmdMic" title="음성 질문 (Ctrl+M)" aria-label="음성 질문, 단축키 Control M" aria-pressed="false">
+          <input type="text" id="cmdInput" placeholder="화면에 대해 무엇이든 물어보세요" data-ui-text-placeholder="question.inputPlaceholder" />
+          <button class="mic" id="cmdMic" title="음성 질문 (Ctrl+M)" aria-label="음성 질문, 단축키 Control M" aria-pressed="false" data-ui-text-title="question.micTitle" data-ui-text-aria-label="question.micAriaLabel">
             <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><rect x="9" y="2" width="6" height="12" rx="3"/><path d="M5 10a7 7 0 0 0 14 0M12 17v4"/></svg>
           </button>
         </div>
-        <button class="send" id="cmdSend" title="전송" aria-label="전송">
+        <button class="send" id="cmdSend" title="전송" aria-label="전송" data-ui-text-title="question.send" data-ui-text-aria-label="question.send">
           <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M5 12h14M13 6l6 6-6 6"/></svg>
         </button>
       </div>
       <div class="shortcuts">
-        <span><kbd>Ctrl</kbd>+<kbd>1~9</kbd> 질문 프리셋</span>
-        <span><kbd>Ctrl</kbd>+<kbd>M</kbd> 음성 질문</span>
-        <span><kbd>Ctrl</kbd>+<kbd>Q</kbd>·<kbd>W</kbd>·<kbd>0</kbd> 페이지 전환·화자·요약 켜기·끄기</span>
-        <span><kbd>Ctrl</kbd>+<kbd>B</kbd> 패널 접기·펼치기</span>
-        <span>맥도 Control 키</span>
+        <span><kbd>Ctrl</kbd>+<kbd>1~9</kbd> <span data-ui-text="shortcut.questionPreset">질문 프리셋</span></span>
+        <span><kbd>Ctrl</kbd>+<kbd>M</kbd> <span data-ui-text="shortcut.voiceQuestion">음성 질문</span></span>
+        <span><kbd>Ctrl</kbd>+<kbd>Q</kbd>·<kbd>W</kbd>·<kbd>0</kbd> <span data-ui-text="shortcut.featureToggle">페이지 전환·화자·요약 켜기·끄기</span></span>
+        <span><kbd>Ctrl</kbd>+<kbd>B</kbd> <span data-ui-text="shortcut.panelToggle">패널 접기·펼치기</span></span>
+        <span data-ui-text="shortcut.macControl">맥도 Control 키</span>
       </div>
     </div>
   </div>
 
-  <nav id="panelRail" aria-label="접힌 SEEON 패널">
-    <button class="icon-btn" id="panelExpandBtn" type="button" title="패널 펼치기 (Ctrl+B)" aria-label="SEEON 패널 펼치기, 단축키 Control B">
+  <nav id="panelRail" aria-label="접힌 SEEON 패널" data-ui-text-aria-label="panel.railAriaLabel">
+    <button class="icon-btn" id="panelExpandBtn" type="button" title="패널 펼치기 (Ctrl+B)" aria-label="SEEON 패널 펼치기, 단축키 Control B" data-ui-text-title="panel.expandTitle" data-ui-text-aria-label="panel.expandAriaLabel">
       <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M18 6l-6 6 6 6M11 6l-6 6 6 6"/></svg>
     </button>
-    <span class="live" id="railLive" role="img" aria-label="대기 중" title="대기 중"><span class="live-dot"></span></span>
+    <span class="live" id="railLive" role="img" aria-label="대기 중" title="대기 중" data-ui-text-aria-label="capture.idle" data-ui-text-title="capture.idle"><span class="live-dot"></span></span>
   </nav>
 
   <div id="settingsPanel" hidden>
-    <h4>사용자 설정</h4>
+    <h4 data-ui-text="settings.title">사용자 설정</h4>
     <div class="set-row">
-      <span class="label">캡션 파이프라인</span>
+      <span class="label" data-ui-text="settings.captionPipeline">캡션 파이프라인</span>
       <input type="checkbox" id="pipeChk" checked />
     </div>
-    <div id="featureToggleList" role="group" aria-label="기능 켜기·끄기"></div>
+    <div id="featureToggleList" role="group" aria-label="기능 켜기·끄기" data-ui-text-aria-label="settings.featureGroupAriaLabel"></div>
     <div class="set-row">
-      <label class="label" for="captionLanguageSelect">캡션 언어</label>
+      <label class="label" for="captionLanguageSelect" data-ui-text="settings.captionLanguage">캡션 언어</label>
       <select id="captionLanguageSelect" class="set-select" aria-describedby="captionLanguageNote"></select>
     </div>
-    <div class="set-note" id="captionLanguageNote">해설·질문 답·요약을 들려줄 언어예요. 회의 말은 한국어·영어를 자동으로 알아들어요. 회의 캡처 중에는 바꿀 수 없어요.</div>
+    <div class="set-note" id="captionLanguageNote" data-ui-text="settings.captionLanguageNote">해설·질문 답·요약을 들려줄 언어예요. 회의 말은 한국어·영어를 자동으로 알아들어요. 회의 캡처 중에는 바꿀 수 없어요.</div>
     <div class="set-row">
-      <label class="label" for="slideTextBackendSelect">화면 글자 읽기</label>
+      <label class="label" for="slideTextBackendSelect" data-ui-text="settings.slideTextBackend">화면 글자 읽기</label>
       <select id="slideTextBackendSelect" class="set-select" aria-describedby="slideTextBackendNote"></select>
     </div>
-    <div class="set-note" id="slideTextBackendNote">OCR 은 글자 인식 서버로 읽고, 응답이 없으면 VLM 으로 읽어요. 회의 캡처 중에는 바꿀 수 없어요.</div>
+    <div class="set-note" id="slideTextBackendNote" data-ui-text="settings.slideTextBackendNote">OCR 은 글자 인식 서버로 읽고, 응답이 없으면 VLM 으로 읽어요. 회의 캡처 중에는 바꿀 수 없어요.</div>
     <div id="questionPresetSection" role="group" aria-labelledby="questionPresetTitle">
       <div class="set-row">
-        <span class="label" id="questionPresetTitle">질문 프리셋 (Ctrl+1~9)</span>
-        <button type="button" class="set-mini" id="questionPresetResetBtn">기본값으로</button>
+        <span class="label" id="questionPresetTitle" data-ui-text="settings.questionPresetTitle">질문 프리셋 (Ctrl+1~9)</span>
+        <button type="button" class="set-mini" id="questionPresetResetBtn" data-ui-text="settings.questionPresetReset">기본값으로</button>
       </div>
       <div id="questionPresetList"></div>
-      <div class="set-note" id="questionPresetNote">고친 칸은 바로 저장돼요. 칸을 비우거나 ×로 지우면 뒤 번호가 하나씩 당겨져요. 9개까지 넣을 수 있어요.</div>
+      <div class="set-note" id="questionPresetNote" data-ui-text="settings.questionPresetNote">고친 칸은 바로 저장돼요. 칸을 비우거나 ×로 지우면 뒤 번호가 하나씩 당겨져요. 9개까지 넣을 수 있어요.</div>
     </div>
     <div class="set-status">
-      <b>캡처</b><span id="stCapture">off</span>
-      <b>해상도</b><span id="stRes">–</span>
-      <b>화면 해설 내레이션</b><span id="stDelay">–</span>
-      <b>버퍼</b><span id="stBuffer">–</span>
-      <b>GPU 서버</b><span id="stGpuTunnel">–</span>
+      <b data-ui-text="status.capture">캡처</b><span id="stCapture">off</span>
+      <b data-ui-text="status.resolution">해상도</b><span id="stRes">–</span>
+      <b data-ui-text="status.narration">화면 해설 내레이션</b><span id="stDelay">–</span>
+      <b data-ui-text="status.buffer">버퍼</b><span id="stBuffer">–</span>
+      <b data-ui-text="status.gpuServer">GPU 서버</b><span id="stGpuTunnel">–</span>
     </div>
     <div class="set-note" id="modeNote"></div>
   </div>
 
   <div id="prepOverlay" hidden>
-    <div>회의 소리를 모으는 중입니다</div>
+    <div data-ui-text="prep.collecting">회의 소리를 모으는 중입니다</div>
     <div id="prepRemain"></div>
   </div>
 
   <dialog id="archiveModal" aria-labelledby="archiveTitle">
     <div class="archive-head">
-      <h3 id="archiveTitle">지난 회의</h3>
+      <h3 id="archiveTitle" data-ui-text="archive.title">지난 회의</h3>
       <div class="archive-actions">
-        <button type="button" id="archiveFolderBtn" class="secondary">폴더 열기</button>
-        <button type="button" id="archiveCloseBtn" class="secondary">닫기</button>
+        <button type="button" id="archiveFolderBtn" class="secondary" data-ui-text="archive.openFolder">폴더 열기</button>
+        <button type="button" id="archiveCloseBtn" class="secondary" data-ui-text="common.close">닫기</button>
       </div>
     </div>
     <p id="archiveStatus" class="archive-status" aria-live="polite"></p>
     <ul id="archiveList" class="archive-list"></ul>
     <section id="archiveDetail" hidden>
-      <button type="button" id="archiveBackBtn" class="secondary">목록으로</button>
+      <button type="button" id="archiveBackBtn" class="secondary" data-ui-text="archive.backToList">목록으로</button>
       <h4 id="archiveDetailTitle" tabindex="-1"></h4>
-      <h5>회의 요약</h5>
+      <h5 data-ui-text="archive.summaryHeading">회의 요약</h5>
       <pre id="archiveSummary" class="archive-text" tabindex="0"></pre>
-      <h5>대화 스크립트</h5>
+      <h5 data-ui-text="archive.scriptHeading">대화 스크립트</h5>
       <pre id="archiveScript" class="archive-text" tabindex="0"></pre>
     </section>
   </dialog>

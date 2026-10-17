@@ -1,4 +1,5 @@
 import { NARRATION_CLASS_MAP } from '../constants.js';
+import { defaultUiText } from '../i18n/ui-text.js';
 
 // 켜고 끄는 기능은 부가 정보 2종(페이지 전환 안내·화자 안내)과 회의 요약이다.
 // 정보 공백 해설(지시·발화·무발화)과 질문은 항상 동작한다.
@@ -15,11 +16,19 @@ export const FEATURE_KEY_LIST = [
   FEATURE_KEY_MAP.meetingSummary,
 ];
 
-export const FEATURE_LABEL_MAP = {
-  [FEATURE_KEY_MAP.pageTransition]: '페이지 전환 안내',
-  [FEATURE_KEY_MAP.speakerIdentity]: '화자 안내',
-  [FEATURE_KEY_MAP.meetingSummary]: '회의 요약',
+const FEATURE_LABEL_KEY_MAP = {
+  [FEATURE_KEY_MAP.pageTransition]: 'feature.pageTransition',
+  [FEATURE_KEY_MAP.speakerIdentity]: 'feature.speakerIdentity',
+  [FEATURE_KEY_MAP.meetingSummary]: 'feature.meetingSummary',
 };
+
+// 화면에 보이는 기능 이름. t 를 주면 캡션 언어로, 주지 않으면 한국어로 돌려준다.
+export function readFeatureLabel({ key, t = defaultUiText }) {
+  return t(FEATURE_LABEL_KEY_MAP[key]);
+}
+
+// 한국어 기능 이름(개발용 기록에 쓴다).
+export const FEATURE_LABEL_MAP = Object.fromEntries(FEATURE_KEY_LIST.map((key) => [key, readFeatureLabel({ key })]));
 
 // 기능을 끄면 막을 재생 분류. 회의 요약은 해설이 아니라서 없다.
 const NARRATION_CLASS_BY_FEATURE_MAP = {
@@ -103,21 +112,21 @@ export function createFeatureToggleStore({ storage }) {
   };
 }
 
-export function listDisabledFeatureLabel({ store }) {
-  return FEATURE_KEY_LIST.filter((key) => !store.isOn(key)).map((key) => FEATURE_LABEL_MAP[key]);
+export function listDisabledFeatureLabel({ store, t = defaultUiText }) {
+  return FEATURE_KEY_LIST.filter((key) => !store.isOn(key)).map((key) => readFeatureLabel({ key, t }));
 }
 
 // 머리줄 배지 문구. 모두 켜져 있으면 빈 문구(배지를 숨긴다).
-export function describeDisabledFeatureBadge({ store }) {
-  const labelList = listDisabledFeatureLabel({ store });
-  return labelList.length ? `꺼진 기능: ${labelList.join(' · ')}` : '';
+export function describeDisabledFeatureBadge({ store, t = defaultUiText }) {
+  const labelList = listDisabledFeatureLabel({ store, t });
+  return labelList.length ? t('feature.offBadge', { labelList: labelList.join(' · ') }) : '';
 }
 
 // 캡처 시작 때 읽는 안내. 꺼진 기능마다 켜는 단축키를 붙인다. 모두 켜져 있으면 빈 문구다.
-export function describeDisabledFeatureNotice({ store }) {
+export function describeDisabledFeatureNotice({ store, t = defaultUiText }) {
   const itemList = FEATURE_KEY_LIST.filter((key) => !store.isOn(key))
-    .map((key) => `${FEATURE_LABEL_MAP[key]}(${FEATURE_SHORTCUT_MAP[key].spoken})`);
-  return itemList.length ? `꺼져 있는 기능: ${itemList.join(', ')}. 설정이나 단축키로 켤 수 있어요` : '';
+    .map((key) => t('feature.offNoticeItem', { label: readFeatureLabel({ key, t }), shortcut: FEATURE_SHORTCUT_MAP[key].spoken }));
+  return itemList.length ? t('feature.offNotice', { itemList: itemList.join(', ') }) : '';
 }
 
 export function listDisabledNarrationClass({ store }) {
