@@ -8,15 +8,15 @@ const {
   buildTransitionNarration, buildRevisitNarration,
 } = require('../src/main/caption-pipeline/orchestrator/slide-transition-text.js');
 
-test('전환 해설: 번호가 있는 슬라이드만 "슬라이드 N:" 을 붙인다', () => {
+test('전환 해설: 번호가 있는 슬라이드만 "슬라이드 N:", 슬라이드가 아니면 "페이지:" 를 붙인다', () => {
   assert.equal(buildTransitionNarration({ isSlide: true, displayNumber: 1, narration: '매출 추이 그래프' }), '슬라이드 1: 매출 추이 그래프');
-  assert.equal(buildTransitionNarration({ isSlide: false, displayNumber: 3, narration: 'PDF 문서, 연봉 제도' }), 'PDF 문서, 연봉 제도');
+  assert.equal(buildTransitionNarration({ isSlide: false, displayNumber: 3, narration: '연봉 제도를 설명한 PDF 문서' }), '페이지: 연봉 제도를 설명한 PDF 문서');
   assert.equal(buildTransitionNarration({ isSlide: true, displayNumber: null, narration: '매출 추이 그래프' }), '매출 추이 그래프');
 });
 
-test('복귀 해설: 슬라이드면 "이전 슬라이드 N", 슬라이드가 아니면 "이전 화면" 으로 말한다', () => {
+test('복귀 해설: 슬라이드면 "이전 슬라이드 N", 슬라이드가 아니면 "이전 페이지" 로 말한다', () => {
   assert.equal(buildRevisitNarration({ isSlide: true, displayNumber: 2, topic: '공정한 보상 원칙' }), '이전 슬라이드 2: 공정한 보상 원칙');
-  assert.equal(buildRevisitNarration({ isSlide: false, displayNumber: 3, topic: '반기 연봉 조정 제도' }), '이전 화면: 반기 연봉 조정 제도');
+  assert.equal(buildRevisitNarration({ isSlide: false, displayNumber: 3, topic: '반기 연봉 조정 제도' }), '이전 페이지: 반기 연봉 조정 제도');
   assert.equal(buildRevisitNarration({ isSlide: true, displayNumber: null, topic: '공정한 보상 원칙' }), '이전 화면: 공정한 보상 원칙');
 });
 

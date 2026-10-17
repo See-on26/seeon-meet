@@ -74,6 +74,8 @@ const DESCRIPTION_TAIL_NOUN_LIST = [
   '자료', '데이터', '모음', '묶음', '장', '건', '점', '컷', '양식', '서식', '보고서', '기록',
   '수치', '값', '통계', '지표', '비율', '분포', '추이', '변화', '실적', '성과',
   '박스', '상자', '카드', '배너', '도형', '버튼', '메뉴', '창', '탭', '타임라인', '로드맵', '일정',
+  // PPT 가 아닌 화면은 묘사를 화면 형태로 끝맺는다("…네이버 블로그", "…파일 탐색기").
+  '블로그', '사이트', '탐색기', '폴더', '시트', '파일', '게시판', '게시글', '메일',
   '조직도', '목차', '표지', '평가', '제도', '정책',
   '구조도', '구성도', '개념도', '모식도', '관계도', '계통도', '체계도', '배치도', '설계도', '도면',
 ];
@@ -132,7 +134,7 @@ const NARRATION_SLOT_MAP = {
     ],
     [PAGE_TRANSITION_KIND_MAP.document]: [
       { key: 'screenForm', label: '파일/화면 형태 (예: 엑셀, 한글파일, 네이버 웹페이지)', minWordCount: 1, maxWordCount: 2 },
-      { key: 'description', label: '묘사 (제목·주제)', minWordCount: 5, maxWordCount: 7, isPhrase: true, tailNounList: DESCRIPTION_TAIL_NOUN_LIST },
+      { key: 'description', label: '묘사 (주제 + 화면 형태)', minWordCount: 5, maxWordCount: 7, isPhrase: true, tailNounList: DESCRIPTION_TAIL_NOUN_LIST },
     ],
   },
   [NARRATION_TYPE_MAP.deixis]: {
@@ -357,9 +359,7 @@ const NARRATION_ASSEMBLE_MAP = {
     [PAGE_TRANSITION_KIND_MAP.slide]: ({ slotMap, index }) => (
       `슬라이드 ${index}: ${slotMap.description}`
     ),
-    [PAGE_TRANSITION_KIND_MAP.document]: ({ slotMap }) => (
-      `${slotMap.screenForm}, ${slotMap.description}`
-    ),
+    [PAGE_TRANSITION_KIND_MAP.document]: ({ slotMap }) => `페이지: ${slotMap.description}`,
   },
   [NARRATION_TYPE_MAP.deixis]: {
     [DEIXIS_FORM_MAP.simple]: ({ slotMap }) => (

@@ -1,3 +1,4 @@
+const { PAGE_PREFIX } = require('../orchestrator/slide-transition-text');
 const { RECORD_KIND_MAP } = require('../instrumentation/record-store');
 
 // 회의 중 슬라이드·발화·해설·질문을 슬라이드 단위로 모은다. 질문 검색과 회의 후 스크립트·요약의 근거다.
@@ -14,6 +15,7 @@ const SLIDE_FRAME_KIND_BASE = 'base';
 const USER_COMMAND_CLASS = 'user_command';
 // 전환 고지 생성이 이 사유로 끝나면 고지 문장 대신 화면 주제로 스크립트에 한 줄을 남긴다. 다른 사유(무관한 화면·같은 화면)는 남기지 않는다.
 const TOPIC_FALLBACK_SKIP_REASON = 'incomplete_description';
+const PPT_SCREEN_TYPE = 'ppt';
 
 function toSlideMajor(slideLabel) {
   const major = Number.parseInt(String(slideLabel ?? '').split('-')[0], 10);
@@ -141,7 +143,8 @@ function createContextStore({ onChange = () => {} } = {}) {
     const topic = typeof record.pageTopic === 'string' ? record.pageTopic.trim() : '';
     if (!topic) return '';
     const number = slide.displayNumber ?? (Number.isFinite(record.displayNumber) ? record.displayNumber : null);
-    return number ? `슬라이드 ${number}: ${topic}` : topic;
+    if (number) return `슬라이드 ${number}: ${topic}`;
+    return record.screenType && record.screenType !== PPT_SCREEN_TYPE ? `${PAGE_PREFIX}: ${topic}` : topic;
   }
 
   // requestTs 는 그 전환의 고지 요청 시각(전환 기록의 ts), transitionTs 는 방문을 연 시각이다.
