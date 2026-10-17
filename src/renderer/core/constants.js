@@ -76,12 +76,6 @@ export const USER_COMMAND_MAP = {
   graphAxis: 'graph_axis',
 };
 
-export const USER_COMMAND_KEY_MAP = {
-  5: USER_COMMAND_MAP.screenMaterial,
-  6: USER_COMMAND_MAP.pageSummary,
-  7: USER_COMMAND_MAP.graphAxis,
-};
-
 export const SUMMARY_TOGGLE_KEY = '0';
 
 export const SIC_WAVE_COLOR_MAP = {

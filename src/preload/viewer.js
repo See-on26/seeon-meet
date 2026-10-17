@@ -73,7 +73,7 @@ contextBridge.exposeInMainWorld('seeon', {
   onMicToggle(callback) { ipcRenderer.on('mic-toggle', () => callback()); },
   toggleMeetMic() { return ipcRenderer.invoke('meet-mic-toggle'); },
   inferInsertionGap(args) { return ipcRenderer.invoke('pipeline-gap', args); },
-  onUserCommand(callback) { ipcRenderer.on('user-command', (_e, payload) => callback(payload)); },
+  onQuestionPreset(callback) { ipcRenderer.on('question-preset', (_e, payload) => callback(payload)); },
   onSummaryToggle(callback) { ipcRenderer.on('summary-toggle', () => callback()); },
   onFeatureToggle(callback) { ipcRenderer.on('feature-toggle', (_e, payload) => callback(payload)); },
   setFeatureToggles({ disabledClassList }) {

@@ -1,6 +1,6 @@
 import {
   CROP_JPEG_QUALITY, NARRATION_TYPE_MAP, NARRATION_CLASS_MAP,
-  PAGE_TRANSITION_KIND_MAP, USER_COMMAND_KEY_MAP, USER_COMMAND_MAP, SUMMARY_TOGGLE_KEY,
+  PAGE_TRANSITION_KIND_MAP, USER_COMMAND_MAP, SUMMARY_TOGGLE_KEY,
   MEET_MEETING_URL_PATTERN, SPEAKER_SOURCE_MAP, DEBUG_STAGE_MAP, DEBUG_VERDICT_MAP,
 } from '../core/constants.js';
 import {
@@ -11,10 +11,13 @@ import {
 } from '../core/mode/mode-policy.js';
 import { CONTEXT_TOKEN_BUDGET } from '../core/mode/context-budget.js';
 import {
-  createFeatureToggleStore, FEATURE_KEY_MAP, FEATURE_KEY_LIST, FEATURE_LABEL_MAP,
-  readFeatureKeyFromDigit, listDisabledNarrationClass, listDisabledFeatureLabel, isFeatureLockedDuringCapture,
-  describeDisabledFeatureBadge,
+  createFeatureToggleStore, FEATURE_KEY_MAP, FEATURE_KEY_LIST, FEATURE_LABEL_MAP, FEATURE_SHORTCUT_MAP,
+  readFeatureKeyFromCode, listDisabledNarrationClass, isFeatureLockedDuringCapture,
+  describeDisabledFeatureBadge, describeDisabledFeatureNotice,
 } from '../core/mode/feature-toggle-store.js';
+import {
+  createQuestionPresetStore, MAX_QUESTION_PRESET_COUNT, readQuestionPresetSlotFromKey,
+} from '../core/mode/question-preset-store.js';
 import {
   createMeetingLanguageStore, MEETING_LANGUAGE_LIST, MEETING_LANGUAGE_LABEL_MAP, isMeetingLanguageLocked,
   describeNonDefaultMeetingLanguage,
@@ -125,6 +128,7 @@ function readLocalStorage() {
 const featureToggleStore = createFeatureToggleStore({ storage: readLocalStorage() });
 const meetingLanguageStore = createMeetingLanguageStore({ storage: readLocalStorage() });
 const slideTextBackendStore = createSlideTextBackendStore({ storage: readLocalStorage() });
+const questionPresetStore = createQuestionPresetStore({ storage: readLocalStorage() });
 const isNarrationEntryEnabled = (entry) => featureToggleStore.isClassOn(entry.narrationClass);
 
 // Orchestrator → TTS → 전달 Layer: TTS 는 Orchestrator 를 통과한 해설만 만든다. 재생 차례가 가까운 2개는 미리 만들어
@@ -1217,11 +1221,11 @@ function handleCaption({ text, source, eventVideoTimeMs = null }) {
 const COMMAND_DEDUPE_MS = 400;
 const lastCommandAtMap = new Map();
 
-function isDuplicateCommand({ command }) {
+function isDuplicateCommand({ dedupeKey }) {
   const now = performance.now();
-  const lastAt = lastCommandAtMap.get(command);
+  const lastAt = lastCommandAtMap.get(dedupeKey);
   if (lastAt !== undefined && now - lastAt < COMMAND_DEDUPE_MS) return true;
-  lastCommandAtMap.set(command, now);
+  lastCommandAtMap.set(dedupeKey, now);
   return false;
 }
 
@@ -1233,8 +1237,8 @@ const USER_COMMAND_LABEL_MAP = {
 
 // 프리셋 커맨드(command)와 자유 자연어 질문(questionText)을 함께 처리한다.
 // 자유 질문이면 최근 발화(recentTranscript)를 근거로 붙인다 — 심화 질의응답 경로.
-async function askQuestion({ command = null, questionText = null, inputSource = 'typed' }) {
-  if (command && isDuplicateCommand({ command })) return;
+async function askQuestion({ command = null, questionText = null, inputSource = 'typed', dedupeKey = command }) {
+  if (dedupeKey && isDuplicateCommand({ dedupeKey })) return;
   if (!captureSource.isActive) {
     announce('회의 캡처를 시작해야 질문할 수 있어요');
     return;
@@ -1265,10 +1269,20 @@ async function askQuestion({ command = null, questionText = null, inputSource = 
   if (!result?.isOk) announce('답을 만들지 못했어요');
 }
 
-function handleUserCommand({ command }) {
-  return askQuestion({ command });
+// 질문 프리셋(Ctrl+1~9·질문 버튼). 기본 문구는 전용 명령으로, 고치거나 넣은 문구는 자유 질문으로 묻는다.
+function askQuestionPreset({ slot }) {
+  const preset = questionPresetStore.get(slot);
+  if (!preset) {
+    announce(`Control ${slot}에 넣은 질문이 없어요. 설정의 질문 프리셋에서 넣을 수 있어요`);
+    return;
+  }
+  if (preset.command) {
+    askQuestion({ command: preset.command });
+    return;
+  }
+  askQuestion({ questionText: preset.text, inputSource: 'preset', dedupeKey: `preset:${slot}` });
 }
-window.seeon.onUserCommand(handleUserCommand);
+window.seeon.onQuestionPreset(askQuestionPreset);
 
 // 기능별 켜기·끄기(C15). 페이지 전환·화자 안내를 꺼도 데이터는 계속 모으고 main 이 캡션만 내보내지 않는다.
 
@@ -1302,20 +1316,20 @@ function syncFeatureTogglesToMain() {
 function buildFeatureToggleList() {
   const container = $('featureToggleList');
   if (!container) return;
-  container.replaceChildren(...FEATURE_KEY_LIST.map((key, index) => {
-    const shortcutText = `Ctrl+Shift+${index + 1}`;
+  container.replaceChildren(...FEATURE_KEY_LIST.map((key) => {
+    const shortcut = FEATURE_SHORTCUT_MAP[key];
     const row = document.createElement('div');
     row.className = 'set-row';
     const label = document.createElement('span');
     label.className = 'label';
-    label.textContent = `${FEATURE_LABEL_MAP[key]} (${shortcutText})`;
+    label.textContent = `${FEATURE_LABEL_MAP[key]} (${shortcut.text})`;
     label.setAttribute('aria-hidden', 'true');
     const button = document.createElement('button');
     button.type = 'button';
     button.className = 'set-toggle';
     button.dataset.feature = key;
     button.setAttribute('role', 'switch');
-    button.setAttribute('aria-label', `${FEATURE_LABEL_MAP[key]}, 단축키 Control Shift ${index + 1}`);
+    button.setAttribute('aria-label', `${FEATURE_LABEL_MAP[key]}, 단축키 ${shortcut.spoken}`);
     button.addEventListener('click', () => toggleFeature({ key, isFromSwitch: true }));
     row.append(label, button);
     return row;
@@ -1357,9 +1371,8 @@ featureToggleStore.subscribe(({ key, isOn }) => {
 });
 
 window.seeon.onSummaryToggle(() => toggleFeature({ key: FEATURE_KEY_MAP.meetingSummary }));
-window.seeon.onFeatureToggle(({ digit }) => {
-  const key = readFeatureKeyFromDigit(digit);
-  if (key) toggleFeature({ key });
+window.seeon.onFeatureToggle(({ feature }) => {
+  if (FEATURE_KEY_LIST.includes(feature)) toggleFeature({ key: feature });
 });
 buildFeatureToggleList();
 syncFeatureTogglesToMain();
@@ -1564,29 +1577,25 @@ window.seeon.getGpuTunnelStatus().then(renderGpuTunnelStatus).catch(() => {});
 window.seeon.onGpuTunnelStatus(renderGpuTunnelStatus);
 
 // 실제 키 입력은 main 이 먼저 받아 막는다(before-input-event). 여기는 main 을 거치지 않은 입력용이다.
-const FEATURE_TOGGLE_CODE_PATTERN = /^Digit([1-3])$/;
-
+// 글자 키는 Control 만(맥 Cmd+Q·W 는 그대로), 숫자 키는 Control·Cmd 둘 다 받는다.
 document.addEventListener('keydown', (event) => {
-  if (!(event.ctrlKey || event.metaKey) || event.altKey) return;
-  if (event.shiftKey) {
-    if (event.repeat) return;
-    const matched = FEATURE_TOGGLE_CODE_PATTERN.exec(event.code);
-    const key = matched ? readFeatureKeyFromDigit(matched[1]) : null;
-    if (!key) return;
+  if (event.altKey || event.shiftKey || event.repeat) return;
+  const featureKey = event.ctrlKey && !event.metaKey ? readFeatureKeyFromCode(event.code) : null;
+  if (featureKey) {
     event.preventDefault();
-    toggleFeature({ key });
+    toggleFeature({ key: featureKey });
     return;
   }
-
+  if (!(event.ctrlKey || event.metaKey)) return;
   if (event.key === SUMMARY_TOGGLE_KEY) {
     event.preventDefault();
     toggleFeature({ key: FEATURE_KEY_MAP.meetingSummary });
     return;
   }
-  const command = USER_COMMAND_KEY_MAP[event.key];
-  if (!command) return;
+  const slot = readQuestionPresetSlotFromKey(event.key);
+  if (!slot) return;
   event.preventDefault();
-  handleUserCommand({ command });
+  askQuestionPreset({ slot });
 });
 
 const GAP_SAFETY_MS = 2000;
@@ -1951,10 +1960,8 @@ async function attemptStartExperiment() {
     const startNoticeList = [];
     const languageNotice = describeNonDefaultMeetingLanguage({ language: meetingLanguageStore.get() });
     if (languageNotice) startNoticeList.push(`${languageNotice}. 캡처를 멈춘 뒤 설정에서 바꿀 수 있어요.`);
-    const disabledLabelList = listDisabledFeatureLabel({ store: featureToggleStore });
-    if (disabledLabelList.length) {
-      startNoticeList.push(`꺼져 있는 기능: ${disabledLabelList.join(', ')}. 설정이나 Control Shift 숫자로 켤 수 있어요`);
-    }
+    const disabledFeatureNotice = describeDisabledFeatureNotice({ store: featureToggleStore });
+    if (disabledFeatureNotice) startNoticeList.push(disabledFeatureNotice);
     if (startNoticeList.length) announce(startNoticeList.join(' '));
 
     const sessionResult = await window.seeon.startPipelineSession({
@@ -2236,7 +2243,7 @@ function announce(text) {
   requestAnimationFrame(() => { region.textContent = text; });
 }
 
-// 마이크 질문(Ctrl+8): 사용자 마이크만 녹음해 별도 경로로 전사한 뒤 자유 질문과 같은 경로로 묻는다.
+// 마이크 질문(Ctrl+M): 사용자 마이크만 녹음해 별도 경로로 전사한 뒤 자유 질문과 같은 경로로 묻는다.
 function setMicUi(isRecording) {
   const mic = $('cmdMic');
   mic.classList.toggle('recording', isRecording);
@@ -2299,9 +2306,106 @@ micQuestionController = new MicQuestionController({
 
 $('cmdMic').addEventListener('click', () => { micQuestionController.toggle(); });
 window.seeon.onMicToggle(() => { micQuestionController.toggle(); });
-for (const chip of $('cmdChips').querySelectorAll('.chip')) {
-  chip.addEventListener('click', () => handleUserCommand({ command: chip.dataset.command }));
+// 질문 버튼과 설정의 질문 프리셋 칸은 프리셋 저장소에서 만든다. 버튼 N 번째 = Ctrl+N.
+function buildQuestionPresetChips() {
+  $('cmdChips').replaceChildren(...questionPresetStore.list().map(({ slot, text }) => {
+    const chip = document.createElement('button');
+    chip.type = 'button';
+    chip.className = 'chip';
+    chip.title = `${text} (Ctrl+${slot})`;
+    chip.setAttribute('aria-label', `${text}, 단축키 Control ${slot}`);
+    const keyMark = document.createElement('span');
+    keyMark.className = 'chip-key';
+    keyMark.textContent = String(slot);
+    keyMark.setAttribute('aria-hidden', 'true');
+    chip.append(keyMark, text);
+    chip.addEventListener('click', () => askQuestionPreset({ slot }));
+    return chip;
+  }));
 }
+
+function createPresetRow({ slot, text = '', isNew = false }) {
+  const row = document.createElement('div');
+  row.className = 'preset-row';
+  const keyLabel = document.createElement('label');
+  keyLabel.className = 'preset-key';
+  keyLabel.htmlFor = `questionPresetInput${slot}`;
+  keyLabel.textContent = `Ctrl+${slot}`;
+  keyLabel.setAttribute('aria-hidden', 'true');
+  const input = document.createElement('input');
+  input.type = 'text';
+  input.className = 'preset-input';
+  input.id = `questionPresetInput${slot}`;
+  input.maxLength = 100;
+  input.value = text;
+  input.dataset.presetSlot = String(slot);
+  input.dataset.presetRole = 'input';
+  input.placeholder = isNew ? '새 질문 넣기' : '';
+  input.setAttribute('aria-label', isNew ? `새 질문 넣기, Control ${slot}` : `질문 프리셋 Control ${slot}`);
+  // Enter 뒤에 change 가 한 번 더 올 수 있다. 새 칸은 한 번만 넣는다.
+  let isAdded = false;
+  const commit = () => {
+    if (!isNew) { questionPresetStore.setText(slot, input.value); return; }
+    if (!isAdded) isAdded = questionPresetStore.add(input.value);
+  };
+  input.addEventListener('change', commit);
+  // 새 칸에서 Enter 로 넣으면 다음 새 칸으로 초점을 옮겨 이어서 넣게 한다.
+  input.addEventListener('keydown', (event) => {
+    if (event.key !== 'Enter' || event.isComposing) return;
+    event.preventDefault();
+    if (isNew && input.value.trim()) pendingPresetFocus = { slot: slot + 1, role: 'input' };
+    commit();
+  });
+  row.append(keyLabel, input);
+  if (!isNew) {
+    const removeButton = document.createElement('button');
+    removeButton.type = 'button';
+    removeButton.className = 'preset-remove';
+    removeButton.textContent = '×';
+    removeButton.dataset.presetSlot = String(slot);
+    removeButton.dataset.presetRole = 'remove';
+    removeButton.setAttribute('aria-label', `Control ${slot} 질문 지우기`);
+    removeButton.addEventListener('click', () => {
+      pendingPresetFocus = { slot, role: 'input' };
+      questionPresetStore.remove(slot);
+      announce(`Control ${slot} 질문을 지웠어요`);
+    });
+    row.append(removeButton);
+  }
+  return row;
+}
+
+let pendingPresetFocus = null;
+
+// 다시 그려도 스크린리더 초점이 같은 번호의 칸에 남게 한다.
+function buildQuestionPresetEditor() {
+  const container = $('questionPresetList');
+  const active = document.activeElement;
+  const focusTarget = pendingPresetFocus
+    || (container.contains(active) && active.dataset.presetSlot
+      ? { slot: Number(active.dataset.presetSlot), role: active.dataset.presetRole } : null);
+  pendingPresetFocus = null;
+  const presetList = questionPresetStore.list();
+  const rowList = presetList.map(({ slot, text }) => createPresetRow({ slot, text }));
+  if (presetList.length < MAX_QUESTION_PRESET_COUNT) rowList.push(createPresetRow({ slot: presetList.length + 1, isNew: true }));
+  container.replaceChildren(...rowList);
+  if (!focusTarget) return;
+  const target = container.querySelector(`[data-preset-slot="${focusTarget.slot}"][data-preset-role="${focusTarget.role}"]`)
+    || container.querySelector(`[data-preset-slot="${focusTarget.slot}"]`);
+  target?.focus();
+}
+
+// change 는 초점이 다른 칸으로 옮겨 가기 전에 온다. 옮겨 간 뒤에 다시 그려야 Tab 으로 옮긴 초점을 빼앗지 않는다.
+questionPresetStore.subscribe(() => {
+  buildQuestionPresetChips();
+  setTimeout(buildQuestionPresetEditor, 0);
+});
+$('questionPresetResetBtn').addEventListener('click', () => {
+  questionPresetStore.resetToDefault();
+  announce('질문 프리셋을 기본값으로 되돌렸어요');
+});
+buildQuestionPresetChips();
+buildQuestionPresetEditor();
 
 // 설정 패널은 버튼 바로 아래에 띄운다. 화면이 좁아 머리줄이 접히면 버튼이 내려가는데,
 // 고정 위치로 띄우면 패널이 버튼을 덮어 다시 눌러 닫을 수 없다. Esc·바깥 클릭으로도 닫는다.
@@ -2343,7 +2447,7 @@ document.addEventListener('pointerdown', (event) => {
   setSettingsPanelOpen(false);
 });
 
-// 패널 접기·펼치기(Ctrl+9): 창 폭은 main 이 바꾸고, 여기서는 패널과 띠 중 무엇을 보일지만 바꾼다.
+// 패널 접기·펼치기(Ctrl+B): 창 폭은 main 이 바꾸고, 여기서는 패널과 띠 중 무엇을 보일지만 바꾼다.
 // 화면 낭독기 안내 영역은 패널 밖에 두어 접혀 있어도 해설·안내를 읽는다.
 function renderViewerPanel({ isCollapsed }) {
   const hadFocusInPanel = document.querySelector('.app').contains(document.activeElement);
