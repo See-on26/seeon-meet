@@ -1,5 +1,5 @@
 const fs = require('fs');
-const { ipcMain } = require('electron');
+const { ipcMain, BrowserWindow } = require('electron');
 const { readPipelineConfig, resolveSlideTextBackend } = require('./config');
 const {
   NARRATION_TYPE_MAP, VISUAL_DESCRIPTION_KIND_MAP, SPEAKER_SOURCE_MAP, NARRATION_CLASS_MAP,
@@ -8,6 +8,8 @@ const {
 const { toNarrationClass, NARRATION_ORIGIN_MAP } = require('./contracts/narration-class');
 const { buildSpeakerIdentityFromDom } = require('./agents/speaker-identity-agent');
 const { DEBUG_STAGE_MAP, DEBUG_VERDICT_MAP } = require('./contracts/debug-events');
+const { createDevFlow } = require('../dev-flow');
+const { flattenPlaybackReport } = require('../dev-flow/playback-report');
 const { createAgentFieldMap } = require('./agents');
 const { createUnifiedRouter, ROUTER_MODE_MAP, resolveNarrationEventVideoTimeMs } = require('./router/unified-router');
 const { createSpeechTrigger, TRIGGER_TYPE_LABEL_MAP } = require('./trigger/speech-trigger');
@@ -90,6 +92,12 @@ function formatTriggerCandidateList(candidateList = []) {
 
 function registerPipeline({ getViewerView, meetingArchive = null }) {
   const config = readPipelineConfig();
+  // 개발자 모드 흐름 창(로고 연타). viewer 로 보내는 사건·렌더러 debug·버림·재생 시작을 이번 회의분만 모은다.
+  const devFlow = createDevFlow({ ipcMain, BrowserWindow });
+  function sendPipelineEvent(payload) {
+    getViewerView()?.webContents.send('pipeline-event', payload);
+    devFlow.recorder.addPipelineEvent(payload);
+  }
   const recordStore = createRecordStore({ outDir: OUT_DIR });
   const sessionStore = createSessionStore();
   let pendingAsrCount = 0;
@@ -203,7 +211,7 @@ function registerPipeline({ getViewerView, meetingArchive = null }) {
   function markDebug({ stage, verdict, reason, detail = '', narrationType = null, ts = Date.now() }) {
     const entry = { stage, verdict, reason, detail, narrationType, ts };
     appendRecord({ kind: RECORD_KIND_MAP.debug, ...entry }).catch(() => {});
-    getViewerView()?.webContents.send('pipeline-event', { type: 'debug', ...entry });
+    sendPipelineEvent({ type: 'debug', ...entry });
   }
 
   // 화면 글자 읽기 방법은 설정 화면에서 고른 값이 회의마다 넘어온다. 넘어오지 않으면 .env 값이다.
@@ -306,7 +314,7 @@ function registerPipeline({ getViewerView, meetingArchive = null }) {
       narrationClass: resolvedClass,
       eventVideoTimeMs: Number.isFinite(eventVideoTimeMs) ? eventVideoTimeMs : null,
     });
-    getViewerView()?.webContents.send('pipeline-event', {
+    sendPipelineEvent({
       type: 'caption', ts, text, source, slideLabel, rationale,
       narrationClass: resolvedClass,
       eventVideoTimeMs: Number.isFinite(eventVideoTimeMs) ? eventVideoTimeMs : null,
@@ -347,6 +355,7 @@ function registerPipeline({ getViewerView, meetingArchive = null }) {
     const meetingLanguage = applySessionMeetingLanguage({ asrLanguageSession, asrLanguage });
     sessionSlideTextBackend = resolveSlideTextBackend({ requested: slideTextBackend, fallback: config.slideTextBackend });
     const { sessionId } = sessionStore.startSession({ mode, asrLanguage: meetingLanguage });
+    devFlow.recorder.start({ sessionId, mode });
     contextGeneration += 1;
     contextStore.start({ sessionId, startedAt: Date.now() });
     console.log(`[pipeline] ■ 캡처 세션 시작 (모드=${mode}, 회의 언어=${meetingLanguage}, 화면 글자=${sessionSlideTextBackend}, ${sessionId}) — 중복 이력·화면 레지스트리 초기화`);
@@ -363,11 +372,13 @@ function registerPipeline({ getViewerView, meetingArchive = null }) {
     if (!sessionId) return { isOk: false, message: '진행 중인 세션이 없습니다' };
     const drainedCount = await drainPendingAsr();
 
-    await appendRecord({
-      kind: RECORD_KIND_MAP.debug, ts: Date.now(),
-      stage: DEBUG_STAGE_MAP.session, verdict: DEBUG_VERDICT_MAP.info,
+    const sessionEndEntry = {
+      ts: Date.now(), stage: DEBUG_STAGE_MAP.session, verdict: DEBUG_VERDICT_MAP.info,
       reason: '세션 종료', detail: `${sessionId} · ASR 드레인 ${drainedCount}건`, narrationType: null,
-    });
+    };
+    await appendRecord({ kind: RECORD_KIND_MAP.debug, ...sessionEndEntry });
+    devFlow.recorder.addDebug(sessionEndEntry);
+    devFlow.recorder.markEnded();
 
     lastSession = sessionStore.endSession({ endedAt: Date.now() });
     lastContextSnapshot = contextStore.snapshot();
@@ -695,6 +706,7 @@ function registerPipeline({ getViewerView, meetingArchive = null }) {
   ipcMain.on('pipeline-narration-dropped', (_event, {
     ts, text, slideLabel = null, narrationClass = null, reason = '',
   } = {}) => {
+    devFlow.recorder.addRendererDrop({ ts, text, slideLabel, narrationClass, reason });
     const isForgotten = narrationHistory.forget({ ts, text });
     const described = captionDescribed.revert({ ts, text });
     const isContextForgotten = contextStore.forgetNarration({ ts, text });
@@ -820,7 +832,7 @@ function registerPipeline({ getViewerView, meetingArchive = null }) {
             detail: `${formatTriggerCandidateList(trigger.candidateList)} · 전사="${truncateForLog(result.text, 80)}"`,
           });
         }
-        getViewerView()?.webContents.send('pipeline-event', {
+        sendPipelineEvent({
           type: 'asr', ts: startTs, endTs, text: result.text, segmentList: result.segmentList,
           triggerCandidateList: trigger.candidateList,
         });
@@ -1251,6 +1263,12 @@ function registerPipeline({ getViewerView, meetingArchive = null }) {
 
   ipcMain.on('pipeline-debug', (_event, entry) => {
     appendRecord({ kind: RECORD_KIND_MAP.debug, ...entry }).catch(() => {});
+    devFlow.recorder.addDebug(entry);
+  });
+
+  // 렌더러 재생기가 해설을 실제로 틀기 시작한 순간. 개발자 모드 흐름 창이 '재생됨'을 정할 때 쓴다.
+  ipcMain.on('pipeline-narration-playback', (_event, info) => {
+    devFlow.recorder.addPlayback(flattenPlaybackReport(info));
   });
 
   ipcMain.on('pipeline-boundary', (_event, entry) => {

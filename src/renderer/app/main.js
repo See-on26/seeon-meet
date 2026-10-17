@@ -85,6 +85,7 @@ import { MeetCaptureSession } from '../core/capture/meet-capture-session.js';
 import { fitWithinLongEdge } from '../core/capture/frame-scale.js';
 import { wallToVideoTimeMs, resolveSpeechEndWallTs, attachCandidateEventVideoTime } from '../core/capture/video-time.js';
 import { LAB_PLAYER_URL_PATTERN } from '../lab/lab-constants.js';
+import { createLogoTapCounter } from '../core/dev/logo-tap-counter.js';
 
 const $ = (id) => document.getElementById(id);
 
@@ -134,15 +135,17 @@ const slideTextBackendStore = createSlideTextBackendStore({ storage: readLocalSt
 const questionPresetStore = createQuestionPresetStore({ storage: readLocalStorage() });
 const isNarrationEntryEnabled = (entry) => featureToggleStore.isClassOn(entry.narrationClass);
 
-// 해설이 들리기 시작한 순간을 실험 모드(lab-viewer preload)에 알린다. 제품 앱에는 받는 쪽이 없어 아무 일도 하지 않는다.
+// 해설이 들리기 시작한 순간을 main 에 알린다(개발자 모드 흐름 창의 '재생됨'). 실험 모드는 같은 알림을 실험 기록에도 넘긴다.
 // "들은 자리"는 교차 모드면 지연 재생 위치, 동시 모드면 원본 현재 위치다. 둘 다 캡처 영상 시각 축이다.
 function reportNarrationPlayStart(info) {
-  window.seeon.reportLabNarrationPlayback?.({
+  const report = {
     ...info,
     mode: getCurrentMode(),
     playbackVideoTimeMs: delayBuffer ? delayBuffer.getDelayedTimeMs() : null,
     liveVideoTimeMs: captureSource.videoTimeMs,
-  });
+  };
+  window.seeon.reportNarrationPlayback(report);
+  window.seeon.reportLabNarrationPlayback?.(report);
 }
 
 // 실험 모드 자막 창이 회의 자막을 사용자가 들은 순간에 띄우도록 들은 위치(지연 재생 위치)와 재생 속도를 알린다.
@@ -1583,6 +1586,12 @@ async function showArchiveMeeting({ id }) {
   setArchiveStatus('회의 요약과 대화 스크립트를 열었어요');
   $('archiveDetailTitle').focus();
 }
+
+// 개발자 모드: 로고를 2초 안에 5번 누르면 이번 회의의 파이프라인 흐름 창(단계별 통과/미통과)을 연다.
+const logoTapCounter = createLogoTapCounter();
+$('brandLogo').addEventListener('click', () => {
+  if (logoTapCounter.tap()) window.seeon.openDevFlow().catch(() => {});
+});
 
 $('archiveBtn').addEventListener('click', () => {
   $('archiveModal').showModal();
