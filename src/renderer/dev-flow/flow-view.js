@@ -1,3 +1,5 @@
+import { QUEUE_DROP_LABEL_MAP } from '../core/audio-renderer/narration-queue.js';
+
 // 파이프라인 흐름 창의 표시 규칙(DOM 없음). 시각 표기·거르기·전사 줄 끼워 넣기·스크롤 붙임을 맡는다.
 export const MAX_RENDERED_ITEM_COUNT = 400;
 export const SUMMARY_MAX_LENGTH = 90;
@@ -13,6 +15,24 @@ export const FLOW_TYPE_OPTION_LIST = [
   { key: 'speaker_identity', label: '화자' },
   { key: 'unknown', label: '기타' },
 ];
+
+// 버려진 이유 코드를 흐름 창에서 읽을 문장으로 바꾼다(기록 파일의 코드값은 그대로 둔다).
+// 재생 대기 줄 사유는 렌더러 대기 줄의 문구를 그대로 쓰고, 그 밖의 코드는 흐름 계산이 붙인 것이다.
+const OUTCOME_REASON_LABEL_MAP = {
+  ...QUEUE_DROP_LABEL_MAP,
+  feature_off: '기능 꺼짐 — 내보내지 않음',
+  'rate-limited': '비슷한 해설이 방금 나가 간격 억제',
+  not_played: '끝날 때까지 재생되지 않음',
+  no_audio: 'TTS 합성 실패 — 소리 없음',
+};
+const DUPLICATE_REASON_PREFIX = 'duplicate:';
+
+export function describeOutcomeReason(reason) {
+  if (!reason) return '';
+  if (OUTCOME_REASON_LABEL_MAP[reason]) return OUTCOME_REASON_LABEL_MAP[reason];
+  if (reason.startsWith(DUPLICATE_REASON_PREFIX)) return `앞 해설과 같은 내용이라 막힘(${reason.slice(DUPLICATE_REASON_PREFIX.length)})`;
+  return reason;
+}
 
 export const OUTCOME_OPTION_LIST = [
   { key: 'played', label: '재생됨' },
