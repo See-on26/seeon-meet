@@ -1,6 +1,7 @@
-# TTS 서버 — 앱이 보내는 {text}를 받아 음성을 반환한다.
-# 앱 계약: POST /tts,      body={"text": "..."} → audio/wav  (뷰어가 WebAudio decodeAudioData로 재생)
-#          POST /tts-long, body={"text": "..."} → audio/mpeg (회의 요약본 전문 → mp3 파일)
+# TTS 서버 — 앱이 보내는 {text, language}를 받아 음성을 반환한다.
+# 앱 계약: POST /tts,      body={"text": "...", "language": "KR"|"EN"} → audio/wav  (뷰어가 WebAudio decodeAudioData로 재생)
+#          POST /tts-long, body={"text": "...", "language": "KR"|"EN"} → audio/mpeg (회의 요약본 전문 → mp3 파일)
+# language 는 앱의 캡션 언어다(빠지면 KR).
 # 실행: cd ~/gpu-server && ~/venv-audio/bin/uvicorn tts_server:app --host 127.0.0.1 --port 8803
 import os
 import re
@@ -15,8 +16,23 @@ from pydantic import BaseModel
 
 app = FastAPI()
 
-tts = TTS(language="KR", device="cuda")
-speaker_id_map = tts.hps.data.spk2id  # 한국어는 'KR' 화자 1종
+# 언어별 MeloTTS 모델과 화자. 한국어는 'KR' 화자 1종, 영어는 미국식 'EN-US' 를 쓴다.
+# 둘 다 시작할 때 띄운다 — 첫 영어 요청 때 띄우면 모델 로딩이 앱의 TTS 시간 제한(15초)을 넘겨 그 AD 가 소리 없이 지나간다.
+# 영어 모델을 못 띄워도(NLTK 데이터 없음 등) 한국어 TTS 는 그대로 뜨고, 영어 요청은 한국어 모델로 읽는다.
+SPEAKER_BY_LANGUAGE_MAP = {"KR": "KR", "EN": "EN-US"}
+DEFAULT_LANGUAGE = "KR"
+tts_by_language_map = {DEFAULT_LANGUAGE: TTS(language=DEFAULT_LANGUAGE, device="cuda")}
+try:
+    tts_by_language_map["EN"] = TTS(language="EN", device="cuda")
+except Exception as exc:  # noqa: BLE001 — 영어 모델 실패가 한국어 TTS 기동을 막지 않게 한다
+    print(f"[tts] 영어 모델을 띄우지 못해 영어 요청도 한국어 모델로 읽는다: {exc}", flush=True)
+
+
+def resolve_tts(language):
+    """언어에 맞는 (모델, 화자 id) 를 돌려준다. 모르는 언어나 못 띄운 언어는 한국어로 읽는다."""
+    key = language if language in tts_by_language_map else DEFAULT_LANGUAGE
+    model = tts_by_language_map[key]
+    return model, model.hps.data.spk2id[SPEAKER_BY_LANGUAGE_MAP[key]]
 
 # ── 합성 불가 기호 ──
 # MeloTTS 한국어 g2p는 아래 ASCII 기호를 그대로 통과시키는데 음소 심볼 테이블에 없어
@@ -41,6 +57,7 @@ SUMMARY_SPEECH_SPEED = 1.5
 
 class SynthesisRequest(BaseModel):
     text: str
+    language: str = DEFAULT_LANGUAGE
 
 
 @app.post("/tts")
@@ -54,7 +71,8 @@ def synthesize(request: SynthesisRequest):
         # speed=2.0 은 실시간 캡션의 운영값이다.
         # 어절당 발화 초(M-1)를 재잴 때는 반드시 이 값을 기준으로 해야 한다 —
         # renderer/core/mode/mode-policy.js 의 SPEECH_MS_PER_WORD 가 여기에 종속된다.
-        tts.tts_to_file(text, speaker_id_map["KR"], output_path, speed=2.0)
+        model, speaker_id = resolve_tts(request.language)
+        model.tts_to_file(text, speaker_id, output_path, speed=2.0)
         with open(output_path, "rb") as wav_file:
             wav_bytes = wav_file.read()
     except KeyError as exc:
@@ -104,12 +122,13 @@ def synthesize_long(request: SynthesisRequest):
     if not chunk_list:
         return Response(content=b"empty text", status_code=400, media_type="text/plain")
 
+    model, speaker_id = resolve_tts(request.language)
     work_dir = tempfile.mkdtemp(prefix="tts-long-")
     try:
         wav_path_list = []
         for index, chunk in enumerate(chunk_list):
             wav_path = os.path.join(work_dir, f"part-{index:04d}.wav")
-            tts.tts_to_file(chunk, speaker_id_map["KR"], wav_path, speed=SUMMARY_SPEECH_SPEED)
+            model.tts_to_file(chunk, speaker_id, wav_path, speed=SUMMARY_SPEECH_SPEED)
             wav_path_list.append(wav_path)
             print(f"[tts-long] {index + 1}/{len(chunk_list)} 합성 완료", flush=True)
 
