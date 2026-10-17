@@ -10,7 +10,7 @@ const { requestVlmContent } = require('../src/main/caption-pipeline/agents/share
 const { createContextStore, LABEL_STATUS_MAP } = require('../src/main/caption-pipeline/context/context-store');
 const { createSlideLabeler } = require('../src/main/caption-pipeline/context/slide-labeler');
 const { classifyQuestion } = require('../src/main/caption-pipeline/context/question-classifier');
-const { createQuestionRouter, selectFollowUpQa } = require('../src/main/caption-pipeline/context/question-router');
+const { createQuestionRouter } = require('../src/main/caption-pipeline/context/question-router');
 const { createQuestionAnswerer } = require('../src/main/caption-pipeline/context/question-answerer');
 const { buildTranscriptScript } = require('../src/main/caption-pipeline/context/transcript-script');
 const { createSlideTextAgent } = require('../src/main/caption-pipeline/agents/slide-text-agent');
@@ -73,12 +73,11 @@ const requestText = ({ prompt, label, maxTokens }) => requestVlmContent({ config
   });
   for (const questionText of questionList) {
     const startedAt = Date.now();
-    const followUpQa = selectFollowUpQa({ lastQa: store.getLastQa(), now: store.getLastQa()?.ts ?? 0 });
     const ruled = classifyQuestion(questionText);
     const ruledMajor = ruled?.route === 'past_slide' ? store.resolveSlideNumber(ruled.spokenNumber) : null;
     const isRuledUsable = ruled && (ruled.route !== 'past_slide' || ruledMajor !== null);
     const routed = isRuledUsable ? { route: ruled.route, slideMajorList: ruledMajor === null ? [] : [ruledMajor] } : await router.route({
-      questionText, currentSlideMajor: store.getCurrentSlideMajor(), index: store.buildIndex(), followUpQa,
+      questionText, currentSlideMajor: store.getCurrentSlideMajor(), index: store.buildIndex(), qaList: store.getQaList(),
       startedAt: store.getSessionInfo().startedAt,
     });
     // 앱은 '지금 화면' 질문을 실시간 화면으로 답한다. 여기서는 현재 슬라이드의 저장 기록·이미지로 대신한다.
@@ -88,7 +87,7 @@ const requestText = ({ prompt, label, maxTokens }) => requestVlmContent({ config
       slideMajorList: isCurrentScreen ? [store.getCurrentSlideMajor()] : routed.slideMajorList,
       questionText, wordBudget: { minWordCount: 3, maxWordCount: 30 },
     });
-    store.addQa({ ts: store.getLastQa()?.ts ?? 0, question: questionText, answer: result.text, route: routed.route, slideMajorList: routed.slideMajorList, isFollowUp: Boolean(followUpQa) });
+    store.addQa({ ts: store.getQaList().at(-1)?.ts ?? 0, question: questionText, answer: result.text, route: routed.route, slideMajorList: routed.slideMajorList });
     console.log(`\nQ: ${questionText}\n  갈래=${routed.route} 대상=[${routed.slideMajorList.join(', ')}]`
       + `${result.isImageUsed ? ' 이미지 재조회' : ''} (${Date.now() - startedAt}ms)\n  A: ${result.text}`);
   }
