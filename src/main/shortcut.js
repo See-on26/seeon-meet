@@ -1,18 +1,13 @@
-const { USER_COMMAND_MAP } = require('./caption-pipeline/contracts/narration-types');
-
-const USER_COMMAND_KEY_MAP = {
-  5: USER_COMMAND_MAP.screenMaterial,
-  6: USER_COMMAND_MAP.pageSummary,
-  7: USER_COMMAND_MAP.graphAxis,
-};
-
+// 숫자 키(질문 프리셋 Ctrl+1~9, 회의 요약 Ctrl+0)는 맥에서도 Control·Cmd 둘 다 받는다.
+const QUESTION_PRESET_KEY_PATTERN = /^[1-9]$/;
 const SUMMARY_TOGGLE_KEY = '0';
 
-function readCommandFromInput({ input }) {
-  if (!input || input.type !== 'keyDown') return null;
+// 키를 누르고 있으면 keyDown 이 반복된다. 반복분까지 받으면 같은 질문이 여러 번 나간다.
+function readQuestionPresetSlot({ input }) {
+  if (!input || input.type !== 'keyDown' || input.isAutoRepeat) return null;
   if (!(input.control || input.meta)) return null;
   if (input.shift || input.alt) return null;
-  return USER_COMMAND_KEY_MAP[input.key] || null;
+  return QUESTION_PRESET_KEY_PATTERN.test(input.key || '') ? Number(input.key) : null;
 }
 
 function isSummaryToggleInput({ input }) {
@@ -22,37 +17,42 @@ function isSummaryToggleInput({ input }) {
   return input.key === SUMMARY_TOGGLE_KEY;
 }
 
-const MIC_TOGGLE_KEY = '8';
-
-// 키를 누르고 있으면 keyDown 이 반복된다. 반복분까지 토글로 보면 녹음이 켜졌다 꺼졌다 한다.
-function isMicToggleInput({ input }) {
-  if (!input || input.type !== 'keyDown' || input.isAutoRepeat) return false;
-  if (!(input.control || input.meta)) return false;
-  if (input.shift || input.alt) return false;
-  return input.key === MIC_TOGGLE_KEY;
+// 글자 키는 Control 조합만 받는다. 맥의 Cmd+M(최소화)·Cmd+Q(종료)·Cmd+W(닫기)는 그대로 둔다.
+// 한글 입력 상태에서는 key 가 'ㅡ'처럼 자모로 바뀌므로 자판 위치(code)로 읽는다.
+function readControlLetterCode({ input }) {
+  if (!input || input.type !== 'keyDown' || input.isAutoRepeat) return null;
+  if (!input.control || input.meta || input.shift || input.alt) return null;
+  return input.code || null;
 }
 
-const VIEWER_PANEL_TOGGLE_KEY = '9';
+const MIC_TOGGLE_CODE = 'KeyM';
+const VIEWER_PANEL_TOGGLE_CODE = 'KeyB';
+// 값은 렌더러 feature-toggle-store 의 FEATURE_KEY_MAP 값과 같다. 회의 요약은 Ctrl+0 이다.
+const FEATURE_TOGGLE_CODE_MAP = {
+  KeyQ: 'page_transition',
+  KeyW: 'speaker_identity',
+};
+
+function isMicToggleInput({ input }) {
+  return readControlLetterCode({ input }) === MIC_TOGGLE_CODE;
+}
 
 function isViewerPanelToggleInput({ input }) {
-  if (!input || input.type !== 'keyDown' || input.isAutoRepeat) return false;
-  if (!(input.control || input.meta)) return false;
-  if (input.shift || input.alt) return false;
-  return input.key === VIEWER_PANEL_TOGGLE_KEY;
+  return readControlLetterCode({ input }) === VIEWER_PANEL_TOGGLE_CODE;
 }
 
-// Shift 를 누르면 key 가 '!'·'@' 처럼 바뀌므로 자판 위치(code)로 숫자를 읽는다.
-const FEATURE_TOGGLE_CODE_PATTERN = /^Digit([1-3])$/;
-
-function readFeatureToggleDigit({ input }) {
-  if (!input || input.type !== 'keyDown' || input.isAutoRepeat) return null;
-  if (!(input.control || input.meta)) return null;
-  if (!input.shift || input.alt) return null;
-  const matched = FEATURE_TOGGLE_CODE_PATTERN.exec(input.code || '');
-  return matched ? matched[1] : null;
+function readFeatureToggleKey({ input }) {
+  return FEATURE_TOGGLE_CODE_MAP[readControlLetterCode({ input })] || null;
 }
 
+// Electron 은 preventDefault 한 키를 페이지와 메뉴 단축키 어느 쪽에도 넘기지 않는다.
 function attachShortcutListener({ webContents, getViewerView, onViewerPanelToggle }) {
+  function sendToViewer(channel, payload) {
+    const viewerView = getViewerView();
+    if (!viewerView || viewerView.webContents.isDestroyed()) return;
+    viewerView.webContents.send(channel, payload);
+  }
+
   webContents.on('before-input-event', (event, input) => {
     if (isViewerPanelToggleInput({ input })) {
       event.preventDefault();
@@ -60,37 +60,31 @@ function attachShortcutListener({ webContents, getViewerView, onViewerPanelToggl
       onViewerPanelToggle();
       return;
     }
-    const featureDigit = readFeatureToggleDigit({ input });
-    if (featureDigit) {
+    const feature = readFeatureToggleKey({ input });
+    if (feature) {
       event.preventDefault();
-      const viewerView = getViewerView();
-      if (!viewerView || viewerView.webContents.isDestroyed()) return;
-      console.log(`[shortcut] 기능 토글 Ctrl+Shift+${featureDigit}`);
-      viewerView.webContents.send('feature-toggle', { digit: featureDigit });
+      console.log(`[shortcut] 기능 토글 ${feature}`);
+      sendToViewer('feature-toggle', { feature });
       return;
     }
     if (isMicToggleInput({ input })) {
       event.preventDefault();
-      const viewerView = getViewerView();
-      if (!viewerView || viewerView.webContents.isDestroyed()) return;
       console.log('[shortcut] 마이크 질문 토글');
-      viewerView.webContents.send('mic-toggle');
+      sendToViewer('mic-toggle');
       return;
     }
-    const isToggle = isSummaryToggleInput({ input });
-    const command = isToggle ? null : readCommandFromInput({ input });
-    if (!isToggle && !command) return;
-    event.preventDefault();
-    const viewerView = getViewerView();
-    if (!viewerView || viewerView.webContents.isDestroyed()) return;
-
-    if (isToggle) {
+    if (isSummaryToggleInput({ input })) {
+      event.preventDefault();
       console.log('[shortcut] 회의 요약 토글');
-      viewerView.webContents.send('summary-toggle');
+      sendToViewer('summary-toggle');
       return;
     }
-    console.log(`[shortcut] 사용자 커맨드 ${command}`);
-    viewerView.webContents.send('user-command', { command });
+    const slot = readQuestionPresetSlot({ input });
+    if (slot) {
+      event.preventDefault();
+      console.log(`[shortcut] 질문 프리셋 ${slot}`);
+      sendToViewer('question-preset', { slot });
+    }
   });
 }
 
@@ -100,11 +94,10 @@ function registerCommandShortcut({ getViewerView, getMeetView = () => null, onVi
   attachShortcutListener({ webContents: viewerView.webContents, getViewerView, onViewerPanelToggle });
   const meetView = getMeetView();
   if (meetView) attachShortcutListener({ webContents: meetView.webContents, getViewerView, onViewerPanelToggle });
-  console.log(`[shortcut] 커맨드 단축키 등록 (${meetView ? '뷰어+Meet' : '뷰어'}) — Ctrl+${Object.keys(USER_COMMAND_KEY_MAP).join('/')} · 회의 요약 토글 Ctrl+${SUMMARY_TOGGLE_KEY} · 마이크 질문 Ctrl+${MIC_TOGGLE_KEY} · 패널 접기·펼치기 Ctrl+${VIEWER_PANEL_TOGGLE_KEY} · 기능 토글 Ctrl+Shift+1~3`);
+  console.log(`[shortcut] 커맨드 단축키 등록 (${meetView ? '뷰어+Meet' : '뷰어'}) — 질문 프리셋 Ctrl+1~9 · 회의 요약 토글 Ctrl+${SUMMARY_TOGGLE_KEY} · 마이크 질문 Ctrl+M · 페이지 전환 Ctrl+Q · 화자 안내 Ctrl+W · 패널 접기·펼치기 Ctrl+B`);
 }
 
 module.exports = {
-  registerCommandShortcut, readCommandFromInput, isSummaryToggleInput, isMicToggleInput,
-  isViewerPanelToggleInput, readFeatureToggleDigit, USER_COMMAND_KEY_MAP, SUMMARY_TOGGLE_KEY, MIC_TOGGLE_KEY,
-  VIEWER_PANEL_TOGGLE_KEY,
+  registerCommandShortcut, readQuestionPresetSlot, isSummaryToggleInput, isMicToggleInput,
+  isViewerPanelToggleInput, readFeatureToggleKey, SUMMARY_TOGGLE_KEY, FEATURE_TOGGLE_CODE_MAP,
 };

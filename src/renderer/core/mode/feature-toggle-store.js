@@ -8,7 +8,7 @@ export const FEATURE_KEY_MAP = {
   meetingSummary: 'meeting_summary',
 };
 
-// 순서가 단축키 Ctrl+Shift+1~3 과 설정 패널 순서다.
+// 순서가 설정 패널 순서다.
 export const FEATURE_KEY_LIST = [
   FEATURE_KEY_MAP.pageTransition,
   FEATURE_KEY_MAP.speakerIdentity,
@@ -36,9 +36,21 @@ export function isFeatureLockedDuringCapture(key) {
 
 export const FEATURE_TOGGLE_STORAGE_KEY = 'seeon.featureToggles';
 
-export function readFeatureKeyFromDigit(digit) {
-  const index = Number(digit) - 1;
-  return Number.isInteger(index) && index >= 0 && index < FEATURE_KEY_LIST.length ? FEATURE_KEY_LIST[index] : null;
+// 단축키는 화면 표시(text)와 스크린리더가 읽을 말(spoken)을 함께 둔다. 글자 키는 맥도 Control 이다.
+export const FEATURE_SHORTCUT_MAP = {
+  [FEATURE_KEY_MAP.pageTransition]: { text: 'Ctrl+Q', spoken: 'Control Q' },
+  [FEATURE_KEY_MAP.speakerIdentity]: { text: 'Ctrl+W', spoken: 'Control W' },
+  [FEATURE_KEY_MAP.meetingSummary]: { text: 'Ctrl+0', spoken: 'Control 0' },
+};
+
+// 한글 입력 상태에서도 같도록 자판 위치(KeyboardEvent.code)로 읽는다. main 단축키(shortcut.js)와 같은 짝이다.
+const FEATURE_KEY_BY_CODE_MAP = {
+  KeyQ: FEATURE_KEY_MAP.pageTransition,
+  KeyW: FEATURE_KEY_MAP.speakerIdentity,
+};
+
+export function readFeatureKeyFromCode(code) {
+  return FEATURE_KEY_BY_CODE_MAP[code] || null;
 }
 
 function readStoredStateMap({ storage }) {
@@ -99,6 +111,13 @@ export function listDisabledFeatureLabel({ store }) {
 export function describeDisabledFeatureBadge({ store }) {
   const labelList = listDisabledFeatureLabel({ store });
   return labelList.length ? `꺼진 기능: ${labelList.join(' · ')}` : '';
+}
+
+// 캡처 시작 때 읽는 안내. 꺼진 기능마다 켜는 단축키를 붙인다. 모두 켜져 있으면 빈 문구다.
+export function describeDisabledFeatureNotice({ store }) {
+  const itemList = FEATURE_KEY_LIST.filter((key) => !store.isOn(key))
+    .map((key) => `${FEATURE_LABEL_MAP[key]}(${FEATURE_SHORTCUT_MAP[key].spoken})`);
+  return itemList.length ? `꺼져 있는 기능: ${itemList.join(', ')}. 설정이나 단축키로 켤 수 있어요` : '';
 }
 
 export function listDisabledNarrationClass({ store }) {

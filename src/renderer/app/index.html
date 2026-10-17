@@ -134,7 +134,9 @@
     .chip {
       font-size: 12px; padding: 5px 11px; border-radius: 999px; background: var(--parchment);
       border: 1px solid var(--hairline-strong); color: var(--ink-80); white-space: nowrap;
+      max-width: 100%; overflow: hidden; text-overflow: ellipsis;
     }
+    .chip .chip-key { margin-right: 5px; font-size: 10px; font-weight: 700; color: var(--ink-48); }
     .chip:hover:not(:disabled) { background: var(--primary-soft); border-color: var(--primary); color: var(--primary); }
     .input-row { display: flex; align-items: center; gap: 8px; }
     .input-row .field {
@@ -170,7 +172,14 @@
     #featureToggleList + .set-row { border-top: 1px solid var(--hairline); }
     .set-select { padding: 4px 8px; border-radius: 8px; border: 1px solid var(--hairline-strong); background: var(--parchment); color: var(--ink-80); font: inherit; font-size: 12px; font-weight: 600; }
     .set-select[aria-disabled="true"] { opacity: 0.45; cursor: not-allowed; }
-    #meetingLanguageNote, #slideTextBackendNote { margin-top: 0; }
+    #meetingLanguageNote, #slideTextBackendNote, #questionPresetNote { margin-top: 0; }
+    #questionPresetSection { border-top: 1px solid var(--hairline); margin-top: 7px; }
+    .set-mini { padding: 3px 9px; border-radius: 8px; border: 1px solid var(--hairline-strong); background: var(--parchment); color: var(--ink-80); font-size: 11px; font-weight: 600; }
+    .preset-row { display: flex; align-items: center; gap: 6px; padding: 3px 0; }
+    .preset-key { flex: none; width: 44px; font-size: 11px; font-weight: 700; color: var(--ink-48); }
+    .preset-input { flex: 1; min-width: 0; padding: 4px 7px; border-radius: 7px; border: 1px solid var(--hairline-strong); background: var(--parchment); color: var(--ink); font: inherit; font-size: 12px; }
+    .preset-input::placeholder { color: var(--ink-28); }
+    .preset-remove { flex: none; width: 24px; height: 24px; border-radius: 6px; border: 1px solid var(--hairline-strong); background: var(--canvas); color: var(--ink-48); font-size: 13px; line-height: 1; }
     .set-note { margin-top: 10px; font-size: 11px; color: var(--ink-48); line-height: 1.5; }
     .set-status { margin-top: 10px; display: grid; grid-template-columns: auto 1fr; gap: 4px 12px; font-size: 12px; }
     .set-status b { font-weight: 600; color: var(--ink-48); }
@@ -219,7 +228,7 @@
   <div class="app">
 
     <header>
-      <button class="icon-btn" id="panelCollapseBtn" type="button" title="패널 접기 (Ctrl+9)" aria-label="SEEON 패널 접기, 단축키 Ctrl 9">
+      <button class="icon-btn" id="panelCollapseBtn" type="button" title="패널 접기 (Ctrl+B)" aria-label="SEEON 패널 접기, 단축키 Control B">
         <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M6 6l6 6-6 6M13 6l6 6-6 6"/></svg>
       </button>
       <div class="brand">
@@ -236,7 +245,7 @@
       <button class="ghost-btn" id="meetReloadBtn" type="button" title="Meet 화면 새로고침 — 회의 밖이면 Meet 첫 화면으로 (Ctrl/Cmd+R)" aria-label="Meet 화면 새로고침, 회의 밖이면 Meet 첫 화면으로 돌아가요, 단축키 Ctrl 또는 Cmd R">Meet 새로고침</button>
       <button class="ghost-btn" id="archiveBtn" type="button" title="지난 회의 요약·스크립트 보기" aria-haspopup="dialog">지난 회의</button>
       <span class="live-state" id="meetHint"></span>
-      <span class="feature-off-badge" id="featureOffBadge" title="설정 패널이나 Ctrl+Shift+1~3으로 켤 수 있어요" hidden></span>
+      <span class="feature-off-badge" id="featureOffBadge" title="설정 패널이나 Ctrl+Q(페이지 전환)·Ctrl+W(화자)·Ctrl+0(요약)으로 켤 수 있어요" hidden></span>
 
       <div class="header-spacer"></div>
 
@@ -272,15 +281,11 @@
     </div>
 
     <div class="composer">
-      <div class="chips" id="cmdChips">
-        <button class="chip" data-command="page_summary">지금 화면 요약</button>
-        <button class="chip" data-command="screen_material">무슨 자료야?</button>
-        <button class="chip" data-command="graph_axis">그래프 축이 뭐야?</button>
-      </div>
+      <div class="chips" id="cmdChips" role="group" aria-label="질문 프리셋"></div>
       <div class="input-row">
         <div class="field">
           <input type="text" id="cmdInput" placeholder='화면에 대해 무엇이든 물어보세요' />
-          <button class="mic" id="cmdMic" title="음성 질문 (Ctrl+8)" aria-label="음성 질문" aria-pressed="false">
+          <button class="mic" id="cmdMic" title="음성 질문 (Ctrl+M)" aria-label="음성 질문, 단축키 Control M" aria-pressed="false">
             <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><rect x="9" y="2" width="6" height="12" rx="3"/><path d="M5 10a7 7 0 0 0 14 0M12 17v4"/></svg>
           </button>
         </div>
@@ -289,16 +294,17 @@
         </button>
       </div>
       <div class="shortcuts">
-        <span><kbd>Ctrl</kbd>+<kbd>5~7</kbd> 빠른 질의</span>
-        <span><kbd>Ctrl</kbd>+<kbd>0</kbd> 회의 요약 토글</span>
-        <span><kbd>Ctrl</kbd>+<kbd>9</kbd> 패널 접기·펼치기</span>
-        <span><kbd>Ctrl</kbd>+<kbd>Shift</kbd>+<kbd>1~3</kbd> 페이지 전환·화자·요약 켜기·끄기(맥도 Control)</span>
+        <span><kbd>Ctrl</kbd>+<kbd>1~9</kbd> 질문 프리셋</span>
+        <span><kbd>Ctrl</kbd>+<kbd>M</kbd> 음성 질문</span>
+        <span><kbd>Ctrl</kbd>+<kbd>Q</kbd>·<kbd>W</kbd>·<kbd>0</kbd> 페이지 전환·화자·요약 켜기·끄기</span>
+        <span><kbd>Ctrl</kbd>+<kbd>B</kbd> 패널 접기·펼치기</span>
+        <span>맥도 Control 키</span>
       </div>
     </div>
   </div>
 
   <nav id="panelRail" aria-label="접힌 SEEON 패널">
-    <button class="icon-btn" id="panelExpandBtn" type="button" title="패널 펼치기 (Ctrl+9)" aria-label="SEEON 패널 펼치기, 단축키 Ctrl 9">
+    <button class="icon-btn" id="panelExpandBtn" type="button" title="패널 펼치기 (Ctrl+B)" aria-label="SEEON 패널 펼치기, 단축키 Control B">
       <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M18 6l-6 6 6 6M11 6l-6 6 6 6"/></svg>
     </button>
     <span class="live" id="railLive" role="img" aria-label="대기 중" title="대기 중"><span class="live-dot"></span></span>
@@ -321,6 +327,14 @@
       <select id="slideTextBackendSelect" class="set-select" aria-describedby="slideTextBackendNote"></select>
     </div>
     <div class="set-note" id="slideTextBackendNote">OCR 은 글자 인식 서버로 읽고, 응답이 없으면 VLM 으로 읽어요. 회의 캡처 중에는 바꿀 수 없어요.</div>
+    <div id="questionPresetSection" role="group" aria-labelledby="questionPresetTitle">
+      <div class="set-row">
+        <span class="label" id="questionPresetTitle">질문 프리셋 (Ctrl+1~9)</span>
+        <button type="button" class="set-mini" id="questionPresetResetBtn">기본값으로</button>
+      </div>
+      <div id="questionPresetList"></div>
+      <div class="set-note" id="questionPresetNote">고친 칸은 바로 저장돼요. 칸을 비우거나 ×로 지우면 뒤 번호가 하나씩 당겨져요. 9개까지 넣을 수 있어요.</div>
+    </div>
     <div class="set-status">
       <b>캡처</b><span id="stCapture">off</span>
       <b>해상도</b><span id="stRes">–</span>
