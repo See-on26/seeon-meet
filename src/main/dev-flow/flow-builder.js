@@ -473,6 +473,20 @@ function buildInputStep({ group, typeKey }) {
   return null;
 }
 
+// 판단 LLM 후보 판단 기록('지시대명사:"여기"=X(이유) · 단순 수치:"30%"=O(이유)')에서 공백 아님(X) 후보의 이유를 문장으로 잇는다.
+// 판단 LLM 이 공백이 아니라고 해 막힌 흐름의 머리 줄에 "후보 없음 (no_gap)" 대신 이 이유를 보인다.
+const CANDIDATE_JUDGE_ITEM_PATTERN = /^(.+?):"(.+?)"=([OX])\((.*)\)$/;
+
+function readJudgeBlockedReason({ stepList }) {
+  const judgeStep = stepList.find((step) => step.label === CANDIDATE_JUDGE_LABEL);
+  if (!judgeStep) return null;
+  const rejectedList = String(judgeStep.detail || '').split(' · ')
+    .map((itemText) => CANDIDATE_JUDGE_ITEM_PATTERN.exec(itemText.trim()))
+    .filter((match) => match && match[3] === 'X');
+  if (!rejectedList.length) return null;
+  return `판단 LLM이 공백 아니라고 봄 — ${rejectedList.map(([, type, phrase, , reason]) => `${type} "${phrase}": ${reason}`).join(' / ')}`;
+}
+
 function mapStepDropReason(step) {
   if (step.stage === 'toggle') return UNPLAYED_REASON_MAP.featureOff;
   if (step.stage === 'dedupe') {
@@ -538,7 +552,9 @@ function resolveOutcome({ group, stepList, captionList, playbackList, droppedLis
   }
   const lastDecisive = stepList.filter((step) => step.verdict !== 'info').at(-1);
   const make = (kind, reason) => ({ outcome: { kind, reason, text: null, playedMediaMs: null, captionList: [] }, resolvedList: [] });
-  if (lastDecisive && isSkipVerdict(lastDecisive.verdict)) return make(OUTCOME_KIND_MAP.blocked, lastDecisive.reason || lastDecisive.detail);
+  if (lastDecisive && isSkipVerdict(lastDecisive.verdict)) {
+    return make(OUTCOME_KIND_MAP.blocked, readJudgeBlockedReason({ stepList }) || lastDecisive.reason || lastDecisive.detail);
+  }
   return isFinal ? make(OUTCOME_KIND_MAP.unknown, NO_RESULT_REASON) : make(OUTCOME_KIND_MAP.pending, null);
 }
 
