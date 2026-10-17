@@ -145,6 +145,20 @@ function reportNarrationPlayStart(info) {
   });
 }
 
+// 실험 모드 자막 창이 회의 자막을 사용자가 들은 순간에 띄우도록 들은 위치(지연 재생 위치)와 재생 속도를 알린다.
+// 제품 앱에는 이 알림 함수가 없어 타이머를 만들지 않는다.
+const LAB_LISTEN_REPORT_MS = 250;
+if (window.seeon.reportLabListen) {
+  setInterval(() => {
+    if (!captureSource.isActive) return;
+    window.seeon.reportLabListen({
+      isDelayed: Boolean(delayBuffer),
+      delayedVideoTimeMs: delayBuffer ? delayBuffer.getDelayedTimeMs() : null,
+      playbackRate: delayBuffer?.delayedVideo?.playbackRate ?? 1,
+    });
+  }, LAB_LISTEN_REPORT_MS);
+}
+
 // Orchestrator → TTS → 전달 Layer: TTS 는 Orchestrator 를 통과한 해설만 만든다. 재생 차례가 가까운 2개는 미리 만들어
 // 차례가 오면 바로 들리게 하고(NarrationAudioPrefetcher), 그보다 뒤는 앞 해설이 재생·버려질 때 차례로 만든다.
 async function synthesizeEntryAudio(entry) {
@@ -1192,6 +1206,11 @@ function handleAsrTranscript({ text, ts, endTs, segmentList = [], triggerCandida
     });
 
     transcriptWindow.push({ text: trimmed, ts: performance.now() });
+    // 실험 모드 자막 창이 이 조각을 그 말이 들리는 순간에 띄우도록 벽시계↔영상 시각 기준과 함께 알린다. 제품 앱에는 받는 쪽이 없다.
+    window.seeon.reportLabTranscript?.({
+      text: trimmed, chunkStartTs: ts, chunkEndTs: endTs, segmentList,
+      nowWallTs: Date.now(), nowVideoTimeMs: captureSource.videoTimeMs,
+    });
     const timedCandidateList = attachCandidateEventVideoTime({
       candidateList: triggerCandidateList, text, chunkStartTs: ts, chunkEndTs: endTs, segmentList,
       nowVideoTimeMs: captureSource.videoTimeMs,

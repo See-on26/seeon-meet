@@ -13,6 +13,8 @@ const { finalizeRun } = require('./export/finalize-run');
 const { pickModelConfig } = require('./export/run-info');
 const { createDemoWindowManager } = require('./demo-window');
 const { buildDemoCard } = require('./demo-card');
+const { createSubtitleWindowManager } = require('./subtitle-window');
+const { createSubtitleFeed, buildTranscriptLineList } = require('./subtitle-feed');
 const { createFlowWindowManager } = require('./flow-window');
 const { buildLiveFlowSnapshot } = require('./flow/flow-snapshot');
 
@@ -23,6 +25,8 @@ function registerLabIpc({ ipcMain, labWindow, pipelineConfig, onRunFinished = ()
   // 처음 뜰 때부터 평가 설정·한국어로 둔다. 실행마다 조작 바 값으로 바꾸고 viewer 를 새로 불러 적용한다.
   const presetState = { isEvalPreset: true, asrLanguage: DEFAULT_LAB_ASR_LANGUAGE };
   const demoWindowManager = createDemoWindowManager({ BrowserWindow });
+  const subtitleWindowManager = createSubtitleWindowManager({ BrowserWindow });
+  const subtitleFeed = createSubtitleFeed({ onLine: (line) => subtitleWindowManager.sendLine(line) });
   const recorder = createRunRecorder();
   // 흐름 창은 실행 기록기의 이번 실행 기록으로 그린다. 새 실행을 시작하면 기록기가 비우므로 창도 비워진다.
   const flowWindowManager = createFlowWindowManager({
@@ -48,8 +52,11 @@ function registerLabIpc({ ipcMain, labWindow, pipelineConfig, onRunFinished = ()
     modelConfig: pickModelConfig(pipelineConfig),
     getLayout: labWindow.getLayout,
     notify: sendStatus,
-    // 해설이 들리기 시작할 때 시연 창에 카드를 보낸다(시연 창이 닫혀 있으면 버린다).
-    onPlayback: ({ playback, caption }) => demoWindowManager.sendCard(buildDemoCard({ playback, caption })),
+    // 해설이 들리기 시작할 때 시연 창에 카드를, 자막 창에 AD 줄을 보낸다(창이 닫혀 있으면 버린다).
+    onPlayback: ({ playback, caption }) => {
+      demoWindowManager.sendCard(buildDemoCard({ playback, caption }));
+      subtitleFeed.addNarration({ text: playback.text });
+    },
     onRunFinished,
   });
   labWindow.setCaptureRequestListener(controller.handleCaptureRequested);
@@ -75,6 +82,9 @@ function registerLabIpc({ ipcMain, labWindow, pipelineConfig, onRunFinished = ()
     flowWindowManager.schedulePush();
   });
   ipcMain.on('lab-player-time', (_event, report) => controller.handlePlayerTime(report));
+  // 자막 창: 받아쓰기 조각(영상 시각 기준과 함께)과 viewer 의 들은 위치·재생 속도 보고.
+  ipcMain.on('lab-transcript', (_event, report) => subtitleFeed.addTranscript({ lineList: buildTranscriptLineList(report || {}) }));
+  ipcMain.on('lab-listen', (_event, report) => subtitleFeed.updateListen(report || {}));
   ipcMain.handle('lab-output-chunk', (_event, { buffer }) => controller.handleOutputChunk({ buffer }));
   ipcMain.on('lab-output-state', (_event, state) => controller.handleOutputState(state));
   ipcMain.on('lab-player-error', (_event, { message }) => console.warn(`[lab] 재생 화면 오류: ${message}`));
@@ -86,7 +96,10 @@ function registerLabIpc({ ipcMain, labWindow, pipelineConfig, onRunFinished = ()
     return result.canceled ? null : result.filePaths[0];
   });
   ipcMain.handle('lab-preview-video', (_event, { videoPath } = {}) => controller.previewVideo({ videoPath }));
-  ipcMain.handle('lab-start', (_event, option) => controller.start(option || {}));
+  ipcMain.handle('lab-start', (_event, option) => {
+    subtitleFeed.reset();
+    return controller.start(option || {});
+  });
   ipcMain.handle('lab-pause', () => controller.pause());
   ipcMain.handle('lab-resume', () => controller.resume());
   ipcMain.handle('lab-stop', () => controller.stop());
@@ -94,6 +107,10 @@ function registerLabIpc({ ipcMain, labWindow, pipelineConfig, onRunFinished = ()
   ipcMain.handle('lab-status', () => controller.getStatus());
   ipcMain.handle('lab-open-demo', () => {
     demoWindowManager.open();
+    return { isOk: true };
+  });
+  ipcMain.handle('lab-open-subtitle', () => {
+    subtitleWindowManager.open();
     return { isOk: true };
   });
   ipcMain.handle('lab-open-flow', () => {

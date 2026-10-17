@@ -17,6 +17,13 @@ exposeCapturedApi({
       reportLabNarrationPlayback(info) {
         ipcRenderer.send('lab-narration-playback', buildPlaybackReport(info));
       },
+      // 자막 창용: 받아쓰기 조각과 들은 위치·재생 속도.
+      reportLabTranscript(info) {
+        ipcRenderer.send('lab-transcript', info);
+      },
+      reportLabListen(info) {
+        ipcRenderer.send('lab-listen', info);
+      },
     },
   },
 });
