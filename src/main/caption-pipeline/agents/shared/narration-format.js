@@ -203,11 +203,26 @@ const SILENCE_DESCRIPTION_SLOT_LIST = [
   },
 ];
 
-function getSlotList({ narrationType, subKind, origin = null }) {
+// 한 발화에 변화를 두 번 말했으면(hasSecondClaim) 둘째 대상·값 칸을 더한다. 같은 대상이면 비워 두고 첫 쌍만 읽는다.
+const CLAIM_PAIR_VALUE_MAX_WORD_COUNT = 10;
+const CLAIM_SECOND_PAIR_SLOT_LIST = [
+  { key: 'target2', label: '발표자가 또 말한 변화의 대상 — 첫 대상과 다를 때만. 같거나 없으면 빈 문자열', minWordCount: 0, maxWordCount: 4, isPhrase: true },
+  { key: 'value2', label: '그 대상의 근거 값 — 반드시 수치. 같거나 없으면 빈 문자열', minWordCount: 0, maxWordCount: 5 },
+];
+
+function getSlotList({ narrationType, subKind, origin = null, hasSecondClaim = false }) {
   const isSilenceDescription = origin === NARRATION_ORIGIN_MAP.silence
     && narrationType === NARRATION_TYPE_MAP.visualDescription && subKind === VISUAL_DESCRIPTION_KIND_MAP.reaction;
   if (isSilenceDescription) return SILENCE_DESCRIPTION_SLOT_LIST;
-  return NARRATION_SLOT_MAP[narrationType]?.[subKind] || null;
+  const slotList = NARRATION_SLOT_MAP[narrationType]?.[subKind] || null;
+  const isClaimPair = hasSecondClaim && narrationType === NARRATION_TYPE_MAP.interpretation
+    && subKind === INTERPRETATION_KIND_MAP.claimToValue;
+  if (!slotList || !isClaimPair) return slotList;
+  // 둘째 변화를 둘째 칸 대신 첫 값 칸에 함께 쓰는 경우가 있어, 두 값이 다 들어가게 값 칸을 넓힌다.
+  return [
+    ...slotList.map((slot) => (slot.key === 'value' ? { ...slot, maxWordCount: CLAIM_PAIR_VALUE_MAX_WORD_COUNT } : slot)),
+    ...CLAIM_SECOND_PAIR_SLOT_LIST,
+  ];
 }
 
 function computeSlotTotal({ slotList }) {
@@ -245,11 +260,23 @@ function normalizeSlotMap({ slotList, rawSlotMap }) {
     }
     const truncated = truncateSlot({ text, maxWordCount: slot.maxWordCount });
     const isTruncated = countWord({ text }) > slot.maxWordCount;
-    if (isTruncated) slotMap[slot.key] = trimToCompletePhrase({ text: truncated });
+    if (isTruncated) {
+      slotMap[slot.key] = trimToCompletePhrase({
+        text: slot.mustContainValue ? dropValuelessTailItem({ text: truncated }) : truncated,
+      });
+    }
     else if (slot.isPhrase) slotMap[slot.key] = trimToCompletePhrase({ text: truncated, isConservative: true });
     else slotMap[slot.key] = truncated;
   }
   return slotMap;
+}
+
+// 값 목록("A 9.2시간에서 3.1시간, 고객 만족도 72점…")이 어절 수에서 잘리면 마지막 항목이 "고객"처럼
+// 이름만 남는다. 쉼표 뒤 조각에 수치가 없으면 그 조각을 버린다.
+function dropValuelessTailItem({ text }) {
+  const itemList = String(text || '').split(/\s*,\s*/);
+  while (itemList.length > 1 && !hasValueToken({ text: itemList[itemList.length - 1] })) itemList.pop();
+  return itemList.join(', ');
 }
 
 function hasCompleteTailNoun({ text, tailNounList = DESCRIPTION_TAIL_NOUN_LIST }) {
@@ -304,6 +331,18 @@ function isTargetRepeatedInValue({ target, value }) {
   return itemList.length > 0 && itemList.every((item) => spacedValue.includes(` ${item}`));
 }
 
+function assembleClaimPair({ target, value }) {
+  return isTargetRepeatedInValue({ target, value }) ? value : `${target}, ${value}`;
+}
+
+// 둘째 쌍은 대상과 수치가 다 있을 때만 붙이고, 두 쌍이 어절 예산을 넘으면 첫 쌍만 읽는다.
+function assembleClaimToValue({ slotMap, maxWordCount }) {
+  const first = assembleClaimPair({ target: slotMap.target, value: slotMap.value });
+  if (!slotMap.target2 || !hasValueToken({ text: slotMap.value2 })) return first;
+  const both = `${first}. ${assembleClaimPair({ target: slotMap.target2, value: slotMap.value2 })}`;
+  return Number.isFinite(maxWordCount) && countWord({ text: both }) > maxWordCount ? first : both;
+}
+
 function hasEmptyRequiredSlot({ slotList, slotMap }) {
   return slotList.some((slot) => {
     if (slot.isDiagnostic || slot.minWordCount <= 0) return false;
@@ -332,9 +371,7 @@ const NARRATION_ASSEMBLE_MAP = {
       `${attachJosa({ text: slotMap.value, withFinal: '은', withoutFinal: '는' })} `
       + `${attachJosa({ text: slotMap.frame, withFinal: '을', withoutFinal: '를' })} 의미`
     ),
-    [INTERPRETATION_KIND_MAP.claimToValue]: ({ slotMap }) => (
-      isTargetRepeatedInValue(slotMap) ? slotMap.value : `${slotMap.target}, ${slotMap.value}`
-    ),
+    [INTERPRETATION_KIND_MAP.claimToValue]: assembleClaimToValue,
   },
   [NARRATION_TYPE_MAP.visualDescription]: {
     [VISUAL_DESCRIPTION_KIND_MAP.reaction]: ({ slotMap }) => (
@@ -350,8 +387,9 @@ const NARRATION_ASSEMBLE_MAP = {
   },
 };
 
-function assembleNarration({ narrationType, subKind, rawSlotMap, index = '', origin = null }) {
-  const slotList = getSlotList({ narrationType, subKind, origin });
+function assembleNarration({ narrationType, subKind, rawSlotMap, index = '', origin = null,
+  hasSecondClaim = false, maxWordCount = null }) {
+  const slotList = getSlotList({ narrationType, subKind, origin, hasSecondClaim });
   const assemble = NARRATION_ASSEMBLE_MAP[narrationType]?.[subKind];
   if (!slotList || !assemble) return null;
   const slotMap = normalizeSlotMap({ slotList, rawSlotMap });
@@ -359,7 +397,7 @@ function assembleNarration({ narrationType, subKind, rawSlotMap, index = '', ori
   if (hasEmptyRequiredSlot({ slotList, slotMap })) return null;
   if (hasValuelessSlot({ slotList, slotMap })) return null;
   if (hasInvalidTailSlot({ slotList, slotMap })) return null;
-  const joined = assemble({ slotMap, index }).replace(/\s+/g, ' ').trim();
+  const joined = assemble({ slotMap, index, maxWordCount }).replace(/\s+/g, ' ').trim();
   return { text: dropRepeatedWordAtSeam({ text: joined }), slotMap };
 }
 

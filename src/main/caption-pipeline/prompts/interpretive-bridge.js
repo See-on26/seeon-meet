@@ -34,7 +34,7 @@ const INTERPRETATION_RULE_MAP = {
 function buildInterpretationPrompt({ utterance, recentTranscript = '', subKind = null,
   minWordCount = DEFAULT_INTERPRETATION_MIN_WORD_COUNT,
   maxWordCount = DEFAULT_INTERPRETATION_MAX_WORD_COUNT,
-  maxChars = null, describedElementList = [], mergedAnchorList = [] }) {
+  maxChars = null, describedElementList = [], mergedAnchorList = [], mergedClaimList = [] }) {
   const effectiveMaxChars = Number.isFinite(maxChars) ? maxChars : computeMaxChars({ maxWordCount });
   const ruleList = INTERPRETATION_RULE_MAP[subKind]
     || [...INTERPRETATION_RULE_MAP[INTERPRETATION_KIND_MAP.valueToMeaning],
@@ -49,6 +49,11 @@ function buildInterpretationPrompt({ utterance, recentTranscript = '', subKind =
     mergedAnchorList.length
       ? `발표자가 지시한 표현: ${mergedAnchorList.join(', ')}. 이 대상이 무엇인지도 문장 안에 함께 밝혀라.`
       : '',
+    mergedClaimList.length
+      ? `발표자는 변화를 또 말했다: ${mergedClaimList.map((phrase) => `"${phrase}"`).join(', ')}.`
+        + ' 그 대상이 첫 변화의 대상과 다르면(예: 매출과 방문자 수) "target2"·"value2"에 그 대상과 화면의 값을 쓴다.'
+        + ' 같은 대상·같은 값을 다시 말한 것이면 "target2"·"value2"는 빈 문자열로 둔다.'
+      : '',
     '',
     '청자는 화면을 볼 수 없다.',
     SPEECH_GAP_DECIDED_RULE,
@@ -57,6 +62,7 @@ function buildInterpretationPrompt({ utterance, recentTranscript = '', subKind =
     buildSlotOutputInstruction({
       narrationType: NARRATION_TYPE_MAP.interpretation,
       subKind: subKind || INTERPRETATION_KIND_MAP.valueToMeaning,
+      hasSecondClaim: mergedClaimList.length > 0,
     }),
     '',
     '규칙:',

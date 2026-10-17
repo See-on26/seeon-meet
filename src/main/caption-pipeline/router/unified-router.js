@@ -95,11 +95,13 @@ function toNarrationCandidateList(judgeList) {
   });
 }
 
-// 해설 자리는 해설이 실제로 다루는 후보 구(고른 후보와 그 해설에 흡수된 지시 구) 가운데 가장 늦게 말한 시각이다.
+// 해설 자리는 해설이 실제로 다루는 후보 구(고른 후보와 그 해설에 흡수된 지시 구·둘째 변화 구) 가운데 가장 늦게 말한 시각이다.
 // 뒤 조각의 후보가 합쳐져 해설이 되었는데 결정의 첫 후보 시각에 넣으면 그 말을 하기 전에 해설이 나온다.
 // 다루는 구의 시각을 모르면 결정의 원 사건 시각을 쓴다.
 function resolveNarrationEventVideoTimeMs({ judgeList = [], selectedCandidate = null, fallbackMs = null }) {
-  const coveredPhraseList = [selectedCandidate?.anchor, ...(selectedCandidate?.mergedAnchorList || [])].filter(Boolean);
+  const coveredPhraseList = [
+    selectedCandidate?.anchor, ...(selectedCandidate?.mergedAnchorList || []), ...(selectedCandidate?.mergedClaimList || []),
+  ].filter(Boolean);
   const timeList = judgeList
     .filter((entry) => entry.isGap && coveredPhraseList.includes(entry.phrase) && Number.isFinite(entry.eventVideoTimeMs))
     .map((entry) => entry.eventVideoTimeMs);
