@@ -100,6 +100,10 @@ contextBridge.exposeInMainWorld('seeon', {
   onSummaryProgress(callback) { ipcRenderer.on('summary-progress', (_e, payload) => callback(payload)); },
   appendDebugLog(entry) { ipcRenderer.send('pipeline-debug', entry); },
   reportNarrationDropped(payload) { ipcRenderer.send('pipeline-narration-dropped', payload); },
+  // 해설이 실제로 들리기 시작한 순간(개발자 모드 흐름 창의 '재생됨').
+  reportNarrationPlayback(info) { ipcRenderer.send('pipeline-narration-playback', info); },
+  // 개발자 모드: 로고를 연달아 누르면 파이프라인 흐름 창을 연다.
+  openDevFlow: () => ipcRenderer.invoke('dev-flow-open'),
   reportTransitionCancelled(payload) { ipcRenderer.send('pipeline-transition-cancelled', payload); },
   synthesizeNarration({ ts, text, source = null }) { return ipcRenderer.invoke('pipeline-tts', { ts, text, source }); },
 });
