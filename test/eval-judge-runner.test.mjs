@@ -19,16 +19,23 @@ import { resolveContextWindow } from '../tools/eval/lib/router-context.mjs';
 
 const require = createRequire(import.meta.url);
 const { parseJudgeText, toNarrationCandidateList } = require('../src/main/caption-pipeline/router/unified-router.js');
+const { JUDGE_GROUP_MAP, readJudgeGroup } = require('../src/main/caption-pipeline/prompts/unified-router.js');
 
 // production 라우터가 판단 JSON 을 읽어 돌려주는 꼴을 그대로 만든다. verdictMap: 후보 id → 'O'·'X'.
+// production 처럼 묶음(지시 대상·발화 기반)마다 따로 부른 응답(textList, 묶음 안 번호 1~n)도 만든다.
 function buildRouted({ candidateList, verdictMap, source = 'gpu' }) {
   const numberedList = candidateList.map((candidate, index) => ({ ...candidate, id: index + 1 }));
-  const text = JSON.stringify({
-    judgeList: numberedList.map((candidate) => ({ id: candidate.id, gap: verdictMap[candidate.id] || 'X', reason: `판단 ${candidate.id}` })),
+  const toAnswer = (list, toId) => JSON.stringify({
+    judgeList: list.map((candidate, index) => ({ id: toId(candidate, index), gap: verdictMap[candidate.id] || 'X', reason: `판단 ${candidate.id}` })),
   });
+  const text = toAnswer(numberedList, (candidate) => candidate.id);
+  const textList = Object.values(JUDGE_GROUP_MAP)
+    .map((group) => numberedList.filter((candidate) => readJudgeGroup(candidate.type) === group))
+    .filter((list) => list.length)
+    .map((list) => toAnswer(list, (_candidate, index) => index + 1));
   const judgeList = parseJudgeText({ text, candidateList: numberedList });
   const narrationList = toNarrationCandidateList(judgeList);
-  return { text, routed: { candidateList: narrationList, judgeList, source, blockedReason: narrationList.length ? null : 'no_gap' } };
+  return { text, textList, routed: { candidateList: narrationList, judgeList, source, blockedReason: narrationList.length ? null : 'no_gap' } };
 }
 
 const converseBody = (text) => JSON.stringify({
@@ -68,6 +75,33 @@ test('판단 응답을 읽지 못하면 production 이 X(해설 안 함)로 처�
   assert.equal(countJudgeableCandidate([
     { type: 'demonstrative', phrase: '이 부분' }, { type: 'number', phrase: '' }, { type: 'pointing', phrase: '여기' },
   ]), 1, 'production 은 구가 없거나 모르는 유형인 후보를 넘기지 않는다');
+});
+
+// production 판단은 지시 대상·발화 기반 묶음마다 따로 부른다(QA 2-7). 묶음마다 자기 후보 수만큼 번호 1~n 을 읽을 수 있어야 한다.
+test('두 묶음을 따로 부른 판단은 호출마다 그 묶음 후보 수로 응답 꼴을 본다', () => {
+  const candidateList = [
+    { type: 'demonstrative', phrase: '여기', start: 0, end: 2 },
+    { type: 'number', phrase: '30%', start: 3, end: 6 },
+    { type: 'change', phrase: '많이 올랐습니다', start: 8, end: 15 },
+  ];
+  const { routed } = buildRouted({ candidateList, verdictMap: {} });
+  const deixisText = '{"judgeList":[{"id":1,"reason":"없다","evidence":"","gap":"O"}]}';
+  const speechText = '{"judgeList":[{"id":1,"reason":"없다","evidence":"","gap":"O"},{"id":2,"reason":"없다","evidence":"","gap":"X"}]}';
+  const classify = (rawTextList) => classifyRouterPathError({
+    routed, capture: { rawText: rawTextList.at(-1) }, captureList: rawTextList.map((rawText) => ({ rawText })), candidateList,
+  });
+  assert.equal(classify([deixisText, speechText]), null);
+  assert.equal(classify([speechText, deixisText]), null, '먼저 끝난 호출이 앞에 기록될 수 있다');
+  assert.equal(classify([deixisText, '판단하기 어렵습니다']), PATH_ERROR_MAP.parse);
+  assert.equal(classify([deixisText, '']), PATH_ERROR_MAP.emptyText);
+  assert.equal(classify([deixisText]), PATH_ERROR_MAP.parse, '부른 묶음 수와 기록된 호출 수가 다르면 응답을 다 읽은 것이 아니다');
+});
+
+test('판단 프롬프트 해시는 두 묶음 지시문·예시를 모두 담는다', async () => {
+  const { PROMPT_HASH_MAP } = await import('../tools/eval/lib/judge-runner.mjs');
+  const { ROUTER_PROMPT_MAP } = require('../src/main/caption-pipeline/prompts/unified-router.js');
+  const { hashInput } = await import('../tools/eval/lib/cache-store.mjs');
+  assert.equal(PROMPT_HASH_MAP.router, hashInput({ promptMap: ROUTER_PROMPT_MAP }));
 });
 
 test('무발화 판정기는 HTTP 오류와 cue 없는 응답을 경로 오류로 센다', () => {
@@ -127,8 +161,8 @@ function createFakeRunner({ routeImpl, judgeImpl }) {
   const runner = createJudgeRunner({
     route: async (input) => {
       callLog.route += 1;
-      const { text, routed } = routeImpl(input);
-      await recorder.fetch('https://bedrock.example/router', { text });
+      const { text, textList, routed } = routeImpl(input);
+      for (const answerText of textList || [text]) await recorder.fetch('https://bedrock.example/router', { text: answerText });
       return routed;
     },
     judgeSilence: async (input) => {

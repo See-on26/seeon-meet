@@ -9,10 +9,10 @@ import { isSpanOverlap } from './candidate-merge.mjs';
 
 const require = createRequire(import.meta.url);
 const {
-  ROUTER_SOURCE_MAP, ROUTER_SYSTEM_PROMPT, NARRATION_BY_TRIGGER_TYPE_MAP,
+  ROUTER_SOURCE_MAP, NARRATION_BY_TRIGGER_TYPE_MAP,
 } = require('../../../src/main/caption-pipeline/router/unified-router.js');
 const {
-  FEW_SHOT_LIST, GAP_VERDICT_MAP, ROUTER_BLOCKED_REASON_MAP,
+  ROUTER_PROMPT_MAP, GAP_VERDICT_MAP, ROUTER_BLOCKED_REASON_MAP, readJudgeGroup,
 } = require('../../../src/main/caption-pipeline/prompts/unified-router.js');
 const { TRIGGER_TYPE_LABEL_MAP } = require('../../../src/main/caption-pipeline/trigger/speech-trigger.js');
 const { SILENCE_JUDGE_SOURCE_MAP } = require('../../../src/main/caption-pipeline/router/silence-judge.js');
@@ -30,7 +30,7 @@ export const PATH_ERROR_MAP = {
 
 // production 프롬프트가 바뀌면 캐시가 저절로 무효가 되도록 프롬프트 해시를 캐시 키에 넣는다.
 export const PROMPT_HASH_MAP = {
-  router: hashInput({ system: ROUTER_SYSTEM_PROMPT, fewShot: FEW_SHOT_LIST }),
+  router: hashInput({ promptMap: ROUTER_PROMPT_MAP }),
   silence: hashInput({ system: SILENCE_JUDGE_SYSTEM_PROMPT, fewShot: SILENCE_FEW_SHOT_LIST }),
 };
 
@@ -110,12 +110,34 @@ export function isSilenceTextWellFormed(text) {
 
 // production 라우터는 판정 LLM 을 쓸 수 없으면(fallback) 부르지 않고, 호출이 실패하면(error) 모든 후보를 X 로 둔다.
 // 후보가 없으면(none) 부르지 않는다 — 평가는 후보가 있는 발화만 넘기므로 생기지 않는다.
-export function classifyRouterPathError({ routed, capture, candidateList = [] }) {
+// production 판단은 지시 대상·발화 기반 묶음마다 따로 부르고 묶음 안에서 번호를 1부터 매긴다. 호출은 끝난 순서로 기록되므로
+// 응답마다 어느 묶음 것인지 모른다 — 묶음 후보 수를 응답에 하나씩 맞출 수 있는 배치가 있으면 다 읽은 것이다.
+function countJudgeableCandidateByGroup(candidateList = []) {
+  const countMap = new Map();
+  for (const candidate of candidateList) {
+    if (!NARRATION_BY_TRIGGER_TYPE_MAP[candidate.type] || !candidate.phrase) continue;
+    const group = readJudgeGroup(candidate.type);
+    countMap.set(group, (countMap.get(group) || 0) + 1);
+  }
+  return [...countMap.values()];
+}
+
+function canAssignCount({ textList, countList }) {
+  if (!textList.length) return !countList.length;
+  const [text, ...restTextList] = textList;
+  return countList.some((count, index) => isRouterTextWellFormed({ text, candidateCount: count })
+    && canAssignCount({ textList: restTextList, countList: countList.filter((_, other) => other !== index) }));
+}
+
+export function classifyRouterPathError({ routed, capture, captureList = null, candidateList = [] }) {
   if (routed.source === ROUTER_SOURCE_MAP.fallback) return PATH_ERROR_MAP.noToken;
   if (routed.source === ROUTER_SOURCE_MAP.error) return PATH_ERROR_MAP.http;
   if (routed.source === ROUTER_SOURCE_MAP.none) return null;
-  if (!capture.rawText) return PATH_ERROR_MAP.emptyText;
-  if (!isRouterTextWellFormed({ text: capture.rawText, candidateCount: countJudgeableCandidate(candidateList) })) return PATH_ERROR_MAP.parse;
+  const summaryList = captureList?.length ? captureList : [capture];
+  if (summaryList.some((summary) => !summary?.rawText)) return PATH_ERROR_MAP.emptyText;
+  const countList = countJudgeableCandidateByGroup(candidateList);
+  if (summaryList.length !== countList.length) return PATH_ERROR_MAP.parse;
+  if (!canAssignCount({ textList: summaryList.map((summary) => summary.rawText), countList })) return PATH_ERROR_MAP.parse;
   return null;
 }
 
@@ -130,7 +152,7 @@ export function classifySilencePathError({ judged, capture }) {
   return null;
 }
 
-// 캐시 키·보고서에 쓰는 판정 모델 이름표. gpu 백엔드는 GPU 모델로 판정하고 실패한 호출만 Bedrock 이 답한다.
+// 캐시 키·보고서에 쓰는 판정 모델 이름표. gpu 백엔드는 GPU 모델로만 판정한다(실패해도 Bedrock 으로 넘기지 않는다).
 export function buildJudgeModelLabel({ config }) {
   return config.judgeBackend === 'gpu' ? `gpu:${config.judgeGpuModel}` : config.judgeModelId;
 }
@@ -194,7 +216,10 @@ export function createJudgeRunner({
     const captureSummary = summarizeConverseCapture(captureList);
     const entry = {
       routed, capture: captureSummary,
-      pathError: classifyRouterPathError({ routed, capture: captureSummary, candidateList: input.candidateList }),
+      pathError: classifyRouterPathError({
+        routed, capture: captureSummary, candidateList: input.candidateList,
+        captureList: captureList.map((captured) => summarizeConverseCapture([captured])),
+      }),
     };
     if (!entry.pathError) cache.write(key, entry);
     return { ...entry, isCacheHit: false };
