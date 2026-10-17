@@ -1,4 +1,4 @@
-import { NarrationQueue, shouldInterrupt, QUEUE_DROP_REASON_MAP, readEntryAudio } from './narration-queue.js';
+import { NarrationQueue, QUEUE_DROP_REASON_MAP, readEntryAudio } from './narration-queue.js';
 
 export const DEFAULT_DUCK_DB = -12;
 const DEFAULT_RAMP_MS = 120;
@@ -25,7 +25,7 @@ export function createSidePanner({ audioContext, positionX }) {
 export class NarrationMixer {
   constructor({ onStatus = null, onDrop = null, duckDecibel = DEFAULT_DUCK_DB,
     createAudioContext = () => new AudioContext(), now = () => performance.now(),
-    isEntryEnabled = () => true, prepareAudio = readEntryAudio } = {}) {
+    isEntryEnabled = () => true, prepareAudio = readEntryAudio, getPlaybackTimeMs = () => null } = {}) {
     this.onStatus = onStatus || (() => {});
     this.prepareAudio = prepareAudio;
     this.onDrop = onDrop || (() => {});
@@ -39,7 +39,7 @@ export class NarrationMixer {
     this.currentSource = null;
     this.currentEntry = null;
     this.playToken = 0;
-    this.queue = new NarrationQueue({ now, isEntryEnabled });
+    this.queue = new NarrationQueue({ now, isEntryEnabled, getPlaybackTimeMs });
     this.isInserting = false;
   }
 
@@ -87,13 +87,7 @@ export class NarrationMixer {
       return;
     }
     for (const entry of entryList) this.queue.push(entry);
-    // 꺼진 분류의 질문 답은 어차피 버려지므로 재생 중인 해설을 끊지 않는다.
-    const isInterrupting = entryList.some((entry) => this.queue.isEntryEnabled(entry)
-      && shouldInterrupt({ currentEntry: this.currentEntry, incomingEntry: entry }));
-    if (isInterrupting) {
-      this.interruptCurrent();
-      return;
-    }
+    // 질문 답(수동 AD)도 재생 중인 해설을 끊지 않는다. 끝나면 대기 줄 순위(질문 답이 0순위)대로 바로 이어 재생한다.
     if (!this.currentEntry) this.beginNext();
   }
 
@@ -137,16 +131,6 @@ export class NarrationMixer {
   handleNarrationEnded() {
     this.currentSource = null;
     this.currentEntry = null;
-    this.beginNext();
-  }
-
-  interruptCurrent() {
-    const entry = this.currentEntry;
-    this.playToken += 1;
-    try { this.currentSource?.stop(); } catch {  }
-    this.currentSource = null;
-    this.currentEntry = null;
-    if (entry) this.onDrop({ entry, reason: QUEUE_DROP_REASON_MAP.interrupted });
     this.beginNext();
   }
 

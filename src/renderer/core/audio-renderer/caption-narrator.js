@@ -1,5 +1,5 @@
 import { SIC_CATCHUP_MIN_RATE, SIC_CATCHUP_MAX_RATE, SIC_CATCHUP_RATE_PER_SEC } from '../constants.js';
-import { NarrationQueue, shouldInterrupt, QUEUE_DROP_REASON_MAP, readEntryAudio } from './narration-queue.js';
+import { NarrationQueue, QUEUE_DROP_REASON_MAP, readEntryAudio } from './narration-queue.js';
 import { isImmediateCaption } from './narration-entry.js';
 import {
   computeGainFromDecibel, createSidePanner, DEFAULT_DUCK_DB, NARRATION_PAN_X,
@@ -14,7 +14,7 @@ export function computeCatchupRate({ pausedSec, minRate, maxRate, ratePerSec }) 
 export class CaptionNarrator {
   constructor({ getLiveVideo, onStatus = null, onDrop = null, getRateRange = null, isCatchupDelegated = null,
     createAudioContext = () => new AudioContext(), now = () => performance.now(),
-    isEntryEnabled = () => true, prepareAudio = readEntryAudio }) {
+    isEntryEnabled = () => true, prepareAudio = readEntryAudio, getPlaybackTimeMs = () => null }) {
     this.getLiveVideo = getLiveVideo;
     this.prepareAudio = prepareAudio;
     this.onStatus = onStatus || (() => {});
@@ -35,7 +35,7 @@ export class CaptionNarrator {
     this.playToken = 0;
     this.pausedTotalMs = 0;
     this.pauseStartedAt = null;
-    this.queue = new NarrationQueue({ now, getPausedMs: () => this.readPausedMs(), isEntryEnabled });
+    this.queue = new NarrationQueue({ now, getPausedMs: () => this.readPausedMs(), isEntryEnabled, getPlaybackTimeMs });
     // isInserting: 자동 해설 때문에 회의 영상을 멈춘 상태. isOverlaying: 질문 답을 회의 소리를 줄인 채 겹쳐 트는 상태.
     this.isInserting = false;
     this.isOverlaying = false;
@@ -106,13 +106,7 @@ export class CaptionNarrator {
       return;
     }
     for (const entry of entryList) this.queue.push(entry);
-    // 꺼진 분류의 질문 답은 어차피 버려지므로 재생 중인 해설을 끊지 않는다.
-    const isInterrupting = entryList.some((entry) => this.queue.isEntryEnabled(entry)
-      && shouldInterrupt({ currentEntry: this.currentEntry, incomingEntry: entry }));
-    if (isInterrupting) {
-      this._interruptCurrent();
-      return;
-    }
+    // 질문 답(수동 AD)도 재생 중인 해설을 끊지 않는다. 끝나면 대기 줄 순위(질문 답이 0순위)대로 바로 이어 재생한다.
     if (!this.currentEntry) this._beginNext();
   }
 
@@ -167,22 +161,6 @@ export class CaptionNarrator {
     this.currentNarrationSec = 0;
     this.currentSource = null;
     this.currentEntry = null;
-    this._beginNext();
-  }
-
-  // 질문 답이 자동 해설을 끊는다. 멈춰 있던 만큼은 따라잡기에 넣는다.
-  _interruptCurrent() {
-    const entry = this.currentEntry;
-    if (this.isInserting && this.currentSource && this.audioContext) {
-      const playedSec = Math.max(0, this.audioContext.currentTime - this.currentStartSec);
-      this.narratedSec += Math.min(playedSec, this.currentNarrationSec);
-    }
-    this.playToken += 1;
-    try { this.currentSource?.stop(); } catch {  }
-    this.currentSource = null;
-    this.currentEntry = null;
-    this.currentNarrationSec = 0;
-    if (entry) this.onDrop({ entry, reason: QUEUE_DROP_REASON_MAP.interrupted });
     this._beginNext();
   }
 

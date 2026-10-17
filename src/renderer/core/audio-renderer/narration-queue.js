@@ -21,10 +21,14 @@ export const SAME_PRIORITY_ORDER_MAP = {
 // 재생 차례가 된 뒤 앞 해설이 끝나기를 이만큼 넘게 기다린 자동 해설은 발표가 이미 지나간 내용이라 버린다.
 export const NARRATION_QUEUE_TTL_MS = 8000;
 
+// 자동 해설이 재생 차례에 왔을 때 그 트리거(사건 시각)에서 이만큼 넘게 지났으면 버린다. 트리거에서 너무 멀어지면
+// 무엇에 대한 해설인지 알 수 없고, 그사이 발표자가 이미 설명했을 수 있다(수동 AD 를 기다리는 보류 뒤에 특히 생긴다).
+export const NARRATION_STALE_AFTER_TRIGGER_MS = 10000;
+
 export const QUEUE_DROP_REASON_MAP = {
   expired: 'expired',
+  stale: 'stale',
   slideChanged: 'slide_changed',
-  interrupted: 'interrupted',
   featureOff: 'feature_off',
   ttsFailed: 'tts_failed',
   stopped: 'stopped',
@@ -36,8 +40,8 @@ export const QUEUE_DROP_REASON_MAP = {
 
 export const QUEUE_DROP_LABEL_MAP = {
   [QUEUE_DROP_REASON_MAP.expired]: `재생 대기 ${NARRATION_QUEUE_TTL_MS / 1000}초 초과 — 버림`,
+  [QUEUE_DROP_REASON_MAP.stale]: `트리거 뒤 ${NARRATION_STALE_AFTER_TRIGGER_MS / 1000}초 지남 — 지나간 내용이라 버림`,
   [QUEUE_DROP_REASON_MAP.slideChanged]: '다음 슬라이드 전환 고지가 앞서 — 이전 슬라이드 해설 버림',
-  [QUEUE_DROP_REASON_MAP.interrupted]: '질문 답이 재생 중인 해설을 끊음',
   [QUEUE_DROP_REASON_MAP.featureOff]: '기능 꺼짐 — 대기 중이던 해설 버림',
   [QUEUE_DROP_REASON_MAP.ttsFailed]: 'TTS 합성 실패 — 소리 없이 건너뜀',
   [QUEUE_DROP_REASON_MAP.stopped]: '재생 멈춤(일시정지·모드 전환·정지) — 기다리던 해설 버림',
@@ -56,11 +60,6 @@ export async function readEntryAudio(entry) {
 export function readNarrationPriority({ narrationClass }) {
   const priority = NARRATION_PRIORITY_MAP[narrationClass];
   return Number.isInteger(priority) ? priority : NARRATION_PRIORITY_MAP[NARRATION_CLASS_MAP.deixis];
-}
-
-// 질문 답만 재생 중인 자동 해설을 끊는다. 자동 해설끼리는 끊지 않고 다음 차례만 앞당긴다.
-export function shouldInterrupt({ currentEntry, incomingEntry }) {
-  return Boolean(currentEntry) && isImmediateCaption(incomingEntry) && !isImmediateCaption(currentEntry);
 }
 
 function isPageTransition(entry) {
@@ -113,12 +112,14 @@ function pickFirst(entryList) {
 export class NarrationQueue {
   // getPausedMs: 해설 때문에 회의가 멈춰 있던 누적 시간. 교차 모드는 그동안 재생 위치가 서 있어 기다린 시간에 넣지 않는다.
   // isEntryEnabled: 사용자가 끈 분류(C15)는 생성 중에 꺼졌거나 예약돼 있던 것도 재생하지 않는다.
+  // getPlaybackTimeMs: 사용자가 지금 듣고 있는 영상 시각. 해설의 사건 시각(eventTimeMs)과 같은 축이다.
   constructor({ ttlMs = NARRATION_QUEUE_TTL_MS, now = () => performance.now(), getPausedMs = () => 0,
-    isEntryEnabled = () => true } = {}) {
+    isEntryEnabled = () => true, getPlaybackTimeMs = () => null } = {}) {
     this.ttlMs = ttlMs;
     this.now = now;
     this.getPausedMs = getPausedMs;
     this.isEntryEnabled = isEntryEnabled;
+    this.getPlaybackTimeMs = getPlaybackTimeMs;
     this.entryList = [];
     this.nextSeq = 0;
   }
@@ -133,14 +134,22 @@ export class NarrationQueue {
     return nowTs - entry.dueAt - (this.getPausedMs() - entry.pausedMsAtPush);
   }
 
+  isStaleAfterTrigger({ entry, playbackMs }) {
+    return Number.isFinite(playbackMs) && Number.isFinite(entry.eventTimeMs)
+      && playbackMs - entry.eventTimeMs > NARRATION_STALE_AFTER_TRIGGER_MS;
+  }
+
   takeNext() {
     const nowTs = this.now();
+    const playbackMs = this.getPlaybackTimeMs();
     const droppedList = [];
     const drop = ({ entry, reason }) => droppedList.push({ entry, reason, waitedMs: this.readWaitedMs({ entry, nowTs }) });
     let aliveList = [];
     for (const entry of this.entryList) {
       if (!this.isEntryEnabled(entry)) {
         drop({ entry, reason: QUEUE_DROP_REASON_MAP.featureOff });
+      } else if (isExpirable(entry) && this.isStaleAfterTrigger({ entry, playbackMs })) {
+        drop({ entry, reason: QUEUE_DROP_REASON_MAP.stale });
       } else if (isExpirable(entry) && this.readWaitedMs({ entry, nowTs }) > this.ttlMs) {
         drop({ entry, reason: QUEUE_DROP_REASON_MAP.expired });
       } else {

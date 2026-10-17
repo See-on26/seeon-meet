@@ -35,7 +35,9 @@ import {
   AsrSegmentTimeline, buildInsertionGapList, resolveInsertionTargetMs, isAudioGapActive,
   GAP_CANDIDATE_SOURCE_MAP, SNAP_REASON_MAP,
 } from '../core/audio-renderer/audio-gap-candidates.js';
-import { isImmediateCaption, isAnchoredCaption, NarrationHoldGate } from '../core/audio-renderer/narration-entry.js';
+import {
+  isImmediateCaption, isAnchoredCaption, NarrationHoldGate, holdDuringAnswer, MANUAL_ANSWER_HOLD_MAX_MS,
+} from '../core/audio-renderer/narration-entry.js';
 import { QUEUE_DROP_LABEL_MAP, QUEUE_DROP_REASON_MAP } from '../core/audio-renderer/narration-queue.js';
 import { NarrationAudioPrefetcher } from '../core/audio-renderer/narration-audio-prefetcher.js';
 import { QuestionRecorder } from '../core/command/question-recorder.js';
@@ -151,6 +153,8 @@ const narrator = new CaptionNarrator({
   isEntryEnabled: isNarrationEntryEnabled,
   getRateRange: () => getCatchupRateRange({ mode: getCurrentMode() }),
   isCatchupDelegated: () => Boolean(delayBuffer),
+  // 트리거에서 10초 넘게 멀어진 자동 해설을 버리는 기준. 교차 모드는 사용자가 듣고 있는 늦춘 위치다.
+  getPlaybackTimeMs: () => (delayBuffer ? delayBuffer.getDelayedTimeMs() : captureSource.videoTimeMs),
 });
 
 let narrationMixer = null;
@@ -287,7 +291,7 @@ function startNarrationPlayer({ stream }) {
   if (policy?.isMixed) {
     narrationMixer = new NarrationMixer({
       onStatus: handleNarrationStatus, onDrop: handleNarrationDrop, isEntryEnabled: isNarrationEntryEnabled,
-      prepareAudio: (entry) => narrationAudio.take(entry),
+      prepareAudio: (entry) => narrationAudio.take(entry), getPlaybackTimeMs: () => captureSource.videoTimeMs,
     });
     narrationMixer.start(stream);
 
@@ -1244,6 +1248,11 @@ async function askQuestion({ command = null, questionText = null, inputSource = 
     return;
   }
   appendAskBubble({ text: questionText || USER_COMMAND_LABEL_MAP[command] || command });
+  // 답(수동 AD)이 나올 때까지 자동 해설을 보류한다(최대 20초). 재생 중인 해설은 끊지 않고 끝난 뒤 답을 바로 낸다.
+  await holdDuringAnswer({ gate: narrationGate, task: () => requestAnswer({ command, questionText, inputSource }) });
+}
+
+async function requestAnswer({ command, questionText, inputSource }) {
   const buffer = await captureFrameJpeg();
   if (!buffer) {
     announce('화면을 캡처하지 못해 질문하지 못했어요');
@@ -2268,10 +2277,8 @@ async function endMicQuestionSession({ isAwaitingAnswer = false } = {}) {
 }
 
 // 음성 인식·답 생성이 멈춰도 자동 해설이 계속 막히지 않게 답을 기다리는 시간에 상한을 둔다.
-const MIC_ANSWER_HOLD_MAX_MS = 20000;
-
 function askQuestionFromAudioWithinHold(event) {
-  return Promise.race([askQuestionFromAudio(event), waitFor({ ms: MIC_ANSWER_HOLD_MAX_MS })]);
+  return Promise.race([askQuestionFromAudio(event), waitFor({ ms: MANUAL_ANSWER_HOLD_MAX_MS })]);
 }
 
 async function askQuestionFromAudio({ buffer, startTs }) {

@@ -3,7 +3,7 @@ import assert from 'node:assert/strict';
 import { createRequire } from 'node:module';
 import {
   NarrationQueue, NARRATION_QUEUE_TTL_MS, QUEUE_DROP_REASON_MAP, NARRATION_PRIORITY_MAP, readNarrationPriority,
-  shouldInterrupt, SAME_PRIORITY_ORDER_MAP,
+  SAME_PRIORITY_ORDER_MAP,
 } from '../src/renderer/core/audio-renderer/narration-queue.js';
 
 const require = createRequire(import.meta.url);
@@ -155,16 +155,6 @@ test('빈 대기 줄은 null 을 돌려주고 clear 는 대기 해설을 모두 
   queue.clear();
   assert.equal(queue.size, 0);
   assert.equal(queue.takeNext().entry, null);
-});
-
-test('질문 답만 재생 중인 자동 해설을 끊는다', () => {
-  const answer = { narrationClass: 'user_command' };
-  const transition = { narrationClass: 'page_transition' };
-  const deixis = { narrationClass: 'deixis' };
-  assert.equal(shouldInterrupt({ currentEntry: deixis, incomingEntry: answer }), true);
-  assert.equal(shouldInterrupt({ currentEntry: deixis, incomingEntry: transition }), false);
-  assert.equal(shouldInterrupt({ currentEntry: answer, incomingEntry: answer }), false);
-  assert.equal(shouldInterrupt({ currentEntry: null, incomingEntry: answer }), false);
 });
 
 test('늦게 들어온 전환 고지는 그 뒤에 일어난 새 슬라이드 해설을 버리지 않는다', () => {
