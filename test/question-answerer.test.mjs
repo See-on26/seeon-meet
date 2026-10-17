@@ -5,7 +5,7 @@ import { createRequire } from 'node:module';
 const require = createRequire(import.meta.url);
 const { createContextStore } = require('../src/main/caption-pipeline/context/context-store.js');
 const {
-  createQuestionAnswerer, NOT_FOUND_TEXT, NO_IMAGE_TEXT, SPEAKER_UNKNOWN_TEXT,
+  createQuestionAnswerer, NOT_FOUND_TEXT, NO_IMAGE_TEXT, SPEAKER_UNKNOWN_TEXT, OFF_TOPIC_TEXT,
 } = require('../src/main/caption-pipeline/context/question-answerer.js');
 
 const wordBudget = { minWordCount: 3, maxWordCount: 15 };
@@ -99,10 +99,10 @@ test('회의 흐름은 색인과 슬라이드별 발화 앞부분으로 답한�
   assert.doesNotMatch(textCallList[0].prompt, /\[슬라이드 [34]\]/);
 });
 
-test('none 갈래는 모델 없이 없는 내용이라고 답한다', async () => {
+test('회의와 무관한 none 갈래는 모델 없이 회의 질문에만 답한다고 말한다', async () => {
   const { answerer, textCallList } = makeAnswerer();
   const result = await answerer.answer({ route: 'none', slideMajorList: [], questionText: '날씨?', wordBudget });
-  assert.deepEqual(result, { text: NOT_FOUND_TEXT, isGrounded: false, isImageUsed: false });
+  assert.deepEqual(result, { text: OFF_TOPIC_TEXT, isGrounded: true, isImageUsed: false });
   assert.equal(textCallList.length, 0);
 });
 

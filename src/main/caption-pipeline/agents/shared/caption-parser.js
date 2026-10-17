@@ -97,6 +97,10 @@ function isSlotJsonAttempt({ text }) {
   return /"\w+"\s*:\s*"/.test(text);
 }
 
+// 모델이 "…정보가 없습니다. NONE" 처럼 설명 뒤에 토큰을 붙이는 경우. 토큰이 사용자에게 읽히지 않게 답 없음으로 본다.
+// 대문자 토큰이 끝에 홀로 있을 때만 본다(문장 가운데 NONE·영어 소문자 none 은 답으로 둔다).
+const TRAILING_NONE_PATTERN = new RegExp(`(?:^|[\\s.,!?。])["'“”‘’]?${GROUNDING_NONE_TOKEN}["'“”‘’]?[.。!]?\\s*$`);
+
 function parseGroundingText(content, maxChars = DEFAULT_GROUNDING_MAX_CHARS, maxWordCount = null) {
   if (typeof content !== 'string') return { text: '', isGrounded: false };
 
@@ -105,7 +109,7 @@ function parseGroundingText(content, maxChars = DEFAULT_GROUNDING_MAX_CHARS, max
     .replace(/\*+/g, '')
     .replace(/^\s*(?:[가-힣A-Za-z0-9 ·]{0,12}(?:형|캡션|내레이션|답변))\s*[:：]\s*/, '')
     .trim();
-  if (!cleaned || new RegExp(`^${GROUNDING_NONE_TOKEN}\\b`, 'i').test(cleaned)) {
+  if (!cleaned || new RegExp(`^${GROUNDING_NONE_TOKEN}\\b`, 'i').test(cleaned) || TRAILING_NONE_PATTERN.test(cleaned)) {
     return { text: '', isGrounded: false };
   }
 
