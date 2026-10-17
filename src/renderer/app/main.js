@@ -1262,7 +1262,8 @@ async function requestAnswer({ command, questionText, inputSource }) {
   const wordBudget = computeAnswerWordBudget();
   if (!questionText) {
     await window.seeon.sendPipelineCommand({
-      ts, buffer, command, wordBudget, eventVideoTimeMs: captureSource.videoTimeMs,
+      ts, buffer, command, questionLabel: USER_COMMAND_LABEL_MAP[command] || '', wordBudget,
+      eventVideoTimeMs: captureSource.videoTimeMs,
     }).catch(() => null);
     return;
   }
@@ -1271,7 +1272,6 @@ async function requestAnswer({ command, questionText, inputSource }) {
   const heardWallTs = Date.now() - Math.max(0, captureSource.videoTimeMs - heardVideoTimeMs);
   const result = await window.seeon.sendPipelineQuestion({
     ts, buffer, questionText, wordBudget, inputSource, heardWallTs, heardVideoTimeMs,
-    recentTranscript: transcriptWindow.getBefore({ nowTs: performance.now(), windowMs: 60000 }),
     currentSlideLabel: slideRegistry.currentLabel(), speakerHintNow: getSpeakerHint(),
     eventVideoTimeMs: captureSource.videoTimeMs,
   }).catch(() => null);

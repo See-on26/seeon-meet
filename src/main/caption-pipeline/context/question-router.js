@@ -2,8 +2,8 @@ const { parseJsonObject } = require('./parse-json-response');
 const { formatElapsed } = require('./clock-format');
 const { QUESTION_ROUTE_MAP } = require('./question-classifier');
 const { formatHeardSlideTag } = require('./slide-tag');
+const { formatQaHistory, formatTargetSlide } = require('./qa-history');
 
-const FOLLOW_UP_WINDOW_MS = 60000;
 const MAX_TARGET_SLIDE_COUNT = 3;
 const ROUTER_MAX_TOKENS = 120;
 const AGENT_LABEL = '질문 라우터';
@@ -12,12 +12,6 @@ const ROUTER_ROUTE_LIST = [
   QUESTION_ROUTE_MAP.currentScreen, QUESTION_ROUTE_MAP.pastSlide, QUESTION_ROUTE_MAP.speaker,
   QUESTION_ROUTE_MAP.narrationReplay, QUESTION_ROUTE_MAP.meetingFlow, QUESTION_ROUTE_MAP.none,
 ];
-
-// 되묻기는 1턴만 받는다. 되묻기에 대한 답(isFollowUp)에는 다시 붙이지 않는다.
-function selectFollowUpQa({ lastQa, now }) {
-  if (!lastQa || lastQa.isFollowUp) return null;
-  return now - lastQa.ts <= FOLLOW_UP_WINDOW_MS ? lastQa : null;
-}
 
 function formatIndexLine({ entry, startedAt }) {
   const fieldList = [
@@ -31,14 +25,24 @@ function formatIndexLine({ entry, startedAt }) {
   return fieldList.join(' | ');
 }
 
-function buildRouterPrompt({ questionText, currentSlideMajor, index, followUpQa, startedAt }) {
-  const followUpLineList = followUpQa ? [
+// 앞서 오간 질문과 답은 시간·횟수 제한 없이 이번 회의 것을 모두 넣는다(너무 길면 오래된 것부터 뺀다).
+// 직전 질문·답은 따로 세 줄로 보인다. 한 줄 목록 속에 두면 모델이 되묻기("그럼 C는?")를 지금 화면 질문으로 본다.
+function buildQaHistoryLineList({ qaList }) {
+  if (!qaList.length) return [];
+  const lastQa = qaList[qaList.length - 1];
+  const earlierText = formatQaHistory({ qaList: qaList.slice(0, -1), isSlideShown: true, isTimeShown: false });
+  return [
     '',
+    ...(earlierText ? ['그 전 질문과 답 (오래된 것부터):', earlierText, ''] : []),
     '직전 질문과 답 (되묻는 질문이면 직전 대상 슬라이드를 그대로 쓴다):',
-    `질문: ${followUpQa.question}`,
-    `답: ${followUpQa.answer}`,
-    `대상 슬라이드: ${followUpQa.slideMajorList.join(', ') || '없음'}`,
-  ] : [];
+    `질문: ${lastQa.question}`,
+    `답: ${lastQa.answer}`,
+    `대상 슬라이드: ${formatTargetSlide({ qa: lastQa })}`,
+  ];
+}
+
+function buildRouterPrompt({ questionText, currentSlideMajor, index, qaList = [], startedAt }) {
+  const qaHistoryLineList = buildQaHistoryLineList({ qaList });
   return [
     '시각장애인 사용자가 회의 중에 질문했다. 답을 어디서 찾을지 고른다.',
     'JSON 하나만 출력한다. 형식: {"route": "<갈래>", "slideMajorList": [슬라이드 번호]}',
@@ -56,7 +60,7 @@ function buildRouterPrompt({ questionText, currentSlideMajor, index, followUpQa,
     `현재 슬라이드 id: ${currentSlideMajor ?? '없음'}`,
     '슬라이드 색인 (id | 들은 번호 | 제목 | 키워드 | 처음 나온 시각):',
     ...(index.length ? index.map((entry) => formatIndexLine({ entry, startedAt })) : ['(아직 없음)']),
-    ...followUpLineList,
+    ...qaHistoryLineList,
     '',
     `질문: ${questionText}`,
   ].join('\n');
@@ -97,5 +101,5 @@ function createQuestionRouter({ requestText }) {
 }
 
 module.exports = {
-  createQuestionRouter, buildRouterPrompt, parseRouterResponse, selectFollowUpQa, FOLLOW_UP_WINDOW_MS,
+  createQuestionRouter, buildRouterPrompt, parseRouterResponse,
 };

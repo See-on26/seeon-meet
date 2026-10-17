@@ -258,8 +258,8 @@ function createContextStore({ onChange = () => {} } = {}) {
     notifyChange();
   }
 
-  function addQa({ ts, question, answer = '', route, slideMajorList = [], isFollowUp = false }) {
-    qaList.push({ ts, question, answer, route, slideMajorList: [...slideMajorList], isFollowUp });
+  function addQa({ ts, question, answer = '', route, slideMajorList = [] }) {
+    qaList.push({ ts, question, answer, route, slideMajorList: [...slideMajorList] });
     notifyChange();
   }
 
@@ -341,7 +341,8 @@ function createContextStore({ onChange = () => {} } = {}) {
     getSessionInfo: () => ({ sessionId, startedAt }),
     applyRecord, applySlideText, cancelTransition, forgetNarration, listReadyForLabelMajors, markLabelRequested, setLabel, addQa,
     getSlide, getSlideList, getCurrentSlideMajor: () => currentMajor,
-    getUtteranceList, getNarrationList, getLastQa: () => qaList[qaList.length - 1] || null,
+    getUtteranceList, getNarrationList,
+    getQaList: () => qaList.map((qa) => ({ ...qa, slideMajorList: [...qa.slideMajorList] })),
     buildIndex, resolveSlideNumber, snapshot,
   };
 }
