@@ -84,6 +84,7 @@ import { RoiStore, SPEAKER_VERDICT_MAP } from '../core/roi/roi-store.js';
 import { MeetCaptureSession } from '../core/capture/meet-capture-session.js';
 import { fitWithinLongEdge } from '../core/capture/frame-scale.js';
 import { wallToVideoTimeMs, resolveSpeechEndWallTs, attachCandidateEventVideoTime } from '../core/capture/video-time.js';
+import { createLogoTapCounter } from '../core/dev/logo-tap-counter.js';
 
 const $ = (id) => document.getElementById(id);
 
@@ -133,6 +134,18 @@ const slideTextBackendStore = createSlideTextBackendStore({ storage: readLocalSt
 const questionPresetStore = createQuestionPresetStore({ storage: readLocalStorage() });
 const isNarrationEntryEnabled = (entry) => featureToggleStore.isClassOn(entry.narrationClass);
 
+// 해설이 들리기 시작한 순간을 main 에 알린다(개발자 모드 흐름 창의 '재생됨').
+// "들은 자리"는 교차 모드면 지연 재생 위치, 동시 모드면 원본 현재 위치다. 둘 다 캡처 영상 시각 축이다.
+function reportNarrationPlayStart(info) {
+  const report = {
+    ...info,
+    mode: getCurrentMode(),
+    playbackVideoTimeMs: delayBuffer ? delayBuffer.getDelayedTimeMs() : null,
+    liveVideoTimeMs: captureSource.videoTimeMs,
+  };
+  window.seeon.reportNarrationPlayback(report);
+}
+
 // Orchestrator → TTS → 전달 Layer: TTS 는 Orchestrator 를 통과한 해설만 만든다. 재생 차례가 가까운 2개는 미리 만들어
 // 차례가 오면 바로 들리게 하고(NarrationAudioPrefetcher), 그보다 뒤는 앞 해설이 재생·버려질 때 차례로 만든다.
 async function synthesizeEntryAudio(entry) {
@@ -150,6 +163,7 @@ const narrator = new CaptionNarrator({
   getLiveVideo: getPlaybackVideo,
   onStatus: handleNarrationStatus,
   onDrop: handleNarrationDrop,
+  onPlayStart: reportNarrationPlayStart,
   isEntryEnabled: isNarrationEntryEnabled,
   getRateRange: () => getCatchupRateRange({ mode: getCurrentMode() }),
   isCatchupDelegated: () => Boolean(delayBuffer),
@@ -291,6 +305,7 @@ function startNarrationPlayer({ stream }) {
   if (policy?.isMixed) {
     narrationMixer = new NarrationMixer({
       onStatus: handleNarrationStatus, onDrop: handleNarrationDrop, isEntryEnabled: isNarrationEntryEnabled,
+      onPlayStart: reportNarrationPlayStart,
       prepareAudio: (entry) => narrationAudio.take(entry), getPlaybackTimeMs: () => captureSource.videoTimeMs,
     });
     narrationMixer.start(stream);
@@ -1550,6 +1565,12 @@ async function showArchiveMeeting({ id }) {
   setArchiveStatus('회의 요약과 대화 스크립트를 열었어요');
   $('archiveDetailTitle').focus();
 }
+
+// 개발자 모드: 로고를 2초 안에 5번 누르면 이번 회의의 파이프라인 흐름 창(단계별 통과/미통과)을 연다.
+const logoTapCounter = createLogoTapCounter();
+$('brandLogo').addEventListener('click', () => {
+  if (logoTapCounter.tap()) window.seeon.openDevFlow().catch(() => {});
+});
 
 $('archiveBtn').addEventListener('click', () => {
   $('archiveModal').showModal();
