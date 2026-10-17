@@ -549,7 +549,7 @@ function registerPipeline({ getViewerView, meetingArchive = null }) {
       markDebug({
         stage: DEBUG_STAGE_MAP.vlm, verdict: DEBUG_VERDICT_MAP.pass, ts,
         narrationType: NARRATION_TYPE_MAP.pageTransition,
-        reason: '전환 내레이션 생성',
+        reason: result.isRetried ? '전환 내레이션 생성(묘사가 길어 다시 물음)' : '전환 내레이션 생성',
         detail: `"${narration}" (${Date.now() - startedAt}ms, 묘사="${result.description}")`,
       });
       const sent = await sendCaption({
