@@ -8,6 +8,7 @@ const {
 const { toNarrationClass, NARRATION_ORIGIN_MAP } = require('./contracts/narration-class');
 const { buildSpeakerIdentityFromDom } = require('./agents/speaker-identity-agent');
 const { DEBUG_STAGE_MAP, DEBUG_VERDICT_MAP } = require('./contracts/debug-events');
+const { DEFAULT_CAPTION_LANGUAGE, resolveCaptionLanguage } = require('./contracts/caption-language');
 const { createDevFlow } = require('../dev-flow');
 const { flattenPlaybackReport } = require('../dev-flow/playback-report');
 const { createAgentFieldMap } = require('./agents');
@@ -216,6 +217,8 @@ function registerPipeline({ getViewerView, meetingArchive = null }) {
 
   // 화면 글자 읽기 방법은 설정 화면에서 고른 값이 회의마다 넘어온다. 넘어오지 않으면 .env 값이다.
   let sessionSlideTextBackend = config.slideTextBackend;
+  // 사용자에게 들리는 말의 언어. 캡처를 시작할 때 설정 화면에서 고른 값이 넘어온다.
+  let sessionCaptionLanguage = DEFAULT_CAPTION_LANGUAGE;
   const slideTextAgent = createSlideTextAgent({
     config, ocrClient: createOcrClient({ config }), getBackend: () => sessionSlideTextBackend,
   });
@@ -342,7 +345,7 @@ function registerPipeline({ getViewerView, meetingArchive = null }) {
     }
   });
 
-  ipcMain.handle('pipeline-session-start', async (_event, { mode = '', asrLanguage, slideTextBackend } = {}) => {
+  ipcMain.handle('pipeline-session-start', async (_event, { mode = '', asrLanguage, captionLanguage, slideTextBackend } = {}) => {
     describedStore.reset();
     captionDescribed.reset();
     screenRegistry.reset();
@@ -354,14 +357,15 @@ function registerPipeline({ getViewerView, meetingArchive = null }) {
     boundaryTrigger.reset();
     const meetingLanguage = applySessionMeetingLanguage({ asrLanguageSession, asrLanguage });
     sessionSlideTextBackend = resolveSlideTextBackend({ requested: slideTextBackend, fallback: config.slideTextBackend });
-    const { sessionId } = sessionStore.startSession({ mode, asrLanguage: meetingLanguage });
+    sessionCaptionLanguage = resolveCaptionLanguage(captionLanguage);
+    const { sessionId } = sessionStore.startSession({ mode, asrLanguage: meetingLanguage, captionLanguage: sessionCaptionLanguage });
     devFlow.recorder.start({ sessionId, mode });
     contextGeneration += 1;
     contextStore.start({ sessionId, startedAt: Date.now() });
-    console.log(`[pipeline] ■ 캡처 세션 시작 (모드=${mode}, 회의 언어=${meetingLanguage}, 화면 글자=${sessionSlideTextBackend}, ${sessionId}) — 중복 이력·화면 레지스트리 초기화`);
+    console.log(`[pipeline] ■ 캡처 세션 시작 (모드=${mode}, 받아쓰기=${meetingLanguage}, 캡션 언어=${sessionCaptionLanguage}, 화면 글자=${sessionSlideTextBackend}, ${sessionId}) — 중복 이력·화면 레지스트리 초기화`);
     markDebug({
       stage: DEBUG_STAGE_MAP.session, verdict: DEBUG_VERDICT_MAP.info,
-      reason: '세션 시작', detail: `모드=${mode} · 회의 언어=${meetingLanguage} · 화면 글자=${sessionSlideTextBackend} · ${sessionId} · 기록=${recordStore.filePath}`,
+      reason: '세션 시작', detail: `모드=${mode} · 받아쓰기=${meetingLanguage} · 캡션 언어=${sessionCaptionLanguage} · 화면 글자=${sessionSlideTextBackend} · ${sessionId} · 기록=${recordStore.filePath}`,
     });
 
     return { isOk: true, sessionId, recordPath: recordStore.filePath, gapSource: config.gapSource };

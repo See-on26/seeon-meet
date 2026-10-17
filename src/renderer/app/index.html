@@ -172,7 +172,7 @@
     #featureToggleList + .set-row { border-top: 1px solid var(--hairline); }
     .set-select { padding: 4px 8px; border-radius: 8px; border: 1px solid var(--hairline-strong); background: var(--parchment); color: var(--ink-80); font: inherit; font-size: 12px; font-weight: 600; }
     .set-select[aria-disabled="true"] { opacity: 0.45; cursor: not-allowed; }
-    #meetingLanguageNote, #slideTextBackendNote, #questionPresetNote { margin-top: 0; }
+    #captionLanguageNote, #slideTextBackendNote, #questionPresetNote { margin-top: 0; }
     #questionPresetSection { border-top: 1px solid var(--hairline); margin-top: 7px; }
     .set-mini { padding: 3px 9px; border-radius: 8px; border: 1px solid var(--hairline-strong); background: var(--parchment); color: var(--ink-80); font-size: 11px; font-weight: 600; }
     .preset-row { display: flex; align-items: center; gap: 6px; padding: 3px 0; }
@@ -318,10 +318,10 @@
     </div>
     <div id="featureToggleList" role="group" aria-label="기능 켜기·끄기"></div>
     <div class="set-row">
-      <label class="label" for="meetingLanguageSelect">회의 언어</label>
-      <select id="meetingLanguageSelect" class="set-select" aria-describedby="meetingLanguageNote"></select>
+      <label class="label" for="captionLanguageSelect">캡션 언어</label>
+      <select id="captionLanguageSelect" class="set-select" aria-describedby="captionLanguageNote"></select>
     </div>
-    <div class="set-note" id="meetingLanguageNote">자동(한·영)은 말하는 조각마다 한국어·영어 중 하나로 전사해요. 회의 캡처 중에는 바꿀 수 없어요.</div>
+    <div class="set-note" id="captionLanguageNote">해설·질문 답·요약을 들려줄 언어예요. 회의 말은 한국어·영어를 자동으로 알아들어요. 회의 캡처 중에는 바꿀 수 없어요.</div>
     <div class="set-row">
       <label class="label" for="slideTextBackendSelect">화면 글자 읽기</label>
       <select id="slideTextBackendSelect" class="set-select" aria-describedby="slideTextBackendNote"></select>

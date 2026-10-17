@@ -34,17 +34,17 @@ function createFakeAsrClient() {
 beforeEach(() => { requestUrlList = []; });
 afterEach(() => { globalThis.fetch = originalFetch; mock.restoreAll(); });
 
-test('ASR 언어 허용값은 ko·en·auto 이고 기본은 ko 다', () => {
+test('ASR 언어 허용값은 ko·en·auto 이고 기본은 자동(auto)이다', () => {
   assert.deepEqual(ASR_LANGUAGE_LIST, ['ko', 'en', 'auto']);
-  assert.equal(DEFAULT_ASR_LANGUAGE, 'ko');
+  assert.equal(DEFAULT_ASR_LANGUAGE, 'auto');
   for (const language of ['ko', 'en', 'auto']) assert.equal(isAsrLanguage(language), true, language);
   for (const language of ['ja', 'EN', '', undefined, null]) assert.equal(isAsrLanguage(language), false, String(language));
 });
 
-test('환경변수가 없으면 회의·질문 ASR 언어 둘 다 ko 다', () => {
+test('환경변수가 없으면 회의·질문 ASR 언어 둘 다 자동(auto)이다', () => {
   const config = readPipelineConfig({});
-  assert.equal(config.asrLanguage, 'ko');
-  assert.equal(config.questionAsrLanguage, 'ko');
+  assert.equal(config.asrLanguage, 'auto');
+  assert.equal(config.questionAsrLanguage, 'auto');
 });
 
 test('회의와 질문 ASR 언어는 환경변수를 따로 읽는다', () => {
@@ -54,14 +54,14 @@ test('회의와 질문 ASR 언어는 환경변수를 따로 읽는다', () => {
   }
   const config = readPipelineConfig({ SEEON_ASR_LANGUAGE: 'en' });
   assert.equal(config.asrLanguage, 'en');
-  assert.equal(config.questionAsrLanguage, 'ko');
+  assert.equal(config.questionAsrLanguage, 'auto');
 });
 
-test('허용하지 않는 ASR 언어는 경고하고 ko 로 둔다', () => {
+test('허용하지 않는 ASR 언어는 경고하고 자동(auto)으로 둔다', () => {
   const warn = mock.method(console, 'warn', () => {});
   const config = readPipelineConfig({ SEEON_ASR_LANGUAGE: 'japanese', SEEON_QUESTION_ASR_LANGUAGE: 'EN' });
-  assert.equal(config.asrLanguage, 'ko');
-  assert.equal(config.questionAsrLanguage, 'ko');
+  assert.equal(config.asrLanguage, 'auto');
+  assert.equal(config.questionAsrLanguage, 'auto');
   assert.equal(warn.mock.callCount(), 2);
   assert.match(warn.mock.calls[0].arguments[0], /SEEON_ASR_LANGUAGE/);
   assert.match(warn.mock.calls[1].arguments[0], /SEEON_QUESTION_ASR_LANGUAGE/);

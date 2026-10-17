@@ -19,9 +19,9 @@ import {
   createQuestionPresetStore, MAX_QUESTION_PRESET_COUNT, readQuestionPresetSlotFromKey,
 } from '../core/mode/question-preset-store.js';
 import {
-  createMeetingLanguageStore, MEETING_LANGUAGE_LIST, MEETING_LANGUAGE_LABEL_MAP, isMeetingLanguageLocked,
-  describeNonDefaultMeetingLanguage,
-} from '../core/mode/meeting-language-store.js';
+  createCaptionLanguageStore, CAPTION_LANGUAGE_LIST, CAPTION_LANGUAGE_LABEL_MAP, isCaptionLanguageLocked,
+  describeNonDefaultCaptionLanguage,
+} from '../core/mode/caption-language-store.js';
 import {
   createSlideTextBackendStore, SLIDE_TEXT_BACKEND_OPTION_LIST, SLIDE_TEXT_BACKEND_LABEL_MAP,
 } from '../core/mode/slide-text-backend-store.js';
@@ -129,7 +129,7 @@ function readLocalStorage() {
 }
 
 const featureToggleStore = createFeatureToggleStore({ storage: readLocalStorage() });
-const meetingLanguageStore = createMeetingLanguageStore({ storage: readLocalStorage() });
+const captionLanguageStore = createCaptionLanguageStore({ storage: readLocalStorage() });
 const slideTextBackendStore = createSlideTextBackendStore({ storage: readLocalStorage() });
 const questionPresetStore = createQuestionPresetStore({ storage: readLocalStorage() });
 const isNarrationEntryEnabled = (entry) => featureToggleStore.isClassOn(entry.narrationClass);
@@ -1401,67 +1401,68 @@ window.seeon.onFeatureToggle(({ feature }) => {
 buildFeatureToggleList();
 syncFeatureTogglesToMain();
 
-// 회의 언어(한국어·English·자동)는 여기서 고르기만 하고, 캡처를 시작할 때 main 에 한 번 넘겨 적용한다.
+// 캡션 언어(한국어·English)는 여기서 고르기만 하고, 캡처를 시작할 때 main 에 한 번 넘겨 그 회의 동안 쓴다.
+// 회의 받아쓰기는 고르지 않는다(늘 자동). 사용자에게 들리는 말과 화면 글자가 이 언어를 따른다.
 // 화자 안내처럼 잠긴 동안에도 초점을 받아 왜 못 바꾸는지 들을 수 있게 disabled 대신 aria-disabled 를 쓴다.
-const MEETING_LANGUAGE_OPEN_KEY_LIST = [' ', 'Enter', 'ArrowUp', 'ArrowDown'];
+const CAPTION_LANGUAGE_OPEN_KEY_LIST = [' ', 'Enter', 'ArrowUp', 'ArrowDown'];
 
-function isMeetingLanguageLockedNow() {
-  return isMeetingLanguageLocked({ isCaptureActive: captureSource.isActive });
+function isCaptionLanguageLockedNow() {
+  return isCaptionLanguageLocked({ isCaptureActive: captureSource.isActive });
 }
 
-function announceMeetingLanguageLocked() {
-  announce('회의 언어는 회의 캡처를 시작하기 전에만 바꿀 수 있어요');
+function announceCaptionLanguageLocked() {
+  announce('캡션 언어는 회의 캡처를 시작하기 전에만 바꿀 수 있어요');
 }
 
 // 잠긴 선택 상자는 펼치지 않는다. 그래도 값이 바뀌면(문자 입력 등) change 에서 되돌린다.
-function blockLockedMeetingLanguageInput(event) {
-  if (!isMeetingLanguageLockedNow()) return;
-  if (event.type === 'keydown' && !MEETING_LANGUAGE_OPEN_KEY_LIST.includes(event.key)) return;
+function blockLockedCaptionLanguageInput(event) {
+  if (!isCaptionLanguageLockedNow()) return;
+  if (event.type === 'keydown' && !CAPTION_LANGUAGE_OPEN_KEY_LIST.includes(event.key)) return;
   event.preventDefault();
-  announceMeetingLanguageLocked();
+  announceCaptionLanguageLocked();
 }
 
-function handleChangeMeetingLanguage() {
-  const select = $('meetingLanguageSelect');
-  if (isMeetingLanguageLockedNow()) {
-    select.value = meetingLanguageStore.get();
-    announceMeetingLanguageLocked();
+function handleChangeCaptionLanguage() {
+  const select = $('captionLanguageSelect');
+  if (isCaptionLanguageLockedNow()) {
+    select.value = captionLanguageStore.get();
+    announceCaptionLanguageLocked();
     return;
   }
-  meetingLanguageStore.set(select.value);
+  captionLanguageStore.set(select.value);
 }
 
-function buildMeetingLanguageSelect() {
-  const select = $('meetingLanguageSelect');
+function buildCaptionLanguageSelect() {
+  const select = $('captionLanguageSelect');
   if (!select) return;
-  select.replaceChildren(...MEETING_LANGUAGE_LIST.map((language) => {
+  select.replaceChildren(...CAPTION_LANGUAGE_LIST.map((language) => {
     const option = document.createElement('option');
     option.value = language;
-    option.textContent = MEETING_LANGUAGE_LABEL_MAP[language];
+    option.textContent = CAPTION_LANGUAGE_LABEL_MAP[language];
     return option;
   }));
-  select.addEventListener('mousedown', blockLockedMeetingLanguageInput);
-  select.addEventListener('keydown', blockLockedMeetingLanguageInput);
-  select.addEventListener('change', handleChangeMeetingLanguage);
-  syncMeetingLanguageUi();
+  select.addEventListener('mousedown', blockLockedCaptionLanguageInput);
+  select.addEventListener('keydown', blockLockedCaptionLanguageInput);
+  select.addEventListener('change', handleChangeCaptionLanguage);
+  syncCaptionLanguageUi();
 }
 
-function syncMeetingLanguageUi() {
-  const select = $('meetingLanguageSelect');
+function syncCaptionLanguageUi() {
+  const select = $('captionLanguageSelect');
   if (!select) return;
-  select.value = meetingLanguageStore.get();
-  select.setAttribute('aria-disabled', String(isMeetingLanguageLockedNow()));
+  select.value = captionLanguageStore.get();
+  select.setAttribute('aria-disabled', String(isCaptionLanguageLockedNow()));
 }
 
 // 선택 상자는 스크린리더가 바뀐 값을 읽으므로 화면 알림만 띄운다.
-meetingLanguageStore.subscribe(({ language }) => {
-  showNotice(`회의 언어 ${MEETING_LANGUAGE_LABEL_MAP[language]} — 다음 회의 캡처부터 적용돼요`);
-  syncMeetingLanguageUi();
+captionLanguageStore.subscribe(({ language }) => {
+  showNotice(`캡션 언어 ${CAPTION_LANGUAGE_LABEL_MAP[language]} — 다음 회의 캡처부터 적용돼요`);
+  syncCaptionLanguageUi();
 });
 
-buildMeetingLanguageSelect();
+buildCaptionLanguageSelect();
 
-// 화면 글자 읽기(VLM·OCR)도 회의 언어처럼 캡처를 시작할 때 main 에 넘겨 그 회의 동안 쓴다.
+// 화면 글자 읽기(VLM·OCR)도 캡션 언어처럼 캡처를 시작할 때 main 에 넘겨 그 회의 동안 쓴다.
 // 고른 적이 없으면 main 의 .env 값(SEEON_SLIDE_TEXT_BACKEND)을 보여 주고, 그 값으로 읽는다.
 let slideTextBackendDefault = null;
 
@@ -1475,7 +1476,7 @@ function announceSlideTextBackendLocked() {
 
 function blockLockedSlideTextBackendInput(event) {
   if (!captureSource.isActive) return;
-  if (event.type === 'keydown' && !MEETING_LANGUAGE_OPEN_KEY_LIST.includes(event.key)) return;
+  if (event.type === 'keydown' && !CAPTION_LANGUAGE_OPEN_KEY_LIST.includes(event.key)) return;
   event.preventDefault();
   announceSlideTextBackendLocked();
 }
@@ -1985,17 +1986,17 @@ async function attemptStartExperiment() {
   $('toggleBtn').disabled = true;
   try {
     showNotice('회의 캡처를 시작했습니다 — 화면 해설이 곧 표시됩니다.');
-    // 꺼 둔 기능과 고른 회의 언어는 다음 실행에도 남는다. 모르고 회의를 듣지 않게 시작할 때 알린다.
+    // 꺼 둔 기능과 고른 캡션 언어는 다음 실행에도 남는다. 모르고 회의를 듣지 않게 시작할 때 알린다.
     // 연달아 announce 하면 앞 문구가 스크린리더에서 묻히므로 한 번에 읽는다.
     const startNoticeList = [];
-    const languageNotice = describeNonDefaultMeetingLanguage({ language: meetingLanguageStore.get() });
+    const languageNotice = describeNonDefaultCaptionLanguage({ language: captionLanguageStore.get() });
     if (languageNotice) startNoticeList.push(`${languageNotice}. 캡처를 멈춘 뒤 설정에서 바꿀 수 있어요.`);
     const disabledFeatureNotice = describeDisabledFeatureNotice({ store: featureToggleStore });
     if (disabledFeatureNotice) startNoticeList.push(disabledFeatureNotice);
     if (startNoticeList.length) announce(startNoticeList.join(' '));
 
     const sessionResult = await window.seeon.startPipelineSession({
-      mode: getCurrentMode(), asrLanguage: meetingLanguageStore.get(), slideTextBackend: slideTextBackendStore.get(),
+      mode: getCurrentMode(), captionLanguage: captionLanguageStore.get(), slideTextBackend: slideTextBackendStore.get(),
     }).catch(() => null);
     currentSessionId = sessionResult?.sessionId || null;
     gapSource = sessionResult?.gapSource === GAP_CANDIDATE_SOURCE_MAP.audio
@@ -2071,7 +2072,7 @@ async function attemptStartExperiment() {
     $('pauseBtn').disabled = false;
     setToggleUi(true);
     syncFeatureToggleUi();
-    syncMeetingLanguageUi();
+    syncCaptionLanguageUi();
     syncSlideTextBackendUi();
     renderModeButtons();
 
@@ -2153,7 +2154,7 @@ function stopExperiment() {
   $('stBuffer').textContent = '–';
   setToggleUi(false);
   syncFeatureToggleUi();
-  syncMeetingLanguageUi();
+  syncCaptionLanguageUi();
   syncSlideTextBackendUi();
   renderModeButtons();
   markDebug({
@@ -2456,7 +2457,7 @@ function setSettingsPanelOpen(isOpen) {
   if (!isOpen) return;
   placeSettingsPanel();
   syncFeatureToggleUi();
-  syncMeetingLanguageUi();
+  syncCaptionLanguageUi();
   syncSlideTextBackendUi();
 }
 
