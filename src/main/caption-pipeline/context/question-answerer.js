@@ -1,6 +1,7 @@
 const { parseGroundingText, computeMaxChars, GROUNDING_NONE_TOKEN } = require('../agents/shared/caption-parser');
 const { QUESTION_ROUTE_MAP } = require('./question-classifier');
 const { formatHeardSlideTag } = require('./slide-tag');
+const { formatQaHistory } = require('./qa-history');
 const {
   NEED_IMAGE_TOKEN, formatUtteranceLine, buildSlideEvidence, buildPastSlideAnswerPrompt,
   buildImageAnswerPrompt, buildSpeakerAnswerPrompt, buildNarrationReplayPrompt, buildMeetingFlowPrompt,
@@ -44,6 +45,11 @@ function createQuestionAnswerer({ requestText, requestImage, readImage, contextS
     return contextStore.getSessionInfo().startedAt;
   }
 
+  // 이번 회의에서 앞서 오간 질문과 답. 지금 질문은 답을 낸 뒤에 쌓이므로 들어가지 않는다.
+  function readQaHistoryText() {
+    return formatQaHistory({ qaList: contextStore.getQaList(), startedAt: getStartedAt() });
+  }
+
   function buildSlideEvidenceText(slideList) {
     const narrationList = contextStore.getNarrationList({ limit: Infinity });
     return slideList.map((slide) => buildSlideEvidence({
@@ -61,6 +67,7 @@ function createQuestionAnswerer({ requestText, requestImage, readImage, contextS
     const content = await requestText({
       prompt: buildPastSlideAnswerPrompt({
         questionText, evidenceText, ...wordBudget, hasImage: Boolean(slideList[0].imagePath),
+        qaHistoryText: readQaHistoryText(),
       }),
       label: '질문 답(지난 화면)', maxTokens: ANSWER_MAX_TOKENS,
     });
@@ -78,7 +85,7 @@ function createQuestionAnswerer({ requestText, requestImage, readImage, contextS
     }
     const imageContent = await requestImage({
       jpegBuffer,
-      prompt: buildImageAnswerPrompt({ questionText, evidenceText, ...wordBudget }),
+      prompt: buildImageAnswerPrompt({ questionText, evidenceText, ...wordBudget, qaHistoryText: readQaHistoryText() }),
       label: '질문 답(지난 화면 이미지)', maxTokens: ANSWER_MAX_TOKENS,
     });
     return { ...toAnswer({ content: imageContent, wordBudget }), isImageUsed: true };
@@ -93,7 +100,7 @@ function createQuestionAnswerer({ requestText, requestImage, readImage, contextS
       .map((utterance) => formatUtteranceLine({ utterance, startedAt: getStartedAt() }))
       .join('\n');
     const content = await requestText({
-      prompt: buildSpeakerAnswerPrompt({ questionText, utteranceText, ...wordBudget }),
+      prompt: buildSpeakerAnswerPrompt({ questionText, utteranceText, ...wordBudget, qaHistoryText: readQaHistoryText() }),
       label: '질문 답(화자)', maxTokens: ANSWER_MAX_TOKENS,
     });
     return toAnswer({ content, wordBudget });
@@ -107,7 +114,7 @@ function createQuestionAnswerer({ requestText, requestImage, readImage, contextS
       .slice(-NARRATION_REPLAY_LIMIT);
     if (!narrationList.length) return notFound();
     const content = String(await requestText({
-      prompt: buildNarrationReplayPrompt({ questionText, narrationList }),
+      prompt: buildNarrationReplayPrompt({ questionText, narrationList, qaHistoryText: readQaHistoryText() }),
       label: '질문 답(해설 다시)', maxTokens: 20,
     }) ?? '').trim();
     if (content.startsWith(GROUNDING_NONE_TOKEN)) return notFound();
@@ -127,7 +134,7 @@ function createQuestionAnswerer({ requestText, requestImage, readImage, contextS
       ].filter(Boolean).join('\n');
     }).join('\n');
     const content = await requestText({
-      prompt: buildMeetingFlowPrompt({ questionText, flowText, ...wordBudget }),
+      prompt: buildMeetingFlowPrompt({ questionText, flowText, ...wordBudget, qaHistoryText: readQaHistoryText() }),
       label: '질문 답(회의 흐름)', maxTokens: ANSWER_MAX_TOKENS,
     });
     return toAnswer({ content, wordBudget });

@@ -5,7 +5,7 @@ import { createRequire } from 'node:module';
 const require = createRequire(import.meta.url);
 const { formatElapsed } = require('../src/main/caption-pipeline/context/clock-format.js');
 const {
-  selectFollowUpQa, buildRouterPrompt, parseRouterResponse, createQuestionRouter,
+  buildRouterPrompt, parseRouterResponse, createQuestionRouter,
 } = require('../src/main/caption-pipeline/context/question-router.js');
 
 const index = [
@@ -21,18 +21,10 @@ test('경과 시각은 mm:ss, 1시간을 넘으면 h:mm:ss, 모르면 --:--', ()
   assert.equal(formatElapsed({ ts: 1, startedAt: null }), '--:--');
 });
 
-test('직전 Q&A 는 60초 이내이고 되묻기가 아닐 때만 붙인다', () => {
-  const lastQa = { ts: 10_000, question: 'q', answer: 'a', slideMajorList: [3], isFollowUp: false };
-  assert.equal(selectFollowUpQa({ lastQa, now: 70_000 }), lastQa);
-  assert.equal(selectFollowUpQa({ lastQa, now: 70_001 }), null);
-  assert.equal(selectFollowUpQa({ lastQa: { ...lastQa, isFollowUp: true }, now: 11_000 }), null);
-  assert.equal(selectFollowUpQa({ lastQa: null, now: 0 }), null);
-});
-
-test('라우터 프롬프트는 색인·현재 슬라이드·직전 Q&A·질문을 담는다', () => {
+test('라우터 프롬프트는 색인·현재 슬라이드·앞서 오간 질문과 답·질문을 담는다', () => {
   const prompt = buildRouterPrompt({
     questionText: '거기서 두 번째는?', currentSlideMajor: 5, index, startedAt: 1000,
-    followUpQa: { question: '연봉 슬라이드 뭐였어?', answer: '반기 조정', slideMajorList: [3] },
+    qaList: [{ ts: 11000, question: '연봉 슬라이드 뭐였어?', answer: '반기 조정', route: 'past_slide', slideMajorList: [3] }],
   });
   assert.match(prompt, /현재 슬라이드 id: 5/);
   assert.match(prompt, /3 \| 슬라이드 171 \| 반기 연봉 조정 \| 연봉, \+500 \| 02:30/);
@@ -41,7 +33,7 @@ test('라우터 프롬프트는 색인·현재 슬라이드·직전 Q&A·질문�
   assert.match(prompt, /slideMajorList 에는 근거가 될 슬라이드의 id/);
   assert.match(prompt, /대상 슬라이드: 3/);
   assert.match(prompt, /질문: 거기서 두 번째는\?/);
-  assert.doesNotMatch(buildRouterPrompt({ questionText: 'q', currentSlideMajor: null, index: [], startedAt: 0, followUpQa: null }), /직전 질문/);
+  assert.doesNotMatch(buildRouterPrompt({ questionText: 'q', currentSlideMajor: null, index: [], startedAt: 0, qaList: [] }), /직전 질문/);
 });
 
 test('라우터 응답 해석: 모르는 갈래·색인에 없는 번호는 버리고 최대 3장', () => {
@@ -54,16 +46,16 @@ test('라우터 응답 해석: 모르는 갈래·색인에 없는 번호는 버�
 test('라우터는 LLM 결과를 돌려주고, 실패하면 지금 화면으로 대체한다', async () => {
   const router = createQuestionRouter({ requestText: async () => '{"route": "speaker", "slideMajorList": [3]}' });
   assert.deepEqual(
-    await router.route({ questionText: 'q', currentSlideMajor: 5, index, startedAt: 0, followUpQa: null }),
+    await router.route({ questionText: 'q', currentSlideMajor: 5, index, startedAt: 0, qaList: [] }),
     { route: 'speaker', slideMajorList: [3], source: 'llm', reason: '' },
   );
   const brokenRouter = createQuestionRouter({ requestText: async () => '몰라요' });
-  const fallback = await brokenRouter.route({ questionText: 'q', currentSlideMajor: 5, index, startedAt: 0, followUpQa: null });
+  const fallback = await brokenRouter.route({ questionText: 'q', currentSlideMajor: 5, index, startedAt: 0, qaList: [] });
   assert.equal(fallback.route, 'current_screen');
   assert.deepEqual(fallback.slideMajorList, [5]);
   assert.equal(fallback.source, 'fallback');
   const failingRouter = createQuestionRouter({ requestText: async () => { throw new Error('timeout'); } });
-  const failed = await failingRouter.route({ questionText: 'q', currentSlideMajor: null, index, startedAt: 0, followUpQa: null });
+  const failed = await failingRouter.route({ questionText: 'q', currentSlideMajor: null, index, startedAt: 0, qaList: [] });
   assert.equal(failed.route, 'current_screen');
   assert.deepEqual(failed.slideMajorList, []);
   assert.match(failed.reason, /timeout/);

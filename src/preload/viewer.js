@@ -59,13 +59,13 @@ contextBridge.exposeInMainWorld('seeon', {
     return ipcRenderer.invoke('pipeline-deixis',
       { ts, buffer: new Uint8Array(buffer), utterance, recentTranscript, beforeTranscript, afterTranscript, hasPointingRegion, pointingOrderHint, slideLabel, wordBudgetMap, eventVideoTimeMs, triggerCandidateList });
   },
-  sendPipelineCommand({ ts, buffer, command = null, questionText = null, recentTranscript = '', wordBudget = null, eventVideoTimeMs = null }) {
+  sendPipelineCommand({ ts, buffer, command = null, questionText = null, questionLabel = '', recentTranscript = '', wordBudget = null, eventVideoTimeMs = null }) {
     return ipcRenderer.invoke('pipeline-command',
-      { ts, buffer: new Uint8Array(buffer), command, questionText, recentTranscript, wordBudget, eventVideoTimeMs });
+      { ts, buffer: new Uint8Array(buffer), command, questionText, questionLabel, recentTranscript, wordBudget, eventVideoTimeMs });
   },
-  sendPipelineQuestion({ ts, buffer, questionText, recentTranscript = '', wordBudget = null, currentSlideLabel = null, speakerHintNow = null, inputSource = 'typed', eventVideoTimeMs = null, heardWallTs = null, heardVideoTimeMs = null }) {
+  sendPipelineQuestion({ ts, buffer, questionText, wordBudget = null, currentSlideLabel = null, speakerHintNow = null, inputSource = 'typed', eventVideoTimeMs = null, heardWallTs = null, heardVideoTimeMs = null }) {
     return ipcRenderer.invoke('pipeline-question',
-      { ts, buffer: new Uint8Array(buffer), questionText, recentTranscript, wordBudget, currentSlideLabel, speakerHintNow, inputSource, eventVideoTimeMs, heardWallTs, heardVideoTimeMs });
+      { ts, buffer: new Uint8Array(buffer), questionText, wordBudget, currentSlideLabel, speakerHintNow, inputSource, eventVideoTimeMs, heardWallTs, heardVideoTimeMs });
   },
   sendQuestionAudio({ buffer, startTs }) {
     return ipcRenderer.invoke('pipeline-question-audio', { buffer: new Uint8Array(buffer), startTs });
