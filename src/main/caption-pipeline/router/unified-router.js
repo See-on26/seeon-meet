@@ -5,8 +5,8 @@ const {
 } = require('../contracts/narration-types');
 const { TRIGGER_TYPE_MAP } = require('../trigger/speech-trigger');
 const {
-  ROUTER_BLOCKED_REASON_MAP, ROUTER_SYSTEM_PROMPT, FEW_SHOT_LIST, GAP_VERDICT_MAP,
-  buildRouterInput, buildFewShotMessageList,
+  ROUTER_BLOCKED_REASON_MAP, ROUTER_PROMPT_MAP, JUDGE_GROUP_MAP, JUDGE_GROUP_LABEL_MAP, GAP_VERDICT_MAP,
+  readJudgeGroup, buildRouterInput, buildFewShotMessageList,
 } = require('../prompts/unified-router');
 const { verifyValueEvidence, needsEvidence } = require('./judge-evidence');
 
@@ -128,27 +128,55 @@ function createUnifiedRouter({ config, judgeLlm = createJudgeLlm({ config }) }) 
         candidateList: numberedList, blockedReason: ROUTER_BLOCKED_REASON_MAP.judgeUnavailable, source: ROUTER_SOURCE_MAP.fallback,
       });
     }
-    try {
-      const { text, source } = await judgeLlm.requestText({
-        systemPrompt: ROUTER_SYSTEM_PROMPT,
-        messageList: [
-          ...buildFewShotMessageList(),
-          { role: 'user', content: [{ text: buildRouterInput({ before, utterance, after, candidateList: numberedList }) }] },
-        ],
-        maxTokens: MAX_ROUTER_TOKENS, timeoutMs: REQUEST_TIMEOUT_MS, label: '통합 라우터',
-      });
-      const judgeList = parseJudgeText({ text, candidateList: numberedList, context: { before, utterance, after } });
-      const narrationCandidateList = toNarrationCandidateList(judgeList);
-      return {
-        candidateList: narrationCandidateList, judgeList, source,
-        blockedReason: narrationCandidateList.length ? null : ROUTER_BLOCKED_REASON_MAP.noGap,
-      };
-    } catch (error) {
-      console.error('[pipeline] 판단 LLM 실패, 해설하지 않음:', error.message);
+    // 묶음마다 자기 지시문으로 동시에 묻는다. 그 문장에 없는 묶음은 부르지 않는다.
+    const groupList = Object.values(JUDGE_GROUP_MAP)
+      .map((group) => ({ group, candidateList: numberedList.filter((candidate) => readJudgeGroup(candidate.type) === group) }))
+      .filter(({ candidateList: groupCandidateList }) => groupCandidateList.length);
+    const settledList = await Promise.allSettled(groupList.map(({ group, candidateList: groupCandidateList }) => judgeGroup({
+      group, candidateList: groupCandidateList, before, utterance, after,
+    })));
+    const judgedById = new Map();
+    let source = null;
+    settledList.forEach((settled, index) => {
+      const { group, candidateList: groupCandidateList } = groupList[index];
+      if (settled.status === 'fulfilled') {
+        source = source || settled.value.source;
+        for (const entry of settled.value.judgeList) judgedById.set(entry.id, entry);
+        return;
+      }
+      console.error(`[pipeline] ${JUDGE_GROUP_LABEL_MAP[group]} 판단 LLM 실패, 그 후보는 해설하지 않음:`, settled.reason?.message);
+      for (const candidate of groupCandidateList) {
+        judgedById.set(candidate.id, { ...candidate, isGap: false, reason: ROUTER_BLOCKED_REASON_MAP.judgeError, evidence: '' });
+      }
+    });
+    if (!source) {
       return buildBlockedResult({
         candidateList: numberedList, blockedReason: ROUTER_BLOCKED_REASON_MAP.judgeError, source: ROUTER_SOURCE_MAP.error,
       });
     }
+    const judgeList = numberedList.map((candidate) => judgedById.get(candidate.id));
+    const narrationCandidateList = toNarrationCandidateList(judgeList);
+    return {
+      candidateList: narrationCandidateList, judgeList, source,
+      blockedReason: narrationCandidateList.length ? null : ROUTER_BLOCKED_REASON_MAP.noGap,
+    };
+  }
+
+  // 묶음 안에서는 후보 번호를 1부터 다시 매겨 묻고(예시와 같은 모양), 답을 원래 번호로 되돌린다.
+  async function judgeGroup({ group, candidateList: groupCandidateList, before, utterance, after }) {
+    const localList = groupCandidateList.map((candidate, index) => ({ ...candidate, id: index + 1 }));
+    const { text, source } = await judgeLlm.requestText({
+      systemPrompt: ROUTER_PROMPT_MAP[group].systemPrompt,
+      messageList: [
+        ...buildFewShotMessageList({ group }),
+        { role: 'user', content: [{ text: buildRouterInput({ before, utterance, after, candidateList: localList }) }] },
+      ],
+      maxTokens: MAX_ROUTER_TOKENS, timeoutMs: REQUEST_TIMEOUT_MS, label: `${JUDGE_GROUP_LABEL_MAP[group]} 판단`,
+    });
+    const localJudgeList = parseJudgeText({ text, candidateList: localList, context: { before, utterance, after } });
+    return {
+      source, judgeList: localJudgeList.map((entry, index) => ({ ...entry, id: groupCandidateList[index].id })),
+    };
   }
 
   return { route };
@@ -156,6 +184,6 @@ function createUnifiedRouter({ config, judgeLlm = createJudgeLlm({ config }) }) 
 
 module.exports = {
   createUnifiedRouter, parseJudgeText, toNarrationCandidateList, buildRouterInput,
-  ROUTER_SYSTEM_PROMPT, FEW_SHOT_LIST, ROUTER_BLOCKED_REASON_MAP, ROUTER_SOURCE_MAP, ROUTER_MODE_MAP,
+  ROUTER_PROMPT_MAP, ROUTER_BLOCKED_REASON_MAP, ROUTER_SOURCE_MAP, ROUTER_MODE_MAP,
   NARRATION_BY_TRIGGER_TYPE_MAP, resolveNarrationEventVideoTimeMs,
 };

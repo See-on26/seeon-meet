@@ -4,7 +4,9 @@ import { createRequire } from 'node:module';
 
 const require = createRequire(import.meta.url);
 const { verifyValueEvidence, hasQuantityExpression } = require('../src/main/caption-pipeline/router/judge-evidence.js');
-const { parseJudgeText, ROUTER_SYSTEM_PROMPT, FEW_SHOT_LIST } = require('../src/main/caption-pipeline/router/unified-router.js');
+const { parseJudgeText, ROUTER_PROMPT_MAP } = require('../src/main/caption-pipeline/router/unified-router.js');
+
+const FEW_SHOT_LIST = [...ROUTER_PROMPT_MAP.deixis.fewShotList, ...ROUTER_PROMPT_MAP.speech.fewShotList];
 
 const changeContext = {
   before: '설치 전후 석 달을 비교했습니다.',
@@ -110,9 +112,9 @@ test('문맥 없이 읽으면 예전처럼 판단을 그대로 쓴다', () => {
 });
 
 test('판단 지시문은 수치·변화의 근거 인용을 요구하고 few-shot 답은 모두 evidence 칸을 가진다', () => {
-  assert.match(ROUTER_SYSTEM_PROMPT, /"evidence"/);
-  assert.match(ROUTER_SYSTEM_PROMPT, /비교 대상의 이름만 있으면 근거가 아니다/);
-  assert.match(ROUTER_SYSTEM_PROMPT, /어느 것이 그런지 말하지 않으면 근거가 아니다/);
+  for (const { systemPrompt } of Object.values(ROUTER_PROMPT_MAP)) assert.match(systemPrompt, /"evidence"/);
+  assert.match(ROUTER_PROMPT_MAP.speech.systemPrompt, /비교 대상의 이름만 있으면 근거가 아니다/);
+  assert.match(ROUTER_PROMPT_MAP.deixis.systemPrompt, /어느 것이 그런지 말하지 않으면 근거가 아니다/);
   for (const example of FEW_SHOT_LIST) {
     for (const entry of example.output.judgeList) assert.equal(typeof entry.evidence, 'string');
   }
