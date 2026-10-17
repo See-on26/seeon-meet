@@ -84,3 +84,18 @@ test('수치 에이전트는 둘째 변화를 프롬프트·칸에 싣고 두 �
   assert.equal(result.slotMap.value2, '72점에서 88점');
   assert.match(JSON.stringify(requestBodyList[0]), /target2/);
 });
+
+// 실험실 A-2: 모델이 둘째 변화를 첫 값 칸에 몰아넣어("첫 응답 시간 9.2시간에서 3.1시간, 고객 만족도 72점에서 88점")
+// 값 칸 6어절에서 잘리자 "…, 고객"으로 끝난 해설이 그대로 나갔다.
+test('값 칸이 어절 수에서 잘리면 쉼표 뒤 수치 없는 조각은 버린다', () => {
+  const text = assembleNarration({
+    narrationType: 'interpretation', subKind: 'claim_to_value',
+    rawSlotMap: { target: '응답 품질 변화', value: '첫 응답 시간 9.2시간에서 3.1시간, 고객 만족도 72점에서 88점' },
+  })?.text;
+  assert.equal(text, '응답 품질 변화, 첫 응답 시간 9.2시간에서 3.1시간');
+});
+
+test('둘째 변화가 있으면 값 칸을 넓혀 한 칸에 몰아넣은 두 값도 다 읽는다', () => {
+  assert.equal(assemble({ target: '응답 품질 변화', value: '첫 응답 시간 9.2시간에서 3.1시간, 고객 만족도 72점에서 88점' }),
+    '응답 품질 변화, 첫 응답 시간 9.2시간에서 3.1시간, 고객 만족도 72점에서 88점');
+});

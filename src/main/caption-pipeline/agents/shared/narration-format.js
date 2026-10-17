@@ -204,6 +204,7 @@ const SILENCE_DESCRIPTION_SLOT_LIST = [
 ];
 
 // 한 발화에 변화를 두 번 말했으면(hasSecondClaim) 둘째 대상·값 칸을 더한다. 같은 대상이면 비워 두고 첫 쌍만 읽는다.
+const CLAIM_PAIR_VALUE_MAX_WORD_COUNT = 10;
 const CLAIM_SECOND_PAIR_SLOT_LIST = [
   { key: 'target2', label: '발표자가 또 말한 변화의 대상 — 첫 대상과 다를 때만. 같거나 없으면 빈 문자열', minWordCount: 0, maxWordCount: 4, isPhrase: true },
   { key: 'value2', label: '그 대상의 근거 값 — 반드시 수치. 같거나 없으면 빈 문자열', minWordCount: 0, maxWordCount: 5 },
@@ -216,7 +217,12 @@ function getSlotList({ narrationType, subKind, origin = null, hasSecondClaim = f
   const slotList = NARRATION_SLOT_MAP[narrationType]?.[subKind] || null;
   const isClaimPair = hasSecondClaim && narrationType === NARRATION_TYPE_MAP.interpretation
     && subKind === INTERPRETATION_KIND_MAP.claimToValue;
-  return slotList && isClaimPair ? [...slotList, ...CLAIM_SECOND_PAIR_SLOT_LIST] : slotList;
+  if (!slotList || !isClaimPair) return slotList;
+  // 둘째 변화를 둘째 칸 대신 첫 값 칸에 함께 쓰는 경우가 있어, 두 값이 다 들어가게 값 칸을 넓힌다.
+  return [
+    ...slotList.map((slot) => (slot.key === 'value' ? { ...slot, maxWordCount: CLAIM_PAIR_VALUE_MAX_WORD_COUNT } : slot)),
+    ...CLAIM_SECOND_PAIR_SLOT_LIST,
+  ];
 }
 
 function computeSlotTotal({ slotList }) {
@@ -254,11 +260,23 @@ function normalizeSlotMap({ slotList, rawSlotMap }) {
     }
     const truncated = truncateSlot({ text, maxWordCount: slot.maxWordCount });
     const isTruncated = countWord({ text }) > slot.maxWordCount;
-    if (isTruncated) slotMap[slot.key] = trimToCompletePhrase({ text: truncated });
+    if (isTruncated) {
+      slotMap[slot.key] = trimToCompletePhrase({
+        text: slot.mustContainValue ? dropValuelessTailItem({ text: truncated }) : truncated,
+      });
+    }
     else if (slot.isPhrase) slotMap[slot.key] = trimToCompletePhrase({ text: truncated, isConservative: true });
     else slotMap[slot.key] = truncated;
   }
   return slotMap;
+}
+
+// 값 목록("A 9.2시간에서 3.1시간, 고객 만족도 72점…")이 어절 수에서 잘리면 마지막 항목이 "고객"처럼
+// 이름만 남는다. 쉼표 뒤 조각에 수치가 없으면 그 조각을 버린다.
+function dropValuelessTailItem({ text }) {
+  const itemList = String(text || '').split(/\s*,\s*/);
+  while (itemList.length > 1 && !hasValueToken({ text: itemList[itemList.length - 1] })) itemList.pop();
+  return itemList.join(', ');
 }
 
 function hasCompleteTailNoun({ text, tailNounList = DESCRIPTION_TAIL_NOUN_LIST }) {
