@@ -1,16 +1,28 @@
-const { ensureUsPrefix, buildInferenceConfig } = require('../router/deixis-judge');
-const { readConverseText } = require('../agents/shared/bedrock-converse');
+const { toChatMessageList } = require('../agents/shared/judge-llm');
 const { NARRATION_TYPE_MAP } = require('../contracts/narration-types');
 const {
   BOUNDARY_KIND_MAP, BOUNDARY_KIND_LABEL_MAP, GAP_CANDIDATE_SOURCE_MAP, MEASURED_GAP_NOTE_LIST,
   GAP_SYSTEM_PROMPT, FEW_SHOT_LIST,
 } = require('../prompts/gap-inference');
 
-const REQUEST_TIMEOUT_MS = 12000;
 const MAX_GAP_TOKENS = 120;
+const THINKING_MODEL_SUFFIX = '+thinking';
+// 사고가 한도에서 끊기면 이 문구로 사고를 닫고 답만 이어 쓰게 한다. vLLM 의 thinking_token_budget 은 생각 끝
+// 토큰만 넣어서, 모델이 답 칸에서 생각을 이어 가다 JSON 없이 끝난다.
+const THINKING_CLOSE_TEXT = '\n\n생각할 시간이 끝났다. 지금까지 따진 것으로 바로 고른다.\n</think>\n\n';
+
+// 삽입 위치는 GPU 판정 LLM(8805, Qwen3.5-9B)이 고른다. 실패해도 Claude(Bedrock)로 넘기지 않고 규칙으로 고른다.
+// 품질 모드는 지연이 60초라 사고(thinking)를 켠다. 한도 없이 두면 사고가 6,000토큰(약 68초)을 넘기기도 해서
+// 1,024토큰(약 12초)에서 끊고 답하게 한다. 균형 모드는 지연이 10초라 사고 없이 바로 답한다(약 0.4초).
+// 성능·동시 모드는 delayMs=0이라 삽입 위치 추론을 호출하지 않는다. 모르는 모드는 사고 없이 묻는다.
+const GAP_REQUEST_BY_MODE_MAP = {
+  listening: { isThinking: true, thinkingBudget: 1024, timeoutMs: 30000 },
+  delayed: { isThinking: false, thinkingBudget: 0, timeoutMs: 6000 },
+};
+const DEFAULT_GAP_REQUEST = GAP_REQUEST_BY_MODE_MAP.delayed;
 
 const GAP_SOURCE_MAP = {
-  bedrock: 'bedrock',
+  gpu: 'gpu',
   fallback: 'fallback',
   none: 'none',
 };
@@ -100,57 +112,72 @@ function parseGapText({ text, gapCount }) {
   return { gapIndex: parsed.gapIndex, reason };
 }
 
-function createGapInferenceAgent({ config }) {
-  const apiKey = config.bedrockApiKey;
+function createGapInferenceAgent({ config, fetchImpl = (...argList) => fetch(...argList) }) {
+  async function postChat({ messageList, maxTokens, isThinking, signal, extraBodyMap = {} }) {
+    const response = await fetchImpl(config.judgeGpuUrl, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({
+        model: config.judgeGpuModel,
+        temperature: 0,
+        max_tokens: maxTokens,
+        chat_template_kwargs: { enable_thinking: isThinking },
+        messages: messageList,
+        ...extraBodyMap,
+      }),
+      signal,
+    });
+    if (!response.ok) throw new Error(`GPU 삽입 위치 추론 HTTP ${response.status}`);
+    const body = await response.json();
+    const choice = body?.choices?.[0];
+    return {
+      content: choice?.message?.content || '',
+      reasoning: choice?.message?.reasoning_content || choice?.message?.reasoning || '',
+      finishReason: choice?.finish_reason || '-',
+    };
+  }
 
-  // 삽입 위치 추론은 모드별로 모델을 나눈다(품질=Opus / 균형=Sonnet). 매핑에 없으면 judge 모델로 폴백.
-  function resolveModelId({ mode }) {
-    return (config.gapModelByModeMap && config.gapModelByModeMap[mode]) || config.judgeModelId;
+  async function closeThinking({ messageList, reasoning, signal }) {
+    const { content, reasoning: answer } = await postChat({
+      messageList: [...messageList, { role: 'assistant', content: `<think>\n${reasoning}${THINKING_CLOSE_TEXT}` }],
+      maxTokens: MAX_GAP_TOKENS,
+      isThinking: true,
+      signal,
+      extraBodyMap: { add_generation_prompt: false, continue_final_message: true },
+    });
+    // 출력에 생각 끝 토큰이 없어 추론 파서가 답을 reasoning 칸에 담는다.
+    return content.trim() ? content : answer;
+  }
+
+  // 두 요청(사고 → 사고 닫기)이 한 시간 한도를 나눠 쓴다.
+  async function requestGapText({ gapRequest, userText }) {
+    const signal = AbortSignal.timeout(gapRequest.timeoutMs);
+    const messageList = toChatMessageList({
+      systemPrompt: GAP_SYSTEM_PROMPT,
+      messageList: [...buildFewShotMessageList(), { role: 'user', content: [{ text: userText }] }],
+    });
+    const first = await postChat({
+      messageList, maxTokens: gapRequest.thinkingBudget + MAX_GAP_TOKENS, isThinking: gapRequest.isThinking, signal,
+    });
+    if (first.content.trim()) return first.content;
+    const isThinkingCut = gapRequest.isThinking && first.finishReason === 'length' && Boolean(first.reasoning.trim());
+    const text = isThinkingCut ? await closeThinking({ messageList, reasoning: first.reasoning, signal }) : '';
+    if (!text.trim()) throw new Error(`GPU 삽입 위치 추론 빈 응답 (finish_reason=${first.finishReason})`);
+    return text;
   }
 
   async function infer({ mode = null, narrationText, narrationType, subKind = null, rationale = '',
     screenSummary = '', beforeTranscript = '', gapList = [] }) {
     if (!gapList.length) return { gapIndex: null, reason: '후보 틈 없음', source: GAP_SOURCE_MAP.none };
-    const modelId = resolveModelId({ mode });
-    const converseUrl = `https://bedrock-runtime.${config.bedrockRegion}.amazonaws.com`
-      + `/model/${ensureUsPrefix(modelId)}/converse`;
-    if (!apiKey) {
-      return {
-        gapIndex: selectFallbackGapIndex({ gapList }),
-        reason: '규칙 폴백 — 트리거 이후 첫 완결 경계 (Bedrock 키 없음)',
-        source: GAP_SOURCE_MAP.fallback,
-      };
-    }
+    const gapRequest = GAP_REQUEST_BY_MODE_MAP[mode] || DEFAULT_GAP_REQUEST;
+    const modelId = `${config.judgeGpuModel}${gapRequest.isThinking ? THINKING_MODEL_SUFFIX : ''}`;
     try {
-      const response = await fetch(converseUrl, {
-        method: 'POST',
-        headers: { Authorization: `Bearer ${apiKey}`, 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          system: [{ text: GAP_SYSTEM_PROMPT }],
-          messages: [
-            ...buildFewShotMessageList(),
-            {
-              role: 'user',
-              content: [{
-                text: buildGapInput({
-                  narrationText, narrationType, subKind, rationale, screenSummary,
-                  beforeTranscript, gapList,
-                }),
-              }],
-            },
-          ],
-          inferenceConfig: buildInferenceConfig({
-            modelId, maxTokens: MAX_GAP_TOKENS,
-          }),
+      const text = await requestGapText({
+        gapRequest,
+        userText: buildGapInput({
+          narrationText, narrationType, subKind, rationale, screenSummary, beforeTranscript, gapList,
         }),
-        signal: AbortSignal.timeout(REQUEST_TIMEOUT_MS),
       });
-      if (!response.ok) {
-        const body = (await response.text()).slice(0, 160);
-        throw new Error(`Bedrock Converse HTTP ${response.status} ${body}`);
-      }
-      const json = await response.json();
-      const text = readConverseText({ json });
       const parsed = parseGapText({ text, gapCount: gapList.length });
 
       const chosen = Number.isInteger(parsed.gapIndex) ? gapList[parsed.gapIndex] : null;
@@ -161,7 +188,7 @@ function createGapInferenceAgent({ config }) {
           source: GAP_SOURCE_MAP.fallback,
         };
       }
-      return { ...parsed, source: GAP_SOURCE_MAP.bedrock, modelId };
+      return { ...parsed, source: GAP_SOURCE_MAP.gpu, modelId };
     } catch (error) {
       console.error('[pipeline] 삽입 위치 추론 실패, 규칙 폴백:', error.message);
       return {
@@ -177,5 +204,5 @@ function createGapInferenceAgent({ config }) {
 
 module.exports = {
   createGapInferenceAgent, buildGapInput, parseGapText, selectFallbackGapIndex, formatGapLine, countGapCandidateSource,
-  canPickBeforeTrigger, GAP_SYSTEM_PROMPT, GAP_SOURCE_MAP, BOUNDARY_KIND_MAP,
+  canPickBeforeTrigger, GAP_SYSTEM_PROMPT, GAP_SOURCE_MAP, GAP_REQUEST_BY_MODE_MAP, BOUNDARY_KIND_MAP,
 };

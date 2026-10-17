@@ -23,8 +23,6 @@ const DEFAULT_ROUTER_MODE = 'unified';
 
 const DEFAULT_SUMMARY_MODEL_ID = 'anthropic.claude-opus-4-7';
 
-const DEFAULT_GAP_QUALITY_MODEL_ID = 'anthropic.claude-opus-4-7';
-
 
 // ASR 전사 언어. auto 는 GPU 서버가 ko·en 중 감지 확률이 높은 쪽으로 전사한다.
 const ASR_LANGUAGE_LIST = ['ko', 'en', 'auto'];
@@ -109,19 +107,13 @@ function readPipelineConfig(env = process.env) {
     bedrockApiKey: env.AWS_BEARER_TOKEN_BEDROCK || '',
     judgeModelId,
     // 판정 GPU LLM 은 VLM 과 따로 띄운 경량 모델(Qwen3.5-9B)에 글만 보낸다. 실패해도 Bedrock 으로 넘기지 않는다.
-    // judgeModelId 는 판정 백엔드를 bedrock 으로 골랐을 때와 균형 모드 삽입 위치 추론에 쓴다.
+    // judgeModelId 는 판정 백엔드를 bedrock 으로 골랐을 때 쓴다. 삽입 위치 추론은 판정 백엔드와 상관없이 이 GPU LLM 을 쓴다.
     judgeBackend: readJudgeBackend({ env }),
     judgeGpuUrl: env.SEEON_JUDGE_GPU_URL || DEFAULT_JUDGE_GPU_URL,
     judgeGpuModel: env.SEEON_JUDGE_GPU_MODEL || DEFAULT_JUDGE_GPU_MODEL,
     summaryModelId: env.SEEON_BEDROCK_SUMMARY_MODEL_ID || DEFAULT_SUMMARY_MODEL_ID,
     // 회의 요약 마무리 재구성(듣는 글) — Sonnet. Opus 요약 초안을 낭독용으로 다듬는다.
     summaryRewriteModelId: env.SEEON_BEDROCK_SUMMARY_REWRITE_MODEL_ID || bedrockModelId,
-    // 삽입 위치 추론(SIC)만 모드별로 모델을 나눈다. 품질=Opus, 균형=Sonnet(=judge 재사용).
-    // 성능·동시 모드는 delayMs=0이라 삽입 위치 추론을 호출하지 않는다.
-    gapModelByModeMap: {
-      listening: env.SEEON_BEDROCK_GAP_QUALITY_MODEL_ID || DEFAULT_GAP_QUALITY_MODEL_ID,
-      delayed: env.SEEON_BEDROCK_GAP_BALANCED_MODEL_ID || judgeModelId,
-    },
     routerMode: env.SEEON_ROUTER_MODE || DEFAULT_ROUTER_MODE,
     // 추상적 척도 해설(화면에 보이는 대상의 정도)은 기본으로 켠다. 'false' 로 두면 척도 후보를 생성하지 않는다.
     isScaleEnabled: env.SEEON_ROUTER_SCALE_ENABLED !== 'false',
