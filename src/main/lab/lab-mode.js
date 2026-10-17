@@ -9,13 +9,8 @@ const LAB_MODE_MAP = {
 
 const LAB_MODE_LIST = Object.values(LAB_MODE_MAP);
 
-// 모드마다 회의 소리를 늦춰 트는 시간(mode-policy.js delayMs).
-const MODE_DELAY_MS_MAP = {
-  [LAB_MODE_MAP.listening]: 60000,
-  [LAB_MODE_MAP.delayed]: 10000,
-  [LAB_MODE_MAP.realtimeSic]: 0,
-  [LAB_MODE_MAP.realtimeMix]: 0,
-};
+// 모드마다 회의 소리를 늦춰 트는 시간(mode-policy.js delayMs). 제품 개발자 흐름 창과 같은 공용 값을 쓴다.
+const { MODE_DELAY_MS_MAP } = require('../dev-flow/mode-delay');
 
 // 동시 모드만 회의 소리를 멈추지 않고 해설을 겹쳐 튼다(mode-policy.js isMixed).
 const MIXED_MODE_LIST = [LAB_MODE_MAP.realtimeMix];

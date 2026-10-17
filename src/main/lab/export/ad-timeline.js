@@ -15,21 +15,8 @@ const AID_MAP = {
 const LEGACY_TRANSITION_SOURCE = 'page-transition';
 const USER_COMMAND_CLASS = 'user_command';
 
-const DROP_REASON_MAP = {
-  noAudio: 'no_audio',
-  notPlayed: 'not_played',
-  suppressed: 'suppressed',
-};
-
-// 렌더러 버림 알림(reportNarrationDropped)의 사유 중 TTS 합성 실패.
-const RENDERER_TTS_FAILED_REASON = 'tts_failed';
-
-// 렌더러가 알린 버림 사유를 결과 폴더의 사유로 옮긴다. TTS 합성 실패는 "소리 없음"(no_audio)이고,
-// 그 밖의 사유(delay_exceeded·leader_cancelled·dwell_cancelled·emit_failed·stopped·expired 등)는 그대로 둔다.
-function resolveRendererDropReason(reason) {
-  if (!reason) return null;
-  return reason === RENDERER_TTS_FAILED_REASON ? DROP_REASON_MAP.noAudio : reason;
-}
+// 버림 사유와 렌더러 사유 옮기기는 제품 개발자 흐름 창과 같은 공용 모듈을 쓴다.
+const { DROP_REASON_MAP, resolveRendererDropReason } = require('../../dev-flow/drop-reason');
 
 const roundOrNull = (value) => (Number.isFinite(value) ? Math.round(value) : null);
 const buildCaptionKey = ({ ts, text }) => `${ts}|${text}`;

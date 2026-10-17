@@ -1,6 +1,6 @@
 const { buildTimeMap, wallToMediaMs, resolveCaptureStartWallMs } = require('../time-map');
 const { buildTranscriptUtteranceList } = require('../export/transcript');
-const { buildFlowView, summarizeTrackList } = require('./flow-builder');
+const { buildFlowView, summarizeTrackList } = require('../../dev-flow/flow-builder');
 
 // 흐름 창에 보내는 갱신값. 실행 기록기가 모은 debug(받은 시각 포함)·해설·재생 알림·버린 해설·시각 보고로 만든다.
 // 실행이 끝난 뒤에도 다음 실행을 시작할 때까지 그 실행의 흐름을 보여 준다.
