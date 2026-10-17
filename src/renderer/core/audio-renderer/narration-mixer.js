@@ -8,6 +8,22 @@ const MEETING_PAN_X = -0.7;
 export const NARRATION_PAN_X = 0.7;
 const PANNER_DISTANCE_Z = -0.4;
 
+// 재생 시작 알림에 싣는 정보. 음성 데이터는 빼고, 무엇이 언제부터 얼마 동안 들렸는지만 남긴다.
+export function buildPlayStartInfo({ entry, durationSec, wallMs }) {
+  return {
+    entry: {
+      text: entry.text,
+      narrationClass: entry.narrationClass,
+      slideLabel: entry.slideLabel ?? null,
+      source: entry.source ?? null,
+      ts: entry.ts ?? null,
+      eventTimeMs: entry.eventTimeMs ?? null,
+    },
+    durationMs: Math.round((durationSec || 0) * 1000),
+    wallMs,
+  };
+}
+
 export function computeGainFromDecibel({ decibel }) {
   return 10 ** (decibel / 20);
 }
@@ -23,12 +39,14 @@ export function createSidePanner({ audioContext, positionX }) {
 }
 
 export class NarrationMixer {
-  constructor({ onStatus = null, onDrop = null, duckDecibel = DEFAULT_DUCK_DB,
-    createAudioContext = () => new AudioContext(), now = () => performance.now(),
+  constructor({ onStatus = null, onDrop = null, onPlayStart = null, duckDecibel = DEFAULT_DUCK_DB,
+    createAudioContext = () => new AudioContext(), now = () => performance.now(), wallNow = () => Date.now(),
     isEntryEnabled = () => true, prepareAudio = readEntryAudio, getPlaybackTimeMs = () => null } = {}) {
     this.onStatus = onStatus || (() => {});
     this.prepareAudio = prepareAudio;
     this.onDrop = onDrop || (() => {});
+    this.onPlayStart = onPlayStart || (() => {});
+    this.wallNow = wallNow;
     this.duckDecibel = duckDecibel;
     this.createAudioContext = createAudioContext;
     this.audioContext = null;
@@ -120,11 +138,21 @@ export class NarrationMixer {
       source.onended = () => { if (token === this.playToken) this.handleNarrationEnded(); };
       this.currentSource = source;
       source.start(this.audioContext.currentTime + START_LEAD_SEC);
+      this.notifyPlayStart({ entry, durationSec: audioBuffer.duration });
       this.onStatus('내레이션 재생 중(회의음 덕킹)…');
     } catch (error) {
       if (token !== this.playToken) return;
       this.onStatus(`내레이션 재생 실패: ${error.message}`);
       this.handleNarrationEnded();
+    }
+  }
+
+  // 알림을 받는 쪽이 실패해도 재생은 계속한다.
+  notifyPlayStart({ entry, durationSec }) {
+    try {
+      this.onPlayStart(buildPlayStartInfo({ entry, durationSec, wallMs: this.wallNow() + START_LEAD_SEC * 1000 }));
+    } catch (error) {
+      console.warn(`[mix] 재생 시작 알림 실패(무시): ${error.message}`);
     }
   }
 
