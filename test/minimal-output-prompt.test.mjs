@@ -3,12 +3,15 @@ import assert from 'node:assert/strict';
 import { createRequire } from 'node:module';
 
 const require = createRequire(import.meta.url);
-const { ROUTER_SYSTEM_PROMPT } = require('../src/main/caption-pipeline/prompts/unified-router.js');
+const { ROUTER_PROMPT_MAP } = require('../src/main/caption-pipeline/prompts/unified-router.js');
 const { JUDGE_SYSTEM_PROMPT } = require('../src/main/caption-pipeline/prompts/deixis-judge.js');
 const { SILENCE_JUDGE_SYSTEM_PROMPT } = require('../src/main/caption-pipeline/prompts/silence-judge.js');
 
 // 정보 공백 해설(지시·발화·무발화)은 최소 출력 원칙을 따른다: 애매하면 내보내지 않는다.
-for (const [name, prompt] of [['라우터', ROUTER_SYSTEM_PROMPT], ['지시 판정기', JUDGE_SYSTEM_PROMPT]]) {
+for (const [name, prompt] of [
+  ['지시 대상 판단', ROUTER_PROMPT_MAP.deixis.systemPrompt], ['발화 기반 판단', ROUTER_PROMPT_MAP.speech.systemPrompt],
+  ['지시 판정기', JUDGE_SYSTEM_PROMPT],
+]) {
   test(`${name}는 애매하면 내보내지 않는다`, () => {
     assert.match(prompt, /애매하면 내보내지 않는다/);
     assert.doesNotMatch(prompt, /확신이 없으면 (통과|caption=true)/);
