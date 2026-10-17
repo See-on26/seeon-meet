@@ -71,6 +71,7 @@ $('pauseBtn').addEventListener('click', () => {
 $('stopBtn').addEventListener('click', () => window.labControl.stop());
 $('resultBtn').addEventListener('click', () => window.labControl.openResult());
 $('demoBtn').addEventListener('click', () => window.labControl.openDemo());
+$('subtitleBtn').addEventListener('click', () => window.labControl.openSubtitle());
 $('flowBtn').addEventListener('click', () => window.labControl.openFlow());
 
 window.labControl.onStatus(render);

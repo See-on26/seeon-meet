@@ -139,7 +139,7 @@ test('production viewer preload 의 API 를 가로채 받고 노출 함수는 �
   assert.deepEqual(fake.exposedMap, {}, '가로채는 동안에는 노출하지 않는다');
 });
 
-test('실험 viewer preload 는 production API 전부 + 재생 시작 알림을 노출하고 평가 설정을 먼저 써 넣는다', () => {
+test('실험 viewer preload 는 production API 전부 + 재생 시작·자막 창 알림을 노출하고 평가 설정을 먼저 써 넣는다', () => {
   const fake = installFakeElectron();
   const storageMap = new Map();
   globalThis.window = { localStorage: { setItem: (key, value) => storageMap.set(key, value), getItem: (key) => storageMap.get(key) ?? null } };
@@ -150,14 +150,17 @@ test('실험 viewer preload 는 production API 전부 + 재생 시작 알림을 
     require('../src/preload/viewer.js');
   } }).seeon);
   const labKeyList = Object.keys(fake.exposedMap.seeon);
-  assert.deepEqual(labKeyList.filter((key) => !productionKeyList.includes(key)), ['reportLabNarrationPlayback']);
+  assert.deepEqual(labKeyList.filter((key) => !productionKeyList.includes(key)), ['reportLabNarrationPlayback', 'reportLabTranscript', 'reportLabListen']);
   assert.deepEqual(productionKeyList.filter((key) => !labKeyList.includes(key)), []);
   assert.deepEqual(JSON.parse(storageMap.get('seeon.featureToggles')), { page_transition: false, speaker_identity: false, meeting_summary: false });
   fake.listenerMap['pipeline-event']({}, { type: 'caption', ts: 1, text: '해설' });
   fake.listenerMap['pipeline-event']({}, { type: 'debug', stage: 'vlm', ts: 1 });
   fake.listenerMap['pipeline-event']({}, { type: 'summary' });
   fake.exposedMap.seeon.reportLabNarrationPlayback({ entry: { text: '해설', ts: 1 }, durationMs: 900, wallMs: 5 });
-  assert.deepEqual(fake.sentList.map(([channel]) => channel), ['lab-viewer-event', 'lab-viewer-event', 'lab-narration-playback']);
+  fake.exposedMap.seeon.reportLabTranscript({ text: '말', chunkStartTs: 1, chunkEndTs: 2, segmentList: [], nowWallTs: 3, nowVideoTimeMs: 3 });
+  fake.exposedMap.seeon.reportLabListen({ isDelayed: true, delayedVideoTimeMs: 1, playbackRate: 1.2 });
+  assert.deepEqual(fake.sentList.map(([channel]) => channel), ['lab-viewer-event', 'lab-viewer-event', 'lab-narration-playback', 'lab-transcript', 'lab-listen']);
+  assert.equal(fake.sentList[4][1].playbackRate, 1.2);
   assert.equal(fake.sentList[1][1].stage, 'vlm');
   delete globalThis.window;
 });

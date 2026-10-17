@@ -1,0 +1,28 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+  <meta charset="UTF-8" />
+  <title>seeon 자막 창</title>
+  <style>
+    :root { --visible-line-count: 7; --pad-y: 24px; font-family: -apple-system, "Apple SD Gothic Neo", sans-serif; }
+    html, body { margin: 0; height: 100%; }
+    body[data-theme="dark"] { color-scheme: dark; background: #000; --meeting: #fff; --meeting-fast: #4da3ff; --narration: #30d158; --hint: #555; }
+    body[data-theme="light"] { color-scheme: light; background: #fff; --meeting: #000; --meeting-fast: #0a5bd8; --narration: #13853a; --hint: #999; }
+    /* 한 화면에 약 visible-line-count 줄이 보이도록 줄 높이를 창 높이로 정한다. */
+    #lineList {
+      height: 100%; overflow-y: auto; box-sizing: border-box; padding: var(--pad-y) 48px;
+      --line-height: calc((100vh - 2 * var(--pad-y)) / var(--visible-line-count));
+      font-size: calc(var(--line-height) / 1.3); line-height: 1.3; font-weight: 600;
+    }
+    .line.meeting { color: var(--meeting); }
+    .line.meeting_fast { color: var(--meeting-fast); }
+    .line.narration { color: var(--narration); }
+    .hint { position: fixed; right: 16px; bottom: 8px; font-size: 13px; color: var(--hint); }
+  </style>
+</head>
+<body data-theme="dark">
+  <div id="lineList" aria-live="polite"></div>
+  <div class="hint">회의 소리 · <span class="line meeting_fast">배속</span> · <span class="line narration">AD</span> — +/− 크기 · B 바탕 · C 지우기</div>
+  <script type="module" src="./subtitle.js"></script>
+</body>
+</html>
