@@ -54,7 +54,8 @@ function createFlowWindowManager({
       webPreferences: { preload: path.join(rootDir, 'preload', 'lab-flow.js'), contextIsolation: true },
     });
     flowWindow.webContents.on('did-finish-load', pushNow);
-    flowWindow.loadFile(path.join(rootDir, 'renderer', 'lab', 'flow.html'));
+    // 흐름 창 화면은 제품 개발자 모드와 같은 공용 화면이다.
+    flowWindow.loadFile(path.join(rootDir, 'renderer', 'dev-flow', 'flow.html'));
     tickTimer = setTick(pushNow, tickMs);
     flowWindow.on('closed', () => {
       stopTimers();
