@@ -94,3 +94,8 @@ test('지시문 예시는 특정 회사·운영체제 이름으로 묘사를 끌
   assert.doesNotMatch(exampleLine, /네이버|윈도우|김치/);
   assert.match(prompt, /형태 낱말을 두 번 쓰지 마라/);
 });
+
+// 윈도우 11·10·7 기본 화면 시험(10/17): 윈도우 10 을 "Windows 11 시작 메뉴"로 3/5 잘못 말했다. 버전은 글자로 보일 때만 쓴다.
+test('운영체제 버전 번호는 화면에 글자로 적혀 있을 때만 쓰게 한다', () => {
+  assert.match(buildPageTransitionPrompt(), /버전 번호\(11·10·7 등\)는 화면에 글자로 적혀 있을 때만/);
+});
