@@ -10,10 +10,9 @@ const SCREEN_TYPE_MAP = {
   unknown: 'unknown',
 };
 
-const SILENT_SCREEN_TYPE_LIST = [
-  SCREEN_TYPE_MAP.desktop, SCREEN_TYPE_MAP.fileExplorer,
-  SCREEN_TYPE_MAP.osUi, SCREEN_TYPE_MAP.unknown,
-];
+// 바탕화면·파일 탐색기·시작 메뉴 같은 OS 화면도 "페이지: …" 로 알린다. 무슨 화면인지 확실하지 않을 때만 알리지 않는다
+// (틀린 고지는 놓친 고지보다 나쁘다).
+const SILENT_SCREEN_TYPE_LIST = [SCREEN_TYPE_MAP.unknown];
 
 const TRANSITION_AXIS_TYPE_LIST = [SCREEN_TYPE_MAP.ppt, SCREEN_TYPE_MAP.web];
 
