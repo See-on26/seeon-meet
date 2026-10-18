@@ -5,7 +5,8 @@ const {
 const { requestVlmContent } = require('./shared/vlm-gateway');
 const { scaleWordBudget } = require('./shared/narration-format');
 const {
-  buildInterpretationPrompt, INTERPRETATION_RULE_MAP, DEFAULT_INTERPRETATION_MIN_WORD_COUNT, DEFAULT_INTERPRETATION_MAX_WORD_COUNT,
+  buildInterpretationPrompt, buildInterpretationScreenTextBlock, INTERPRETATION_RULE_MAP,
+  DEFAULT_INTERPRETATION_MIN_WORD_COUNT, DEFAULT_INTERPRETATION_MAX_WORD_COUNT,
 } = require('../prompts/interpretive-bridge');
 const { DEFAULT_CAPTION_LANGUAGE } = require('../contracts/caption-language');
 
@@ -15,7 +16,8 @@ function createInterpretiveBridgeAgent({ config, getCaptionLanguage = () => DEFA
   async function generate({ jpegBuffer, utterance, recentTranscript = '',
     subKind = null, minWordCount = DEFAULT_INTERPRETATION_MIN_WORD_COUNT,
     maxWordCount = DEFAULT_INTERPRETATION_MAX_WORD_COUNT,
-    describedElementList = [], mergedAnchorList = [], mergedClaimList = [], language = getCaptionLanguage() }) {
+    describedElementList = [], mergedAnchorList = [], mergedClaimList = [], screenLineList = [],
+    language = getCaptionLanguage() }) {
     // 렌더러의 어절 예산을 캡션 언어의 단어 수로 바꾼다(영어는 상한을 ENGLISH_WORD_SCALE 배로, 한국어는 그대로).
     ({ minWordCount, maxWordCount } = scaleWordBudget({ minWordCount, maxWordCount, language }));
     const effectiveMaxChars = computeMaxChars({ maxWordCount, language });
@@ -23,15 +25,22 @@ function createInterpretiveBridgeAgent({ config, getCaptionLanguage = () => DEFA
       config, jpegBuffer, label: AGENT_LABEL, maxTokens: SLOT_AGENT_MAX_TOKENS,
       prompt: buildInterpretationPrompt({
         utterance, recentTranscript, subKind, minWordCount, maxWordCount,
-        maxChars: effectiveMaxChars, describedElementList, mergedAnchorList, mergedClaimList, language,
+        maxChars: effectiveMaxChars, describedElementList, mergedAnchorList, mergedClaimList, screenLineList, language,
       }),
     });
-    return parseSlotCaption({
-      content,
-      narrationType: NARRATION_TYPE_MAP.interpretation,
-      subKind: subKind || INTERPRETATION_KIND_MAP.valueToMeaning,
-      maxChars: effectiveMaxChars, maxWordCount, hasSecondClaim: mergedClaimList.length > 0, language,
+    // 프롬프트에 실제로 들어간 화면 글자 양을 기록용으로 함께 돌려준다.
+    const { lineCount, charCount, numberLineCount } = buildInterpretationScreenTextBlock({
+      screenLineList, utterance, subKind, mergedAnchorList, mergedClaimList,
     });
+    return {
+      ...parseSlotCaption({
+        content,
+        narrationType: NARRATION_TYPE_MAP.interpretation,
+        subKind: subKind || INTERPRETATION_KIND_MAP.valueToMeaning,
+        maxChars: effectiveMaxChars, maxWordCount, hasSecondClaim: mergedClaimList.length > 0, language,
+      }),
+      screenTextBlock: { lineCount, charCount, numberLineCount },
+    };
   }
 
   return { generate };

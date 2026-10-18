@@ -1,9 +1,9 @@
-const { BaseWindow, WebContentsView, screen, shell } = require('electron');
+const { BaseWindow, WebContentsView, shell } = require('electron');
 const path = require('path');
 const { createMeetSession } = require('./meeting/session');
 const { MEET_HOME_URL, handleMeetWindowOpen } = require('./meeting/meet-navigation');
 const { getUaForUrl } = require('./meeting/ua');
-const { computeViewBoundsPair, computeToggledWindowBounds } = require('./viewer-panel-layout');
+const { computeViewBoundsPair, createMeetResizeNotifier } = require('./viewer-panel-layout');
 
 const SMOKE_URL = 'about:blank';
 
@@ -16,29 +16,31 @@ const getWindow = () => win;
 const getViewerView = () => viewerView;
 const getMeetView = () => meetView;
 
+// 캡처 영상은 Meet 화면 크기를 바꾸고 수십 ms 안에 새 크기로 오지만, Meet 좌표는 수백 ms 뒤에 온다.
+// 뷰어가 그 사이 옛 좌표로 새 화면을 자르지 않도록 크기를 바꾸기 전에 새 크기를 먼저 알린다.
+const meetResizeNotifier = createMeetResizeNotifier({
+  notify: ({ width, height }) => {
+    if (!viewerView || viewerView.webContents.isDestroyed()) return;
+    viewerView.webContents.send('meet-view-resized', { width, height });
+  },
+});
+
 function layoutView() {
   if (!win) return;
   const { width, height } = win.getContentBounds();
   const { meetBounds, viewerBounds } = computeViewBoundsPair({
     contentWidth: width, contentHeight: height, isCollapsed: isViewerCollapsed,
   });
+  meetResizeNotifier.observe(meetBounds);
   meetView.setBounds(meetBounds);
   viewerView.setBounds(viewerBounds);
 }
 
-// 전체 화면이면 창 폭을 바꿀 수 없어, 창 크기를 바꿀 때처럼 Meet 화면 폭이 대신 바뀐다.
-// 최대화된 창(맥은 화면을 꽉 채운 창도 최대화로 본다)은 최대화를 풀고 줄인다. 윈도우는 최대화를 풀면
-// 이전 크기로 돌아가므로 풀기 전 크기를 기준으로 계산한다.
-// 창 크기와 화면 배치는 한 번에 바꿔야 중간 크기의 Meet 화면이 캡처되지 않는다.
+// 창 크기는 그대로 두고 패널이 비운 폭만큼 Meet 화면이 늘고 준다(보통 창·최대화·전체 화면 모두).
+// 창이 움직이지 않고 최대화·화면 분할 배치도 풀리지 않는다.
 function setViewerCollapsed({ isCollapsed }) {
   if (!win || isCollapsed === isViewerCollapsed) return isViewerCollapsed;
   isViewerCollapsed = isCollapsed;
-  if (!win.isFullScreen()) {
-    const windowBounds = win.getBounds();
-    const { workArea } = screen.getDisplayMatching(windowBounds);
-    if (win.isMaximized() && process.platform !== 'darwin') win.unmaximize();
-    win.setBounds(computeToggledWindowBounds({ windowBounds, workArea, isCollapsed }));
-  }
   layoutView();
   viewerView.webContents.send('viewer-panel-changed', { isCollapsed });
   return isViewerCollapsed;
@@ -100,7 +102,10 @@ function createWindow() {
 
   viewerView.webContents.loadFile(path.join(__dirname, '..', 'renderer', 'app', 'index.html'));
 
-  win.on('closed', () => { win = null; viewerView = null; meetView = null; isViewerCollapsed = false; });
+  win.on('closed', () => {
+    win = null; viewerView = null; meetView = null; isViewerCollapsed = false;
+    meetResizeNotifier.reset();
+  });
 }
 
 module.exports = {

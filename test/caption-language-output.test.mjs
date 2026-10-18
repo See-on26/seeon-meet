@@ -559,3 +559,30 @@ test('영어 답 자르기는 질문 답·커맨드 답·칸 해설의 일반 �
   const parserSource = fs.readFileSync(new URL('../src/main/caption-pipeline/agents/shared/caption-parser.js', import.meta.url), 'utf8');
   assert.match(parserSource, /parseGroundingText\(cleaned, maxChars, maxWordCount, language\)/);
 });
+
+// 영어 캡션: OCR 덩어리 안내는 다른 지시문처럼 한국어로 들어가고, 출력 언어 규칙은 그대로 끝에 붙는다.
+test('영어 캡션: 수치 프롬프트의 OCR 덩어리는 규칙보다 앞에 들어가고 출력 언어 규칙은 그대로다', () => {
+  const screenLineList = [{ text: 'Error rate 0.07%', score: 0.95 }, { text: '목표 0.1% 이하', score: 0.9 }];
+  for (const subKind of [INTERPRETATION_KIND_MAP.claimToValue, INTERPRETATION_KIND_MAP.valueToMeaning]) {
+    const englishBase = buildInterpretationPrompt({ utterance: 'The error rate is far below the target.', subKind, language: 'en' });
+    const english = buildInterpretationPrompt({ utterance: 'The error rate is far below the target.', subKind, language: 'en', screenLineList });
+    assert.ok(english.includes('글자 인식기(OCR)'), subKind);
+    assert.ok(english.includes('Error rate 0.07%'), subKind);
+    assert.ok(english.indexOf('글자 인식기(OCR)') < english.lastIndexOf(RULE_MARK), subKind);
+    assert.equal(english.slice(english.lastIndexOf(RULE_MARK)), englishBase.slice(englishBase.lastIndexOf(RULE_MARK)), subKind);
+    const korean = buildInterpretationPrompt({ utterance: '오류율은 목표보다 훨씬 낮습니다.', subKind, screenLineList });
+    assert.ok(!korean.includes(RULE_MARK), subKind);
+  }
+});
+
+test('영어 캡션: OCR 줄을 받은 수치 에이전트도 영어로 조립한다', async () => {
+  const promptList = mockVlm(['{"target":"error rate","value":"0.07%"}']);
+  const agentFieldMap = createAgentFieldMap({ config: vlmConfig, getCaptionLanguage: () => 'en' });
+  const result = await agentFieldMap[NARRATION_TYPE_MAP.interpretation].generate({
+    jpegBuffer: Buffer.from('x'), utterance: '오류율은 목표보다 훨씬 낮습니다.', subKind: INTERPRETATION_KIND_MAP.claimToValue,
+    screenLineList: [{ text: '오류율 0.07%', score: 0.95 }],
+  });
+  assert.ok(promptList[0].includes('글자 인식기(OCR)'));
+  assert.ok(promptList[0].includes(RULE_MARK));
+  assert.equal(result.text, 'Error rate, 0.07%');
+});

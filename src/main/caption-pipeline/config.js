@@ -9,6 +9,9 @@ const DEFAULT_EMBED_URL = 'http://127.0.0.1:8804/embed';
 // 슬라이드 전사 백엔드. ocr 은 임베딩 서비스(같은 GPU 서버 프로세스)의 /ocr 로 화면 글자를 읽어 VLM 호출을 줄인다.
 const SLIDE_TEXT_BACKEND_LIST = ['vlm', 'ocr'];
 const DEFAULT_SLIDE_TEXT_BACKEND = 'vlm';
+// 수치 해설(변화·비교, 값→의미)에 그 요청 프레임의 OCR 글자를 근거로 넣는다. 「화면 글자 읽기」(전사 백엔드)와 따로 켠다.
+const SCREEN_TEXT_GROUNDING_LIST = ['on', 'off'];
+const DEFAULT_SCREEN_TEXT_GROUNDING = 'on';
 // 교차 모드 틈 후보 위치: asr = ASR 조각 끝 시각(지금 동작), audio = 앱이 잰 회의 소리의 무음 구간.
 const GAP_SOURCE_LIST = ['asr', 'audio'];
 const DEFAULT_GAP_SOURCE = 'asr';
@@ -61,6 +64,14 @@ function readSlideTextBackend({ env }) {
   return DEFAULT_SLIDE_TEXT_BACKEND;
 }
 
+function readScreenTextGrounding({ env }) {
+  const mode = env.SEEON_SCREEN_TEXT_GROUNDING;
+  if (mode === undefined || mode === '') return DEFAULT_SCREEN_TEXT_GROUNDING;
+  if (SCREEN_TEXT_GROUNDING_LIST.includes(mode)) return mode;
+  console.warn(`[pipeline] SEEON_SCREEN_TEXT_GROUNDING="${mode}" 은 지원하지 않는 값입니다 — ${DEFAULT_SCREEN_TEXT_GROUNDING} 로 둡니다 (허용: ${SCREEN_TEXT_GROUNDING_LIST.join('·')})`);
+  return DEFAULT_SCREEN_TEXT_GROUNDING;
+}
+
 // 설정 화면에서 고른 값(회의마다 넘어온다)을 쓰고, 없거나 모르는 값이면 .env 로 정한 값을 쓴다.
 function resolveSlideTextBackend({ requested, fallback }) {
   return SLIDE_TEXT_BACKEND_LIST.includes(requested) ? requested : fallback;
@@ -101,6 +112,7 @@ function readPipelineConfig(env = process.env) {
     ttsLongUrl: env.SEEON_TTS_LONG_URL || DEFAULT_TTS_LONG_URL,
     embedUrl,
     slideTextBackend: readSlideTextBackend({ env }),
+    isScreenTextGroundingEnabled: readScreenTextGrounding({ env }) === 'on',
     gapSource: readGapSource({ env }),
     ocrUrl: resolveOcrUrl({ env, embedUrl }),
     bedrockRegion: env.SEEON_BEDROCK_REGION || DEFAULT_BEDROCK_REGION,
@@ -128,4 +140,5 @@ function readPipelineConfig(env = process.env) {
 module.exports = {
   readPipelineConfig, DEFAULT_JUDGE_GPU_URL, DEFAULT_JUDGE_GPU_MODEL, ASR_LANGUAGE_LIST, DEFAULT_ASR_LANGUAGE, isAsrLanguage, JUDGE_BACKEND_LIST, DEFAULT_JUDGE_BACKEND,
   SLIDE_TEXT_BACKEND_LIST, DEFAULT_SLIDE_TEXT_BACKEND, resolveSlideTextBackend, GAP_SOURCE_LIST, DEFAULT_GAP_SOURCE,
+  SCREEN_TEXT_GROUNDING_LIST, DEFAULT_SCREEN_TEXT_GROUNDING,
 };

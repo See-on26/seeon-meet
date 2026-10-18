@@ -7,6 +7,9 @@ const VALUE_PRESENCE_VERDICT_MAP = {
   unchecked: 'unchecked',
 };
 
+// 값을 무엇과 대조했나. frame_ocr = 해설 요청과 같은 프레임의 OCR 글자, slide_text = 슬라이드 확정 때 저장한 전사.
+const VALUE_CHECK_SOURCE_MAP = { frameOcr: 'frame_ocr', slideText: 'slide_text' };
+
 const NUMBER_CORE_PATTERN = /\d+(?:[.,]\d+)*/g;
 
 function extractNumberCoreList(text) {
@@ -59,17 +62,7 @@ function isValuePresent({ value, slideText = '', utterance = '', contextText = '
   return { verdict: VALUE_PRESENCE_VERDICT_MAP.present, reason: '' };
 }
 
-// 저장된 전사는 슬라이드 확정 순간의 화면이라, 클릭마다 항목이 나타나는 슬라이드나
-// 출력 상한에 잘린 긴 표에서는 실제로 화면에 있는 값도 없다고 나온다.
-// 없다고 나올 때만 지금 요청에 쓰인 화면을 다시 전사해 한 번 더 확인한다.
-async function verifyValuePresence({ value, subKind, utterance = '', contextText = '', slideText = '',
-  slideTextStatus, retranscribe }) {
-  const storedVerdict = isValuePresent({
-    value, subKind, utterance, contextText, slideText, slideTextStatus,
-  });
-  if (storedVerdict.verdict !== VALUE_PRESENCE_VERDICT_MAP.absent) {
-    return { ...storedVerdict, isRetranscribed: false };
-  }
+async function confirmByRetranscription({ value, subKind, utterance, contextText, retranscribe }) {
   let fresh = null;
   try {
     fresh = await retranscribe();
@@ -92,4 +85,27 @@ async function verifyValuePresence({ value, subKind, utterance = '', contextText
   };
 }
 
-module.exports = { isValuePresent, verifyValuePresence, VALUE_PRESENCE_VERDICT_MAP };
+// frameText: 해설이 본 것과 같은 프레임의 OCR 글자(믿을 줄만). 있으면 그것으로 먼저 보고, 값이 없으면 저장 전사를 거치지 않고
+// 지금 화면을 VLM 으로 다시 전사해 확인한다(OCR 오독을 다른 엔진으로 거른다). null 이면 지금처럼 저장 전사로 본다.
+// 저장된 전사는 슬라이드 확정 순간의 화면이라, 클릭마다 항목이 나타나는 슬라이드나
+// 출력 상한에 잘린 긴 표에서는 실제로 화면에 있는 값도 없다고 나온다.
+// 없다고 나올 때만 지금 요청에 쓰인 화면을 다시 전사해 한 번 더 확인한다.
+async function verifyValuePresence({ value, subKind, utterance = '', contextText = '', slideText = '',
+  slideTextStatus, frameText = null, retranscribe }) {
+  const isFrameChecked = typeof frameText === 'string';
+  const checkedSource = isFrameChecked ? VALUE_CHECK_SOURCE_MAP.frameOcr : VALUE_CHECK_SOURCE_MAP.slideText;
+  const firstVerdict = isValuePresent({
+    value, subKind, utterance, contextText,
+    slideText: isFrameChecked ? frameText : slideText,
+    slideTextStatus: isFrameChecked ? SLIDE_TEXT_STATUS_MAP.ready : slideTextStatus,
+  });
+  if (firstVerdict.verdict !== VALUE_PRESENCE_VERDICT_MAP.absent) {
+    return { ...firstVerdict, isRetranscribed: false, checkedSource };
+  }
+  return {
+    ...await confirmByRetranscription({ value, subKind, utterance, contextText, retranscribe }),
+    checkedSource,
+  };
+}
+
+module.exports = { isValuePresent, verifyValuePresence, VALUE_PRESENCE_VERDICT_MAP, VALUE_CHECK_SOURCE_MAP };
