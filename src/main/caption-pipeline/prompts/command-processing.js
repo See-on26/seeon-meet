@@ -2,6 +2,8 @@ const { USER_COMMAND_MAP } = require('../contracts/narration-types');
 const { GROUNDING_NONE_TOKEN, computeMaxChars } = require('../agents/shared/caption-parser');
 const { buildQaHistoryLineList } = require('./question-answer');
 const { buildAnswerLengthRule } = require('./answer-length-rule');
+const { DEFAULT_CAPTION_LANGUAGE } = require('../contracts/caption-language');
+const { buildOutputLanguageRuleList } = require('./output-language-rule');
 
 const DEFAULT_COMMAND_MIN_WORD_COUNT = 6;
 const DEFAULT_COMMAND_MAX_WORD_COUNT = 25;
@@ -26,10 +28,10 @@ const USER_COMMAND_RULE_MAP = {
 
 function buildCommandPrompt({ command,
   minWordCount = DEFAULT_COMMAND_MIN_WORD_COUNT,
-  maxWordCount = DEFAULT_COMMAND_MAX_WORD_COUNT, maxChars = null }) {
+  maxWordCount = DEFAULT_COMMAND_MAX_WORD_COUNT, maxChars = null, language = DEFAULT_CAPTION_LANGUAGE }) {
   const ruleList = USER_COMMAND_RULE_MAP[command];
   if (!ruleList) return '';
-  const effectiveMaxChars = Number.isFinite(maxChars) ? maxChars : computeMaxChars({ maxWordCount });
+  const effectiveMaxChars = Number.isFinite(maxChars) ? maxChars : computeMaxChars({ maxWordCount, language });
   return [
     '이 이미지는 회의에서 공유 중인 화면이다.',
     '청자는 시각장애인이며, **직접 물어본 질문**에 답하는 중이다.',
@@ -41,6 +43,7 @@ function buildCommandPrompt({ command,
     `(2) ${buildAnswerLengthRule({ minWordCount, maxWordCount, maxChars: effectiveMaxChars })}`,
     '(3) 머리말·인사말 없이 답만 출력한다.',
     '(4) 이미 안내했던 내용이라도 **다시 답한다** — 사용자가 직접 물었기 때문이다.',
+    ...buildOutputLanguageRuleList({ language }),
   ].join('\n');
 }
 
@@ -48,8 +51,9 @@ function buildCommandPrompt({ command,
 // PDF 3.1.2⑧의 "심화 질의응답 에이전트" 경로. 전용 생성기를 새로 만들지 않고 이 프롬프트를 쓴다.
 function buildFreeQuestionPrompt({ questionText,
   minWordCount = DEFAULT_COMMAND_MIN_WORD_COUNT,
-  maxWordCount = DEFAULT_COMMAND_MAX_WORD_COUNT, maxChars = null, recentTranscript = '', contextText = '', qaHistoryText = '' }) {
-  const effectiveMaxChars = Number.isFinite(maxChars) ? maxChars : computeMaxChars({ maxWordCount });
+  maxWordCount = DEFAULT_COMMAND_MAX_WORD_COUNT, maxChars = null, recentTranscript = '', contextText = '', qaHistoryText = '',
+  language = DEFAULT_CAPTION_LANGUAGE }) {
+  const effectiveMaxChars = Number.isFinite(maxChars) ? maxChars : computeMaxChars({ maxWordCount, language });
   return [
     '이 이미지는 회의에서 공유 중인 화면이다.',
     '청자는 시각장애인이며, 화면에 대해 **직접 물어본 질문**에 답하는 중이다.',
@@ -65,6 +69,7 @@ function buildFreeQuestionPrompt({ questionText,
     `(3) ${buildAnswerLengthRule({ minWordCount, maxWordCount, maxChars: effectiveMaxChars })}`,
     '(4) 머리말·인사말 없이 답만 출력한다.',
     '(5) 이미 안내했던 내용이라도 **다시 답한다** — 사용자가 직접 물었기 때문이다.',
+    ...buildOutputLanguageRuleList({ language }),
   ].filter(Boolean).join('\n');
 }
 

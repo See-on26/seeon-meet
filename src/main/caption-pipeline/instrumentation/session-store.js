@@ -1,4 +1,5 @@
 const { RECORD_KIND_MAP } = require('./record-store');
+const { DEFAULT_CAPTION_LANGUAGE } = require('../contracts/caption-language');
 
 const ACCUMULATED_KIND_LIST = [
   RECORD_KIND_MAP.asr,
@@ -10,10 +11,11 @@ const ACCUMULATED_KIND_LIST = [
 function createSessionStore() {
   let currentSession = null;
 
-  function startSession({ mode = '', asrLanguage = null, startedAt = Date.now() } = {}) {
+  // captionLanguage 는 회의 뒤 요약도 같은 언어로 만들도록 세션과 함께 남긴다.
+  function startSession({ mode = '', asrLanguage = null, captionLanguage = DEFAULT_CAPTION_LANGUAGE, startedAt = Date.now() } = {}) {
     const recordListByKindMap = new Map();
     for (const kind of ACCUMULATED_KIND_LIST) recordListByKindMap.set(kind, []);
-    currentSession = { sessionId: `session-${startedAt}`, mode, asrLanguage, startedAt, recordListByKindMap };
+    currentSession = { sessionId: `session-${startedAt}`, mode, asrLanguage, captionLanguage, startedAt, recordListByKindMap };
     return { sessionId: currentSession.sessionId };
   }
 
@@ -28,12 +30,13 @@ function createSessionStore() {
 
   function endSession({ endedAt = Date.now() } = {}) {
     if (!currentSession) return null;
-    const { sessionId, mode, asrLanguage, startedAt, recordListByKindMap } = currentSession;
+    const { sessionId, mode, asrLanguage, captionLanguage, startedAt, recordListByKindMap } = currentSession;
     currentSession = null;
     return {
       sessionId,
       mode,
       asrLanguage,
+      captionLanguage,
       startedAt,
       endedAt,
       asrEntryList: [...recordListByKindMap.get(RECORD_KIND_MAP.asr)],

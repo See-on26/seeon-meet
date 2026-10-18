@@ -2,10 +2,15 @@ const { formatElapsed } = require('../context/clock-format');
 const { buildAnswerLengthRule } = require('./answer-length-rule');
 const { formatHeardSlideTag } = require('../context/slide-tag');
 const { keepNewestWithinChars } = require('../context/newest-within-chars');
+const { DEFAULT_CAPTION_LANGUAGE } = require('../contracts/caption-language');
+const { buildOutputLanguageRuleList } = require('./output-language-rule');
 
 const NEED_IMAGE_TOKEN = 'NEED_IMAGE';
 const SLIDE_TEXT_EVIDENCE_LIMIT = 1500;
 const UTTERANCE_PER_SLIDE_LIMIT = 15;
+
+// 영어 답을 고르더라도 답 없음·이미지 요청 토큰은 시스템이 읽는 값이라 그대로 내야 한다.
+const ANSWER_TOKEN_KEEP_RULE = `답을 찾지 못했을 때의 "NONE"·"${NEED_IMAGE_TOKEN}"은 번역하지 말고 그대로 출력한다.`;
 
 function formatUtteranceLine({ utterance, startedAt }) {
   const speaker = utterance.speakerHint ? `${utterance.speakerHint}: ` : '';
@@ -45,7 +50,7 @@ function buildSlideEvidence({ slide, utteranceList, narrationList, startedAt,
 
 // 저장 이미지가 있으면 글자 기록에서 못 찾은 답을 그림에서 다시 찾는다(텍스트 우선, 모자라면 이미지).
 function buildPastSlideAnswerPrompt({ questionText, evidenceText, minWordCount, maxWordCount, hasImage = false,
-  qaHistoryText = '' }) {
+  qaHistoryText = '', language = DEFAULT_CAPTION_LANGUAGE }) {
   return [
     '시각장애인 사용자가 회의 중에 지나간 화면에 대해 물었다. 아래는 그 화면에 대해 저장해 둔 기록이다.',
     '',
@@ -58,10 +63,12 @@ function buildPastSlideAnswerPrompt({ questionText, evidenceText, minWordCount, 
     ...(hasImage
       ? [`(4) 색·배치·모양처럼 화면 그림을 봐야 답할 수 있는 질문도 정확히 "${NEED_IMAGE_TOKEN}"만 출력한다.`]
       : []),
+    ...buildOutputLanguageRuleList({ language, detailLineList: [ANSWER_TOKEN_KEEP_RULE] }),
   ].join('\n');
 }
 
-function buildImageAnswerPrompt({ questionText, evidenceText, minWordCount, maxWordCount, qaHistoryText = '' }) {
+function buildImageAnswerPrompt({ questionText, evidenceText, minWordCount, maxWordCount, qaHistoryText = '',
+  language = DEFAULT_CAPTION_LANGUAGE }) {
   return [
     '이 이미지는 회의에서 앞서 공유된 화면이다. 시각장애인 사용자가 이 화면에 대해 물었다.',
     '',
@@ -72,10 +79,12 @@ function buildImageAnswerPrompt({ questionText, evidenceText, minWordCount, maxW
     `질문: "${questionText}"`,
     '',
     ...buildAnswerRuleList({ minWordCount, maxWordCount }).map((line) => line.replace('아래 기록', '이미지와 기록')),
+    ...buildOutputLanguageRuleList({ language, detailLineList: [ANSWER_TOKEN_KEEP_RULE] }),
   ].join('\n');
 }
 
-function buildSpeakerAnswerPrompt({ questionText, utteranceText, minWordCount, maxWordCount, qaHistoryText = '' }) {
+function buildSpeakerAnswerPrompt({ questionText, utteranceText, minWordCount, maxWordCount, qaHistoryText = '',
+  language = DEFAULT_CAPTION_LANGUAGE }) {
   return [
     '시각장애인 사용자가 회의에서 누가 무슨 말을 했는지 물었다. 아래는 발언 기록이다.',
     '화자는 회의 화면의 표시로 추정한 것이다. 화자가 적히지 않은 발언은 누가 했는지 말하지 않는다.',
@@ -86,6 +95,7 @@ function buildSpeakerAnswerPrompt({ questionText, utteranceText, minWordCount, m
     `질문: "${questionText}"`,
     '',
     ...buildAnswerRuleList({ minWordCount, maxWordCount }),
+    ...buildOutputLanguageRuleList({ language, detailLineList: [ANSWER_TOKEN_KEEP_RULE] }),
   ].join('\n');
 }
 
@@ -105,7 +115,8 @@ function buildNarrationReplayPrompt({ questionText, narrationList, qaHistoryText
   ].join('\n');
 }
 
-function buildMeetingFlowPrompt({ questionText, flowText, minWordCount, maxWordCount, qaHistoryText = '' }) {
+function buildMeetingFlowPrompt({ questionText, flowText, minWordCount, maxWordCount, qaHistoryText = '',
+  language = DEFAULT_CAPTION_LANGUAGE }) {
   return [
     '시각장애인 사용자가 지금까지의 회의 흐름에 대해 물었다. 아래는 화면에 나온 순서대로 정리한 기록이다.',
     '',
@@ -115,6 +126,7 @@ function buildMeetingFlowPrompt({ questionText, flowText, minWordCount, maxWordC
     `질문: "${questionText}"`,
     '',
     ...buildAnswerRuleList({ minWordCount, maxWordCount }),
+    ...buildOutputLanguageRuleList({ language, detailLineList: [ANSWER_TOKEN_KEEP_RULE] }),
   ].join('\n');
 }
 

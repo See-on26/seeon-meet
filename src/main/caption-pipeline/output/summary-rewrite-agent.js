@@ -13,13 +13,13 @@ const REWRITE_TIMEOUT_MS = 300000;
 function createSummaryRewriteAgent({ config }) {
   // Opus가 만든 요약 초안을 Sonnet으로 낭독용 "듣는 글"로 다듬는다.
   // 실패하면 초안을 그대로 돌려주어 요약 자체가 끊기지 않게 한다.
-  async function rewrite({ draftText, isTruncated = false }) {
+  async function rewrite({ draftText, isTruncated = false, language = 'ko' }) {
     try {
       const { text, stopReason } = await requestConverseText({
         config,
         modelId: config.summaryRewriteModelId,
-        systemPrompt: buildSummaryRewriteSystemPrompt(),
-        messageList: [{ role: 'user', content: [{ text: buildSummaryRewriteInput({ draftText }) }] }],
+        systemPrompt: buildSummaryRewriteSystemPrompt({ language }),
+        messageList: [{ role: 'user', content: [{ text: buildSummaryRewriteInput({ draftText, language }) }] }],
         maxTokens: REWRITE_MAX_TOKENS,
         timeoutMs: REWRITE_TIMEOUT_MS,
         label: AGENT_LABEL,

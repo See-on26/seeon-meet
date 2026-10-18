@@ -20,9 +20,11 @@ uv venv --python 3.10 --seed ~/venv-audio
 # ASR (faster-whisper는 torch가 아니라 ctranslate2 사용) + 웹서버
 ~/venv-audio/bin/pip install faster-whisper fastapi uvicorn
 
-# TTS (MeloTTS-Korean)
+# TTS (MeloTTS 한국어 + 영어 — 앱의 캡션 언어가 English 면 영어 모델로 읽는다)
 ~/venv-audio/bin/pip install git+https://github.com/myshell-ai/MeloTTS.git
 ~/venv-audio/bin/python -m unidic download
+# 영어 모델의 발음 변환(g2p_en)이 쓰는 NLTK 데이터. 없으면 tts_server 가 영어 모델을 못 띄우고 영어도 한국어 모델로 읽는다.
+~/venv-audio/bin/python -c "import nltk; [nltk.download(name, quiet=True) for name in ('averaged_perceptron_tagger', 'averaged_perceptron_tagger_eng', 'cmudict')]"
 
 # torch 3형제를 cu121로 맞춘다. 드라이버 580(CUDA 13.0)은 하위 CUDA 런타임과 호환되므로 그대로 돈다.
 # ⚠️ --no-deps 쓰지 말 것 — CUDA 런타임 라이브러리(libcudart/libcublas)까지 함께 받아야 한다.

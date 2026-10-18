@@ -27,11 +27,12 @@ function buildSummaryInput({ scriptText }) {
 
 // 회의 후 처리의 "회의 요약 에이전트" — 회의 스크립트 작성 단계가 만든 스크립트 한 건을 요약한다.
 function createMeetingSummaryAgent({ config }) {
-  async function summarize({ scriptText }) {
+  // language 는 그 회의의 캡션 언어다. 영어면 요약을 영어로 쓴다.
+  async function summarize({ scriptText, language = 'ko' }) {
     const { text, stopReason } = await requestConverseText({
       config,
       modelId: config.summaryModelId,
-      systemPrompt: buildSummarySystemPrompt(),
+      systemPrompt: buildSummarySystemPrompt({ language }),
       messageList: [{ role: 'user', content: [{ text: buildSummaryInput({ scriptText }) }] }],
       maxTokens: SUMMARY_MAX_TOKENS,
       timeoutMs: SUMMARY_TIMEOUT_MS,

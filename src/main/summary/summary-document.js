@@ -13,14 +13,39 @@ const MARKUP_RULE_LIST = [
 
 const TRUNCATED_NOTICE = '이 요약은 길이 제한에 걸려 뒷부분이 잘렸습니다.';
 
-function formatDurationText({ ms }) {
+// 요약 문서의 머리 글. 그 회의의 캡션 언어로 쓴다(요약 음성도 이 글을 그대로 읽는다).
+const SUMMARY_DOCUMENT_TEXT_MAP = {
+  ko: {
+    title: '회의 요약',
+    length: (durationText) => `회의 길이: ${durationText}`,
+    scale: ({ slideCount, utteranceCount }) => `슬라이드 ${slideCount || 0}장 · 발화 ${utteranceCount || 0}건`,
+    truncated: TRUNCATED_NOTICE,
+    second: (count) => `${count}초`,
+    minute: (count) => `${count}분`,
+    hour: (count) => `${count}시간`,
+  },
+  en: {
+    title: 'Meeting summary',
+    length: (durationText) => `Meeting length: ${durationText}`,
+    scale: ({ slideCount, utteranceCount }) => `${slideCount || 0} slides · ${utteranceCount || 0} utterances`,
+    truncated: 'This summary was cut off at the length limit, so the end is missing.',
+    second: (count) => `${count} ${count === 1 ? 'second' : 'seconds'}`,
+    minute: (count) => `${count} ${count === 1 ? 'minute' : 'minutes'}`,
+    hour: (count) => `${count} ${count === 1 ? 'hour' : 'hours'}`,
+  },
+};
+
+const readDocumentText = (language) => SUMMARY_DOCUMENT_TEXT_MAP[language] || SUMMARY_DOCUMENT_TEXT_MAP.ko;
+
+function formatDurationText({ ms, language = 'ko' }) {
   if (!Number.isFinite(ms) || ms < 0) return '';
+  const text = readDocumentText(language);
   const totalMinute = Math.floor(ms / 60000);
-  if (totalMinute < 1) return `${Math.floor(ms / 1000)}초`;
+  if (totalMinute < 1) return text.second(Math.floor(ms / 1000));
   const hour = Math.floor(totalMinute / 60);
   const minute = totalMinute % 60;
-  if (!hour) return `${minute}분`;
-  return minute ? `${hour}시간 ${minute}분` : `${hour}시간`;
+  if (!hour) return text.minute(minute);
+  return minute ? `${text.hour(hour)} ${text.minute(minute)}` : text.hour(hour);
 }
 
 function buildSummaryFileName({ sessionId, extension }) {
@@ -28,17 +53,14 @@ function buildSummaryFileName({ sessionId, extension }) {
   return `summary-${safeSessionId}.${extension}`;
 }
 
-function formatScaleText({ slideCount, utteranceCount }) {
-  return `슬라이드 ${slideCount || 0}장 · 발화 ${utteranceCount || 0}건`;
-}
-
-function buildSummaryDocument({ meetingMeta, bodyText, isTruncated = false }) {
-  const durationText = formatDurationText({ ms: meetingMeta.endedAt - meetingMeta.startedAt });
-  const lineList = ['회의 요약', ''];
-  if (durationText) lineList.push(`회의 길이: ${durationText}`);
-  lineList.push(formatScaleText(meetingMeta), '');
+function buildSummaryDocument({ meetingMeta, bodyText, isTruncated = false, language = 'ko' }) {
+  const text = readDocumentText(language);
+  const durationText = formatDurationText({ ms: meetingMeta.endedAt - meetingMeta.startedAt, language });
+  const lineList = [text.title, ''];
+  if (durationText) lineList.push(text.length(durationText));
+  lineList.push(text.scale(meetingMeta), '');
   lineList.push(String(bodyText ?? '').trim());
-  if (isTruncated) lineList.push('', TRUNCATED_NOTICE);
+  if (isTruncated) lineList.push('', text.truncated);
   return `${lineList.join('\n')}\n`;
 }
 

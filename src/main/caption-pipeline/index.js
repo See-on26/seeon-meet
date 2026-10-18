@@ -8,6 +8,7 @@ const {
 const { toNarrationClass, NARRATION_ORIGIN_MAP } = require('./contracts/narration-class');
 const { buildSpeakerIdentityFromDom } = require('./agents/speaker-identity-agent');
 const { DEBUG_STAGE_MAP, DEBUG_VERDICT_MAP } = require('./contracts/debug-events');
+const { DEFAULT_CAPTION_LANGUAGE, resolveCaptionLanguage } = require('./contracts/caption-language');
 const { createDevFlow } = require('../dev-flow');
 const { flattenPlaybackReport } = require('../dev-flow/playback-report');
 const { createAgentFieldMap } = require('./agents');
@@ -55,7 +56,7 @@ const { classifyQuestion, QUESTION_ROUTE_MAP } = require('./context/question-cla
 const { createQuestionRouter } = require('./context/question-router');
 const { formatQaHistory, buildPresetQa } = require('./context/qa-history');
 const { buildCurrentScreenContextText } = require('./context/current-screen-context');
-const { createQuestionAnswerer, NOT_FOUND_TEXT } = require('./context/question-answerer');
+const { createQuestionAnswerer, readAnswerText, ANSWER_TEXT_KEY_MAP } = require('./context/question-answerer');
 const { OUT_DIR, CONTEXT_DIR } = require('../paths');
 
 const ASR_DRAIN_TIMEOUT_MS = 8000;
@@ -102,7 +103,11 @@ function registerPipeline({ getViewerView, meetingArchive = null }) {
   const sessionStore = createSessionStore();
   let pendingAsrCount = 0;
   let lastSession = null;
-  const agentFieldMap = createAgentFieldMap({ config });
+  // 사용자에게 들리는 말의 언어. 캡처를 시작할 때 설정 화면에서 고른 값이 넘어온다.
+  // 해설 에이전트·질문 답·무발화·전환 머리말이 부를 때마다 이 값을 읽는다.
+  let sessionCaptionLanguage = DEFAULT_CAPTION_LANGUAGE;
+  const getCaptionLanguage = () => sessionCaptionLanguage;
+  const agentFieldMap = createAgentFieldMap({ config, getCaptionLanguage });
   const embedClient = createEmbedClient({ config });
   const ttsClient = createTtsClient({ config });
 
@@ -132,7 +137,9 @@ function registerPipeline({ getViewerView, meetingArchive = null }) {
   const narrationHistory = createNarrationHistory();
   const silenceGate = createSilenceNarrationGate();
   const featureGate = createFeatureGate();
-  const silenceNarrator = createSilenceNarrator({ gate: silenceGate, judge: createSilenceJudge({ config }) });
+  const silenceNarrator = createSilenceNarrator({
+    gate: silenceGate, judge: createSilenceJudge({ config }), getCaptionLanguage,
+  });
   console.log(`[pipeline] 발화 축 판정 경로: ${config.routerMode}`);
   console.log(`[pipeline] 탐지 판정 LLM: ${config.judgeBackend === 'gpu'
     ? `GPU ${config.judgeGpuModel} (실패하면 판정 없이 넘어감)` : `Bedrock ${config.judgeModelId}`}`);
@@ -160,6 +167,7 @@ function registerPipeline({ getViewerView, meetingArchive = null }) {
       config, jpegBuffer, prompt, label, maxTokens,
     }),
     readImage: (filePath) => fs.promises.readFile(filePath).catch(() => null),
+    getCaptionLanguage,
   });
 
   function appendRecord(record) {
@@ -325,7 +333,7 @@ function registerPipeline({ getViewerView, meetingArchive = null }) {
   // 전달 Layer 앞의 TTS. 렌더러 대기 줄이 이번에 재생할 해설로 고른 것만 합성한다.
   ipcMain.handle('pipeline-tts', async (_event, { ts = Date.now(), text = '', source = null } = {}) => {
     try {
-      const wavData = await ttsClient.synthesize({ text });
+      const wavData = await ttsClient.synthesize({ text, language: getCaptionLanguage() });
       await appendRecord({ kind: RECORD_KIND_MAP.tts, ts, byteLength: wavData.byteLength });
       markDebug({
         stage: DEBUG_STAGE_MAP.tts, verdict: DEBUG_VERDICT_MAP.pass, narrationType: source, ts,
@@ -342,7 +350,7 @@ function registerPipeline({ getViewerView, meetingArchive = null }) {
     }
   });
 
-  ipcMain.handle('pipeline-session-start', async (_event, { mode = '', asrLanguage, slideTextBackend } = {}) => {
+  ipcMain.handle('pipeline-session-start', async (_event, { mode = '', asrLanguage, captionLanguage, slideTextBackend } = {}) => {
     describedStore.reset();
     captionDescribed.reset();
     screenRegistry.reset();
@@ -354,14 +362,15 @@ function registerPipeline({ getViewerView, meetingArchive = null }) {
     boundaryTrigger.reset();
     const meetingLanguage = applySessionMeetingLanguage({ asrLanguageSession, asrLanguage });
     sessionSlideTextBackend = resolveSlideTextBackend({ requested: slideTextBackend, fallback: config.slideTextBackend });
-    const { sessionId } = sessionStore.startSession({ mode, asrLanguage: meetingLanguage });
+    sessionCaptionLanguage = resolveCaptionLanguage(captionLanguage);
+    const { sessionId } = sessionStore.startSession({ mode, asrLanguage: meetingLanguage, captionLanguage: sessionCaptionLanguage });
     devFlow.recorder.start({ sessionId, mode });
     contextGeneration += 1;
     contextStore.start({ sessionId, startedAt: Date.now() });
-    console.log(`[pipeline] ■ 캡처 세션 시작 (모드=${mode}, 회의 언어=${meetingLanguage}, 화면 글자=${sessionSlideTextBackend}, ${sessionId}) — 중복 이력·화면 레지스트리 초기화`);
+    console.log(`[pipeline] ■ 캡처 세션 시작 (모드=${mode}, 받아쓰기=${meetingLanguage}, 캡션 언어=${sessionCaptionLanguage}, 화면 글자=${sessionSlideTextBackend}, ${sessionId}) — 중복 이력·화면 레지스트리 초기화`);
     markDebug({
       stage: DEBUG_STAGE_MAP.session, verdict: DEBUG_VERDICT_MAP.info,
-      reason: '세션 시작', detail: `모드=${mode} · 회의 언어=${meetingLanguage} · 화면 글자=${sessionSlideTextBackend} · ${sessionId} · 기록=${recordStore.filePath}`,
+      reason: '세션 시작', detail: `모드=${mode} · 받아쓰기=${meetingLanguage} · 캡션 언어=${sessionCaptionLanguage} · 화면 글자=${sessionSlideTextBackend} · ${sessionId} · 기록=${recordStore.filePath}`,
     });
 
     return { isOk: true, sessionId, recordPath: recordStore.filePath, gapSource: config.gapSource };
@@ -491,7 +500,7 @@ function registerPipeline({ getViewerView, meetingArchive = null }) {
 
       if (isRevisitFinal) {
         const revisitNarration = buildRevisitNarration({
-          isSlide: isSlideScreen, displayNumber, topic: result.pageTopic || result.narration,
+          isSlide: isSlideScreen, displayNumber, topic: result.pageTopic || result.narration, language: getCaptionLanguage(),
         });
         await appendRecord({
           kind: RECORD_KIND_MAP.pageTransition, ts, slideLabel, screenType: result.screenType,
@@ -527,7 +536,9 @@ function registerPipeline({ getViewerView, meetingArchive = null }) {
       }
       // 고지를 끈 상태면 사용자가 듣지 못한 요소이므로 지시 해설이 "이미 설명함"으로 건너뛰지 않게 등록하지 않는다.
       const isTransitionEnabled = featureGate.isEnabled(NARRATION_CLASS_MAP.pageTransition);
-      const narration = buildTransitionNarration({ isSlide: isSlideScreen, displayNumber, narration: result.narration });
+      const narration = buildTransitionNarration({
+        isSlide: isSlideScreen, displayNumber, narration: result.narration, language: getCaptionLanguage(),
+      });
       if (isTransitionEnabled) {
         captionDescribed.add({ ts, text: narration, slideLabel, elementList: result.describedElementList });
       }
@@ -639,7 +650,7 @@ function registerPipeline({ getViewerView, meetingArchive = null }) {
     try {
       const isDomPath = source === SPEAKER_SOURCE_MAP.dom;
       const result = isDomPath
-        ? buildSpeakerIdentityFromDom({ speakerName, position, participantId })
+        ? buildSpeakerIdentityFromDom({ speakerName, position, participantId, language: getCaptionLanguage() })
         : await agentFieldMap[NARRATION_TYPE_MAP.speakerIdentity].generate({
           jpegBuffer: Buffer.from(buffer),
           minWordCount: wordBudget?.minWordCount, maxWordCount: wordBudget?.maxWordCount,
@@ -1047,6 +1058,7 @@ function registerPipeline({ getViewerView, meetingArchive = null }) {
           if (secondVerdict.verdict === VALUE_PRESENCE_VERDICT_MAP.absent) {
             const firstPair = assembleNarration({
               narrationType, subKind: selectedCandidate?.subKind, rawSlotMap: { ...slotMap, target2: '', value2: '' },
+              language: getCaptionLanguage(),
             });
             markDebug({
               stage: DEBUG_STAGE_MAP.valueCheck, verdict: DEBUG_VERDICT_MAP.skip, ts, narrationType,
@@ -1180,7 +1192,8 @@ function registerPipeline({ getViewerView, meetingArchive = null }) {
           route: routed.route, slideMajorList: routed.slideMajorList, questionText, wordBudget, speakerHintNow,
           heardWallTs, heardVideoTimeMs,
         });
-      const text = result.isGrounded && result.text ? result.text : NOT_FOUND_TEXT;
+      const text = result.isGrounded && result.text
+        ? result.text : readAnswerText({ key: ANSWER_TEXT_KEY_MAP.notFound, language: getCaptionLanguage() });
       contextStore.addQa({
         ts, question: questionText, answer: text, route: routed.route, slideMajorList: routed.slideMajorList,
       });

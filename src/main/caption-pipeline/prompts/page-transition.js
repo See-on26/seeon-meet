@@ -1,4 +1,6 @@
 const { DESCRIPTION_TAIL_NOUN_LIST } = require('../agents/shared/narration-format');
+const { DEFAULT_CAPTION_LANGUAGE } = require('../contracts/caption-language');
+const { buildOutputLanguageRuleList } = require('./output-language-rule');
 
 const SCREEN_TYPE_LIST = [
   'ppt', 'doc', 'sheet', 'web', 'etc',
@@ -11,6 +13,7 @@ const DEFAULT_TRANSITION_MAX_WORD_COUNT = 9;
 function buildPageTransitionPrompt({
   minWordCount = DEFAULT_TRANSITION_MIN_WORD_COUNT,
   maxWordCount = DEFAULT_TRANSITION_MAX_WORD_COUNT,
+  language = DEFAULT_CAPTION_LANGUAGE,
 } = {}) {
   return [
     '이 이미지는 회의에서 방금 새로 표시되거나 전환된 공유 화면이다.',
@@ -62,6 +65,15 @@ function buildPageTransitionPrompt({
     '  "isPhotoOnly": true 또는 false,',
     '  "screenForm": "형태(ppt면 빈 문자열)", "description": "주제 중심 화면 묘사, 끝맺힌 구",',
     '  "describedElementList": ["묘사가 언급한 시각 요소 명사구", ...] }',
+    ...buildOutputLanguageRuleList({
+      language,
+      detailLineList: [
+        'pageTopic·screenForm·description·describedElementList 값을 영어로 쓴다. screenType 은 위 영어 값 그대로 둔다.',
+        'screenForm 은 자연스러운 영어 화면 이름으로 쓴다(예: "web page", "blog post", "PDF document", "Excel sheet", "Word document", "file explorer", "desktop"). 한국어 낱말을 한 자씩 옮기지 마라("blog web" X).',
+        'description 은 위 명사 목록에 해당하는 영어 낱말(slide·chart·table·map·diagram·document·web page 등)로 끝맺는다.'
+          + ' 머리말("Slide N:"·"Page:")은 시스템이 붙이므로 넣지 마라.',
+      ],
+    }),
   ].join('\n');
 }
 

@@ -1,4 +1,5 @@
 import { USER_COMMAND_MAP } from '../constants.js';
+import { defaultUiText } from '../i18n/ui-text.js';
 
 // 질문 프리셋은 Ctrl+1~9 에 하나씩 걸린다. 번호(slot)는 1부터이고 목록 순서와 같다.
 export const MAX_QUESTION_PRESET_COUNT = 9;
@@ -14,6 +15,19 @@ const DEFAULT_QUESTION_PRESET_LIST = [
 export const DEFAULT_QUESTION_PRESET_TEXT_LIST = DEFAULT_QUESTION_PRESET_LIST.map((preset) => preset.text);
 
 const COMMAND_BY_TEXT_MAP = new Map(DEFAULT_QUESTION_PRESET_LIST.map((preset) => [preset.text, preset.command]));
+
+const DEFAULT_PRESET_TEXT_KEY_MAP = {
+  [USER_COMMAND_MAP.screenMaterial]: 'preset.default.screenMaterial',
+  [USER_COMMAND_MAP.pageSummary]: 'preset.default.pageSummary',
+  [USER_COMMAND_MAP.graphAxis]: 'preset.default.graphAxis',
+};
+
+// 저장 값은 사용자가 넣은 문구 그대로다. 기본 문구(전용 명령)만 화면에서 캡션 언어의 이름으로 보인다.
+// 한국어 이름은 저장된 기본 문구와 같아 한국어 화면은 그대로다.
+export function readQuestionPresetText({ preset, t = defaultUiText }) {
+  const key = preset.command ? DEFAULT_PRESET_TEXT_KEY_MAP[preset.command] : null;
+  return key ? t(key) : preset.text;
+}
 
 export function readQuestionPresetSlotFromKey(key) {
   return /^[1-9]$/.test(key || '') ? Number(key) : null;
