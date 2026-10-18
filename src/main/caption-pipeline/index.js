@@ -912,11 +912,6 @@ function registerPipeline({ getViewerView, meetingArchive = null }) {
       return { isOk: true, isGrounded: false };
     }
 
-    // 수치 해설이 될 수 있는 요청이면 판단 LLM 과 함께 같은 프레임의 OCR 을 시작한다. 수치 해설이 아니면 결과를 버린다.
-    const screenTextTask = isRouterMode && shouldStartScreenTextGrounding({ triggerCandidateList })
-      ? screenTextGrounding.start({ jpegBuffer: Buffer.from(buffer) })
-      : null;
-
     const describedElementList = [
       ...describedStore.getDescribed(slideLabel),
       ...narrationHistory.getRecentTextList({ limit: RECENT_NARRATION_LIMIT }),
@@ -925,6 +920,10 @@ function registerPipeline({ getViewerView, meetingArchive = null }) {
     const beforeText = typeof beforeTranscript === 'string' ? beforeTranscript : (recentTranscript || '');
     const afterText = typeof afterTranscript === 'string' ? afterTranscript : '';
     try {
+      // 수치 해설이 될 수 있는 요청이면 판단 LLM 과 함께 같은 프레임의 OCR 을 시작한다. 수치 해설이 아니면 결과를 버린다.
+      const screenTextTask = isRouterMode && shouldStartScreenTextGrounding({ triggerCandidateList })
+        ? screenTextGrounding.start({ jpegBuffer: Buffer.from(buffer) })
+        : null;
       let judgeReason = null;
       let selectedCandidate = null;
       let narrationEventVideoTimeMs = eventVideoTimeMs;
