@@ -127,8 +127,9 @@ test('앞 조각이 꼬리 끝에서 이미 잡은 구와 겹치면 다른 유�
 
 test('비교 기준이 앞 조각에 있어 뒷조각만으로는 안 잡히던 비교를 경계 후보로 붙인다', { skip: !hasKiwiModel }, () => {
   const boundary = createBoundaryTrigger({ detect: kiwiTrigger.detect });
-  assert.deepEqual(phraseListOf(boundary.detect({ text: '퀵 정렬이 버블 정렬보다 훨씬', startTs: 0, endTs: 3000 })), []);
-  const second = boundary.detect({ text: '훨씬 빠릅니다. 그래서 실무에서 많이 씁니다.', startTs: 3000, endTs: 6000 });
+  // "훨씬"은 그 자체로 비교 표지라 뒷조각만으로도 잡히므로, 표지가 아닌 정도 부사로 경계 이어 붙이기를 본다.
+  assert.deepEqual(phraseListOf(boundary.detect({ text: '퀵 정렬이 버블 정렬보다 상당히', startTs: 0, endTs: 3000 })), []);
+  const second = boundary.detect({ text: '상당히 빠릅니다. 그래서 실무에서 많이 씁니다.', startTs: 3000, endTs: 6000 });
   assert.equal(second.boundaryCount, 1);
   assert.equal(second.candidateList[0].type, 'change');
 });

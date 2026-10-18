@@ -98,12 +98,14 @@ const UNIT_SYMBOL_SET = new Set(['%', '℃', '°', '$', '₩']);
 const CHANGE_VERB_SET = new Set([
   '오르', '올라가', '올라오', '떨어지', '내리', '내려가', '늘', '늘어나', '늘리', '줄', '줄어들', '줄이', '뛰', '뛰어오르',
   '바뀌', '달라지', '앞서', '앞지르', '뒤지', '넘', '넘어서', '추월하', '불어나', '꺾이', '치솟', '곤두박질치', '반토막나',
+  '솟구치',
 ]);
 const CHANGE_NOUN_SET = new Set([
   '증가', '감소', '상승', '하락', '단축', '개선', '악화', '향상', '저하', '성장', '급증', '급감', '확대', '축소', '증대', '감축',
   '둔화', '반등', '회복', '역전', '추월', '폭증', '폭락', '급등', '급락', '반감', '배증', '인상', '인하', '절감', '감량',
 ]);
-const COMPARISON_MARKER_FORM_SET = new Set(['보다', '더', '덜']);
+// "훨씬 적게 들면서", "한층 안정적으로 잡히는"처럼 비교 대상을 생략한 비교 부사도 비교 표지로 본다.
+const COMPARISON_MARKER_FORM_SET = new Set(['보다', '더', '덜', '훨씬', '더욱', '한층', '한결']);
 // 사람이 늘리고 줄이는 타동사. 지난 일(었·았)이 아니면 "줄이겠습니다", "늘립니다", "내려 보세요"처럼 계획·지시라 값의 변화가 아니다.
 const AGENTIVE_CHANGE_VERB_SET = new Set(['늘리', '줄이', '내리']);
 const PAST_TENSE_FORM_SET = new Set(['었', '았', '였', '었었', '았었']);
@@ -119,9 +121,20 @@ const SCALE_ADJ_SET = new Set(['크', '작', '길', '짧', '넓', '좁', '많', 
 const MEASURABLE_ADJ_SET = new Set([
   '높', '낮', '빠르', '느리', '무겁', '가볍', '두껍', '얇', '깊', '얕', '굵', '가늘', '밝', '어둡', '멀', '가깝',
   '비싸', '드물', '흔하', '심하', '촘촘하', '빽빽하', '넉넉하',
+  ...['어마어마하', '엄청나', '막대하', '방대하', '거대하', '커다랗'],
 ]);
 // 어근 + 하다로 나뉘어 분석되는 척도 형용사("넉넉/XR 하/XSA").
-const SCALE_ROOT_SET = new Set(['넉넉', '촘촘', '빽빽', '흔', '심']);
+const SCALE_ROOT_SET = new Set(['넉넉', '촘촘', '빽빽', '흔', '심', '어마어마', '막대', '방대', '거대']);
+// 그 자체로 정도가 큰 크기 형용사. 명사를 꾸며도("커다란 밥그릇") 화면 속 크기를 말한다.
+// 엄청나다는 "엄청난 고통", "엄청난 인기"처럼 크기가 아닌 정도에도 흔히 써서 꾸밈말로는 보지 않는다.
+const INTENSE_SIZE_ADJ_SET = new Set(['커다랗', '어마어마하', '막대하', '방대하', '거대하']);
+// 명사를 꾸미는 척도 형용사 앞의 강조 부사("유난히 큰 그릇"). 강조가 없으면 "큰 그릇"은 이름일 수 있어 보지 않는다.
+const ATTRIBUTIVE_INTENSIFIER_SET = new Set(['유난히', '엄청', '굉장히', '무척', '상당히', '매우', '아주', '너무', '정말', '훨씬']);
+// 관형형 + 이 명사 + 보다·확인하다·알다는 "~하는 것을 볼 수 있다"처럼 화면에 보이는 사실을 말하는 꼴이라 꾸밈이 아니라 서술로 본다.
+// "~다는 사실", "~한 결과"는 결론을 전하는 꼴이다.
+const PERCEIVED_HEAD_NOUN_SET = new Set(['것', '거', '모습', '모양', '양상', '사실', '결과']);
+const CONCLUSION_HEAD_NOUN_SET = new Set(['사실', '결과']);
+const PERCEPTION_STEM_SET = new Set(['보', '보이', '확인', '알', '나타나', '드러나']);
 // 양·정도를 말하는 부사. "오래"처럼 시간만 말하는 부사는 화면으로 볼 수 없어 넣지 않는다.
 const QUANTITY_ADVERB_SET = new Set([
   '많이', '대거', '잔뜩', '쑥쑥', '멀리', '가득', '수북이', '듬뿍', '온통', '왕창', '빼곡히', '촘촘히', '넉넉히',
@@ -148,8 +161,9 @@ const COMPARISON_NOUN_SET = new Set([
 // 추세·멈춤 명사. "흐름"은 말의 흐름("흐름이 끊겼네요")으로도 써서 넣지 않는다.
 const TREND_NOUN_SET = new Set(['오름세', '내림세', '상승세', '하락세', '증가세', '감소세', '회복세', '둔화세', '강세', '약세', '반등세', '보합세']);
 const STAGNATION_NOUN_SET = new Set(['주춤', '정체', '횡보', '답보', '제자리걸음']);
-const DIFFERENCE_PREDICATE_SET = new Set(['없', '나', '크', '작', '줄', '좁', '벌어지', '좁혀지', '줄어들']);
-// 정해진 술어와 함께 쓸 때만 변화로 보는 명사: 바닥을 찍다, 기록을 갈아치우다, 차이가 없다, 흑자로 돌아서다, 동률을 이루다.
+const DIFFERENCE_PREDICATE_SET = new Set(['없', '있', '나', '크', '작', '줄', '좁', '벌어지', '좁혀지', '줄어들']);
+// 정해진 술어와 함께 쓸 때만 변화로 보는 명사: 바닥을 찍다, 기록을 갈아치우다, 차이가 없다, 흑자로 돌아서다, 동률을 이루다,
+// 평행선을 그리다, 효과가 없다, 도움이 되지 않다(부정일 때만 — "도움이 됩니다"는 인사말로도 쓴다).
 const ANCHOR_PREDICATE_MAP = new Map([
   ['바닥', new Set(['찍'])],
   ['기록', new Set(['갈', '경신', '갱신', '깨'])],
@@ -157,7 +171,11 @@ const ANCHOR_PREDICATE_MAP = new Map([
   ['격차', DIFFERENCE_PREDICATE_SET],
   ['흑자', new Set(['돌아서'])],
   ['적자', new Set(['돌아서'])],
+  ['평행선', new Set(['그리', '긋', '달리', '이루'])],
+  ['효과', new Set(['없', '있', '크', '나타나'])],
+  ['도움', new Set(['되'])],
 ]);
+const NEGATION_REQUIRED_ANCHOR_SET = new Set(['도움']);
 const COMPARISON_NOUN_PREDICATE_SET = new Set(['이루', '보이', '기록']);
 // 목적·의도를 나타내는 연결 어미("차이가 없도록 준비했습니다").
 const PURPOSE_ENDING_SET = new Set(['도록', '려고', '으려고', '고자']);
@@ -192,6 +210,26 @@ function wordStartOf({ context, token }) {
 
 function isSentenceBoundary(token) {
   return token.tag === 'SF';
+}
+
+// 관형형 어미(etmIndex)가 "~하는 것을 볼 수 있다", "~다는 사실"처럼 보이는 사실·결론을 말하는 꼴인지.
+function isPerceivedModifier({ tokenList, etmIndex }) {
+  const head = tokenList[etmIndex + 1];
+  if (!head || !NOUN_TAG_SET.has(head.tag) || !PERCEIVED_HEAD_NOUN_SET.has(head.form)) return false;
+  if (CONCLUSION_HEAD_NOUN_SET.has(head.form)) return true;
+  // "궁금하실 것으로 보입니다"의 "것으로 보이다"는 짐작이지 화면에 보이는 사실이 아니다.
+  if (['으로', '로'].includes(tokenList[etmIndex + 2]?.form) && tokenList[etmIndex + 2].tag === 'JKB') return false;
+  for (let cursor = etmIndex + 2; cursor < tokenList.length && cursor <= etmIndex + 5; cursor += 1) {
+    const token = tokenList[cursor];
+    if (isSentenceBoundary(token)) return false;
+    if (PERCEPTION_STEM_SET.has(token.form) && (PREDICATE_VERB_TAG_SET.has(token.tag) || token.tag === 'NNG')) return true;
+  }
+  return false;
+}
+
+// 이 자리가 명사를 꾸미는 관형형 어미인지(보이는 사실을 말하는 꼴은 꾸밈으로 보지 않는다).
+function isClosingModifier({ tokenList, index }) {
+  return tokenList[index]?.tag === 'ETM' && !isPerceivedModifier({ tokenList, etmIndex: index });
 }
 
 // 술어 어절 앞에 붙은 부사어 어절(꽤·훨씬·결국·눈에 띄게의 "띄게")을 거슬러 올라가 후보 구의 시작으로 삼는다.
@@ -364,7 +402,7 @@ function hasComparisonMarkerBefore({ context, index, maxDistance = 6 }) {
 function readPredicateStemIndex({ tokenList, index }) {
   const token = tokenList[index];
   const next = tokenList[index + 1];
-  if (next?.tag === 'ETM') return -1;
+  if (isClosingModifier({ tokenList, index: index + 1 })) return -1;
   if (PREDICATE_VERB_TAG_SET.has(token.tag) || PREDICATE_ADJ_TAG_SET.has(token.tag)) return index;
   if (['XSV', 'XSA'].includes(token.tag) && index > 0 && ['NNG', 'XR', 'MAG'].includes(tokenList[index - 1].tag)) return index - 1;
   return -1;
@@ -380,19 +418,19 @@ function findChangeStemIndex({ context, index }) {
   const token = tokenList[index];
   if (PREDICATE_VERB_TAG_SET.has(token.tag) && CHANGE_VERB_SET.has(token.form)) {
     // "줄인 집단", "무너져 내린 흙더미"처럼 관형형으로 명사를 꾸미면 술어가 아니다.
-    return tokenList[index + 1]?.tag === 'ETM' ? -1 : index;
+    return isClosingModifier({ tokenList, index: index + 1 }) ? -1 : index;
   }
   // "길어지다", "좋아지다"처럼 한 동사로 분석된 형용사+어지다.
   if (PREDICATE_VERB_TAG_SET.has(token.tag)
     && (ADJ_TO_CHANGE_VERB_PATTERN.test(token.form) || CONTRACTED_ADJ_CHANGE_VERB_SET.has(token.form))
-    && tokenList[index + 1]?.tag !== 'ETM') return index;
+    && !isClosingModifier({ tokenList, index: index + 1 })) return index;
   if (token.tag === 'VV' && token.form === '미치' && tokenList[index - 1]?.form === '못') return index;
   // 비교 표지 없이 비교하는 술어("밑돌았어요", "거의 비슷합니다").
   if ((PREDICATE_VERB_TAG_SET.has(token.tag) || PREDICATE_ADJ_TAG_SET.has(token.tag)) && COMPARISON_VERB_SET.has(token.form)) {
-    return tokenList[index + 1]?.tag === 'ETM' ? -1 : index;
+    return isClosingModifier({ tokenList, index: index + 1 }) ? -1 : index;
   }
   // 비교·멈춤 명사 + 하다·되다·이다("우세합니다", "능가했어요", "주춤했어요", "박빙이에요", "제자리걸음이에요").
-  if (['XSV', 'XSA', 'VCP'].includes(token.tag) && index > 0 && tokenList[index + 1]?.tag !== 'ETM'
+  if (['XSV', 'XSA', 'VCP'].includes(token.tag) && index > 0 && !isClosingModifier({ tokenList, index: index + 1 })
     && ['NNG', 'XR', 'MAG'].includes(tokenList[index - 1].tag)
     && (COMPARISON_NOUN_SET.has(tokenList[index - 1].form) || STAGNATION_NOUN_SET.has(tokenList[index - 1].form))) return index - 1;
   // 가장·제일 + 술어("가장 붐볐습니다").
@@ -467,6 +505,14 @@ function isPlannedChange({ tokenList, stemIndex }) {
   return !endingList.some((token) => token.tag === 'EP' && PAST_TENSE_FORM_SET.has(token.form));
 }
 
+// 술어가 부정인지("되지 않는다", "안 됩니다", "못 됩니다").
+function isNegatedPredicate({ tokenList, stemIndex }) {
+  if (['안', '못'].includes(tokenList[stemIndex - 1]?.form) && tokenList[stemIndex - 1].tag === 'MAG') return true;
+  const ending = tokenList[stemIndex + 1];
+  const auxiliary = tokenList[stemIndex + 2];
+  return ending?.tag === 'EC' && ending.form === '지' && auxiliary?.tag === 'VX' && ['않', '못하'].includes(auxiliary.form);
+}
+
 function attachConclusionMarker({ context, candidate }) {
   const { tokenList, text } = context;
   const firstIndex = tokenList.findIndex((token) => token.start >= candidate.start);
@@ -505,9 +551,9 @@ function detectKoreanScale(context) {
     if (next?.tag === 'ETM' && tokenList[index + 2]?.form === '편' && tokenList[index + 2].tag === 'NNB') {
       endToken = tokenList[index + 3]?.tag === 'VCP' ? tokenList[index + 3] : tokenList[index + 2];
     } else {
-      if (!next || next.tag === 'ETM' || (next.tag === 'EC' && next.form === '게')) return;
+      if (!next || isClosingModifier({ tokenList, index: index + 1 }) || (next.tag === 'EC' && next.form === '게')) return;
       if (next.tag === 'EC' && tokenList[index + 2]?.tag === 'VX' && tokenList[index + 2].form === '지') return;
-      if (!['EF', 'EC', 'EP'].includes(next.tag)) return;
+      if (!['EF', 'EC', 'EP', 'ETM'].includes(next.tag)) return;
       if (!scaleStem.isListed && next.tag === 'EC' && QUOTATIVE_ENDING_SET.has(next.form)) return;
     }
     if (hasComparisonMarkerBefore({ context, index: scaleStem.stemIndex })) return;
@@ -521,7 +567,7 @@ function detectKoreanScale(context) {
 function endsInModifier({ tokenList, index }) {
   for (let cursor = index + 1; cursor < tokenList.length && cursor <= index + 6; cursor += 1) {
     const token = tokenList[cursor];
-    if (token.tag === 'ETM') return true;
+    if (token.tag === 'ETM') return !isPerceivedModifier({ tokenList, etmIndex: cursor });
     const isAuxiliaryLink = token.tag === 'EC' && tokenList[cursor + 1]?.tag === 'VX';
     if (token.tag !== 'EP' && token.tag !== 'VX' && !isAuxiliaryLink) return false;
   }
@@ -605,6 +651,8 @@ function detectKoreanProportion(context) {
       endIndex = index;
     } else if (token.tag === 'MAG' && token.form === '거의' && next?.tag === 'MAG' && NEARLY_ALL_FORM_SET.has(next.form)) {
       endIndex = index + 1;
+    } else if (token.tag === 'NNG' && token.form === '예외' && next?.form === '없이') {
+      endIndex = index + 1;
     } else if (isFirstTokenOfWord({ context, index }) && readWordText({ context, token }) === '몇몇') {
       // Kiwi 는 문장 첫머리의 "몇몇"을 몇/NR 몇/NR 로 자르기도 해서 어절 글자로 본다. 뒤 어절(세는 말)까지 한 구로.
       endIndex = tokenList.findIndex((later, laterIndex) => laterIndex > index && context.wordOf(later) === context.wordOf(token) + 1);
@@ -663,8 +711,9 @@ function detectKoreanAnchoredChange(context) {
     const predicate = findPredicateAfterNoun({ tokenList, index: anchorEndIndex });
     if (!predicate) return;
     if (allowedStemSet && !allowedStemSet.has(tokenList[predicate.stemIndex].form)) return;
+    if (NEGATION_REQUIRED_ANCHOR_SET.has(form) && !isNegatedPredicate({ tokenList, stemIndex: predicate.stemIndex })) return;
     const following = tokenList[predicate.endIndex + 1];
-    if (following?.tag === 'ETM' || endsInModifier({ tokenList, index: predicate.endIndex })) return;
+    if (isClosingModifier({ tokenList, index: predicate.endIndex + 1 }) || endsInModifier({ tokenList, index: predicate.endIndex })) return;
     if (following?.tag === 'EC' && PURPOSE_ENDING_SET.has(following.form)) return;
     if (isPlannedChange({ tokenList, stemIndex: predicate.stemIndex })) return;
     let startWordIndex = context.wordOf(tokenList[startIndex]);
@@ -678,16 +727,82 @@ function detectKoreanAnchoredChange(context) {
   return candidateList.filter(Boolean);
 }
 
+// 정도를 말하는 관용구: "장난 아니죠", "장난이 아닙니다".
+function detectKoreanScaleIdiom(context) {
+  const { tokenList, text } = context;
+  const candidateList = [];
+  tokenList.forEach((token, index) => {
+    if (token.tag !== 'NNG' || token.form !== '장난') return;
+    const negativeIndex = /^J/.test(tokenList[index + 1]?.tag || '') ? index + 2 : index + 1;
+    if (tokenList[negativeIndex]?.tag !== 'VCN' || isClosingModifier({ tokenList, index: negativeIndex + 1 })) return;
+    candidateList.push(buildCandidate({
+      text, type: TRIGGER_TYPE_MAP.scale, start: wordStartOf({ context, token }), end: wordEndOf({ context, token: tokenList[negativeIndex] }),
+    }));
+  });
+  return candidateList.filter(Boolean);
+}
+
+// 명사를 꾸미는 척도: 그 자체로 큰 크기 형용사("커다란 밥그릇"), 강조 부사 + 척도 형용사("유난히 큰 그릇")는 척도로,
+// 척도 형용사 + 변화 명사("많은 성장", "큰 폭의 하락")는 변화로 본다. 형용사 + 쪽·거는 형용사 + 지시 명사가 맡는다.
+function detectKoreanAttributiveScale(context) {
+  const { tokenList, text } = context;
+  const candidateList = [];
+  tokenList.forEach((token, index) => {
+    const scaleStem = readScaleStem({ tokenList, index });
+    const etm = tokenList[index + 1];
+    const noun = tokenList[index + 2];
+    if (!scaleStem || etm?.tag !== 'ETM' || !noun || !NOUN_TAG_SET.has(noun.tag) || REFERENT_BOUND_NOUN_SET.has(noun.form)) return;
+    const stem = tokenList[scaleStem.stemIndex];
+    const previous = tokenList[scaleStem.stemIndex - 1];
+    const startWordIndex = context.wordOf(stem);
+    if (CHANGE_NOUN_SET.has(noun.form)) {
+      candidateList.push(buildCandidate({ text, type: TRIGGER_TYPE_MAP.change, start: wordStartOf({ context, token: stem }), end: wordEndOf({ context, token: noun }) }));
+      return;
+    }
+    const isIntensified = previous?.tag === 'MAG' && ATTRIBUTIVE_INTENSIFIER_SET.has(previous.form);
+    if (!INTENSE_SIZE_ADJ_SET.has(stem.form) && !isIntensified) return;
+    candidateList.push(buildCandidate({
+      text, type: TRIGGER_TYPE_MAP.scale, start: extendStartOverAdverbial({ context, startWordIndex }), end: wordEndOf({ context, token: noun }),
+    }));
+  });
+  return candidateList.filter(Boolean);
+}
+
+// 단위 없이 말해도 화면 값인 수: 부호가 붙은 수("마이너스 1.23", "minus two")와 소수가 섞인 숫자 나열("10.9, 9.3").
+// 쉼표 뒤에 띄어 써야 나열로 본다("1,800"은 한 수).
+const SIGNED_NUMBER_PATTERN = new RegExp(
+  `(?:마이너스|플러스)\\s?\\d[\\d,]*(?:\\.\\d+)?|\\b(?:minus|negative)\\s(?:\\d[\\d,]*(?:\\.\\d+)?|zero|${[
+    'one', 'two', 'three', 'four', 'five', 'six', 'seven', 'eight', 'nine', 'ten'].join('|')})\\b`, 'gi',
+);
+const NUMBER_LIST_PATTERN = /(?<![\d.])\d+(?:\.\d+)?(?:,\s+\d+(?:\.\d+)?)+(?![\d.])/g;
+
+function detectUnitlessValueNumber({ text }) {
+  const candidateList = [];
+  for (const match of text.matchAll(SIGNED_NUMBER_PATTERN)) {
+    candidateList.push(buildCandidate({ text, type: TRIGGER_TYPE_MAP.number, start: match.index, end: match.index + match[0].length }));
+  }
+  for (const match of text.matchAll(NUMBER_LIST_PATTERN)) {
+    if (!match[0].includes('.')) continue;
+    candidateList.push(buildCandidate({ text, type: TRIGGER_TYPE_MAP.number, start: match.index, end: match.index + match[0].length }));
+  }
+  return candidateList.filter(Boolean);
+}
+
 function detectKoreanCandidateList({ text, tokenList }) {
   const context = createKoreanContext({ text, tokenList });
   const changeList = [...detectKoreanChange(context), ...detectKoreanAnchoredChange(context)];
+  const attributiveList = detectKoreanAttributiveScale(context);
+  changeList.push(...attributiveList.filter((candidate) => candidate.type === TRIGGER_TYPE_MAP.change));
   // 같은 자리를 변화·비교로도 잡았으면("광주 지사에 비해 … 눈에 띄게 낮았습니다") 비교로 보고 척도 후보는 내지 않는다.
-  const scaleList = [...detectKoreanScale(context), ...detectKoreanScaleAdverb(context), ...detectKoreanProportion(context)]
-    .filter((candidate) => !changeList.some((change) => candidate.start < change.end && change.start < candidate.end));
+  const scaleList = [
+    ...detectKoreanScale(context), ...detectKoreanScaleAdverb(context), ...detectKoreanProportion(context),
+    ...detectKoreanScaleIdiom(context), ...attributiveList.filter((candidate) => candidate.type === TRIGGER_TYPE_MAP.scale),
+  ].filter((candidate) => !changeList.some((change) => candidate.start < change.end && change.start < candidate.end));
   return dedupeCandidateList([
     ...detectKoreanDemonstrative(context),
     ...detectKoreanAdjectiveNoun(context),
     ...detectKoreanNumber(context),
+    ...detectUnitlessValueNumber({ text }),
     ...changeList,
     ...scaleList,
   ]);
@@ -792,6 +907,8 @@ const EN_CHANGE_VERB_TEXT = [
   'slowed(?: down)?', 'sped up', 'picked up', 'shot up', 'crept up', 'ticked (?:up|down)', 'bounced back', 'recovered',
   'outperforming', 'crash(?:es|ed)?', 'collapsed', 'trailing', 'lagging', 'beating',
   'cut', 'reduced', 'boosted', 'brought \\w+ (?:down|up)', 'beat', 'trail(?:s|ed)', 'lagged', 'worsened', 'narrowed', 'widened',
+  'exceed(?:s|ed|ing)?', 'surpass(?:es|ed|ing)?', 'outnumber(?:s|ed|ing)?', 'outpac(?:es|ed)', 'peaked', 'plateaued',
+  'level(?:ed|led|s)? off', 'flattened(?: out)?', 'flatlined',
 ].join('|');
 const EN_COMPARATIVE_TEXT = [
   'higher', 'lower', 'bigger', 'smaller', 'larger', 'better', 'worse', 'faster', 'slower', 'cheaper', 'pricier',
@@ -809,6 +926,12 @@ const EN_CHANGE_PATTERN_LIST = [
   new RegExp(`\\b(?:came out|ended up|turned out|got|gets|is|are|was|were|became|looks?)\\s+${EN_MODIFIER_TEXT}(?:${EN_COMPARATIVE_TEXT})\\b${EN_TRAIL_TEXT}`, 'gi'),
   new RegExp('\\bcompared (?:to|with)\\b', 'gi'),
   new RegExp('\\b(?:(?:well|way|far|just|slightly|still|now)\\s+)(?:above|below|ahead of|behind)\\b', 'gi'),
+  // 수와 견주는 위치("below one", "above 50")와 최상·극값("the highest", "a record low").
+  new RegExp(`\\b(?:below|above)\\s(?:\\d[\\d,]*(?:\\.\\d+)?|zero|${[...EN_NUMBER_WORD_SET].join('|')})\\b`, 'gi'),
+  /\bthe\s+(?:(?:very|second|third)\s+)?(?:highest|lowest|largest|biggest|smallest|fewest|greatest|steepest|sharpest|fastest|slowest)\b/gi,
+  /\b(?:all-time|record)\s+(?:highs?|lows?)\b/gi,
+  // than 없이 쓴 비교급 + 값 명사("Higher hospitalization rates", "lower prices").
+  /\b(?:higher|lower|bigger|smaller|larger|greater|fewer)\s+(?:[a-z]+\s+)?(?:rates?|numbers?|levels?|values?|scores?|prices?|costs?|counts?|percentages?|amounts?|shares?|volumes?|totals?)\b/gi,
 ];
 const EN_CONCLUSION_PATTERN = /\b(?:in the end|ultimately|eventually|so in the end|all in all|as a result)\b/gi;
 const EN_SCALE_ADJ_TEXT = 'big|small|large|huge|tiny|long|short|wide|narrow|tall|many|few';
@@ -816,6 +939,15 @@ const EN_INTENSIFIER_TEXT = "really|very|so|super|pretty|quite|incredibly|extrem
 const EN_SCALE_PATTERN_LIST = [
   new RegExp(`\\b(?:(?:${EN_INTENSIFIER_TEXT})\\s+)+(?:${EN_SCALE_ADJ_TEXT})\\b`, 'gi'),
   new RegExp(`(?<=\\b(?:is|are|was|were|looks?|seems?|got|gets|get)\\s)(?:${EN_SCALE_ADJ_TEXT})\\b(?!\\s+than)`, 'gi'),
+  // 수 없는 비율·양 말(한국어 "대부분이", "상당수"와 같은 자리). "a lot of", "some"은 너무 흔해 넣지 않는다.
+  /\bthe\s+(?:vast\s+|overwhelming\s+|great\s+)?majority\b/gi,
+  /\ba\s+(?:whole\s+|big\s+|huge\s+|large\s+)?bunch\s+of\b/gi,
+  /\ba\s+(?:large\s+|small\s+|huge\s+|big\s+|good\s+|great\s+|significant\s+|considerable\s+)?number\s+of\b/gi,
+  /\ba\s+handful\s+of\b/gi,
+  /\bthe\s+bulk\s+of\b/gi,
+  /\b(?:almost|nearly|virtually)\s+(?:all|every|none)\b(?!\s+time\b)/gi,
+  /\bmostly\s+(?:clustered|concentrated|between|around|above|below|under|over|in\s+the)\b/gi,
+  /\bmost\s+of\s+(?:the|them|these|those)\b(?!\s+time\b)/gi,
 ];
 
 // 값의 변화가 아닌 쓰임: 주어 명사("Crashes went down"), 구동사·관용구("drop off", "falls apart", "jumped out", "cut from"),
@@ -966,6 +1098,7 @@ function detectEnglishCandidateList({ text }) {
     ...mergeOverlapping(collectPatternCandidateList({
       text, type: TRIGGER_TYPE_MAP.number, patternList: [EN_NUMBER_PATTERN, EN_PLURAL_COUNT_PATTERN],
     })).filter((candidate) => !isEnglishPeriodNumber({ text, candidate })),
+    ...detectUnitlessValueNumber({ text }),
     ...changeList,
     ...mergeOverlapping(scaleList),
   ]);
