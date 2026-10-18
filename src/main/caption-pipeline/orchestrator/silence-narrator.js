@@ -1,6 +1,7 @@
 const {
   DESCRIPTION_TAIL_NOUN_LIST, cutAtTailNoun, hasCompleteTailNoun,
 } = require('../agents/shared/narration-format');
+const { CAPTION_LANGUAGE_MAP, DEFAULT_CAPTION_LANGUAGE } = require('../contracts/caption-language');
 
 const DESCRIPTION_PREFIX = '이미지 제시';
 const DESCRIPTION_PREFIX_PATTERN = /^\s*이미지 제시\s*,?\s*/;
@@ -31,9 +32,20 @@ function cutAtMaterialNoun({ body }) {
   return [...wordList.slice(0, cutWordList.length - 1), cutWordList[cutWordList.length - 1]].join(' ');
 }
 
+// 영어 캡션의 무발화 해설 머리말. 한국어 자료 명사 끝맺음 검사는 영어 구에 맞지 않아 하지 않는다.
+const ENGLISH_DESCRIPTION_PREFIX = 'Image:';
+const ENGLISH_DESCRIPTION_PREFIX_PATTERN = /^\s*image\s*(?:presented|shown)?\s*[:,]\s*/i;
+
+function finalizeEnglishSilenceDescription({ text }) {
+  const body = String(text || '').replace(ENGLISH_DESCRIPTION_PREFIX_PATTERN, '').replace(TRAILING_PUNCTUATION_PATTERN, '').trim();
+  if (countWordOf(body) < MIN_DESCRIPTION_WORD_COUNT) return null;
+  return `${ENGLISH_DESCRIPTION_PREFIX} ${body}`;
+}
+
 // 무발화 해설은 "보라고 한 자료"를 알려 주는 것이라 자료 명사(사진·그래프·표…)로 끝맺어야 한다.
 // 끝이 흐리면("검은 배경에 하얀") 자료 명사 지점까지 자르고, 그런 지점이 없으면 버린다.
-function finalizeSilenceDescription({ text }) {
+function finalizeSilenceDescription({ text, language = DEFAULT_CAPTION_LANGUAGE }) {
+  if (language === CAPTION_LANGUAGE_MAP.en) return finalizeEnglishSilenceDescription({ text });
   const body = String(text || '').replace(DESCRIPTION_PREFIX_PATTERN, '').replace(TRAILING_PUNCTUATION_PATTERN, '').trim();
   if (!body) return null;
   const cut = cutAtMaterialNoun({ body });
@@ -58,7 +70,7 @@ const SILENCE_RESULT_MAP = {
 
 // 무발화 해설 한 건: 억제 확인 → 침묵 유형 판정 → 화면 묘사 → 내보내기.
 // 묘사·내보내기는 요청마다 화면·예산이 달라 호출부가 넘긴다. 어느 단계에서 끝나든 게이트는 반드시 반납한다.
-function createSilenceNarrator({ gate, judge }) {
+function createSilenceNarrator({ gate, judge, getCaptionLanguage = () => DEFAULT_CAPTION_LANGUAGE }) {
   async function run({ slideLabel, transcript, silenceMs, describe, emit }) {
     const acquired = gate.tryAcquire({ slideLabel });
     if (!acquired.isAllowed) return { status: SILENCE_RESULT_MAP.gated, reason: acquired.reason };
@@ -75,7 +87,7 @@ function createSilenceNarrator({ gate, judge }) {
           rejectReason: described?.rejectReason ?? '', rawContent: described?.rawContent ?? '',
         };
       }
-      const text = finalizeSilenceDescription({ text: described.text });
+      const text = finalizeSilenceDescription({ text: described.text, language: getCaptionLanguage() });
       if (!text) return { status: SILENCE_RESULT_MAP.none, rawText: described.text };
       const sent = await emit({ text });
       isEmitted = Boolean(sent?.isEmitted);

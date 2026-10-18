@@ -2,6 +2,8 @@ const { NARRATION_TYPE_MAP, DEIXIS_FORM_MAP } = require('../contracts/narration-
 const {
   GROUNDING_NONE_TOKEN, computeMaxChars, buildSlotOutputInstruction, SPEECH_GAP_DECIDED_RULE,
 } = require('../agents/shared/caption-parser');
+const { DEFAULT_CAPTION_LANGUAGE } = require('../contracts/caption-language');
+const { buildOutputLanguageRuleList } = require('./output-language-rule');
 
 const DEFAULT_DEIXIS_MIN_WORD_COUNT = 4;
 const DEFAULT_DEIXIS_MAX_WORD_COUNT = 8;
@@ -29,7 +31,7 @@ const DEIXIS_FORM_RULE_MAP = {
 function buildGroundingPrompt({ utterance, recentTranscript, maxChars,
   hasPointingRegion = false, pointingOrderHint = '', describedElementList = [],
   minWordCount = DEFAULT_DEIXIS_MIN_WORD_COUNT, maxWordCount = DEFAULT_DEIXIS_MAX_WORD_COUNT,
-  subKind = null, mergedAnchorList = [] }) {
+  subKind = null, mergedAnchorList = [], language = DEFAULT_CAPTION_LANGUAGE }) {
   const trimmedUtterance = (utterance || '').trim();
   const formRuleList = DEIXIS_FORM_RULE_MAP[subKind]
     || [...DEIXIS_FORM_RULE_MAP.simple, ...DEIXIS_FORM_RULE_MAP.complete];
@@ -93,6 +95,12 @@ function buildGroundingPrompt({ utterance, recentTranscript, maxChars,
     buildSlotOutputInstruction({
       narrationType: NARRATION_TYPE_MAP.deixis,
       subKind: subKind || DEIXIS_FORM_MAP.simple,
+      language,
+    }),
+    ...buildOutputLanguageRuleList({
+      language,
+      detailLineList: ['영어 캡션은 "~임/~함" 명사형 대신 자연스러운 영어 구로 쓴다.'
+        + ' 단순형(simple)은 시스템이 situation 을 target 앞에 붙여 읽는다(예: "Looking at the two-year sales trend table").'],
     }),
   ].filter(Boolean).join('\n');
 }

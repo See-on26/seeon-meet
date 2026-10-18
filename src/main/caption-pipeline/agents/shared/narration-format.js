@@ -3,6 +3,7 @@ const {
   INTERPRETATION_KIND_MAP, VISUAL_DESCRIPTION_KIND_MAP, SPEAKER_IDENTITY_KIND_MAP,
 } = require('../../contracts/narration-types');
 const { NARRATION_ORIGIN_MAP } = require('../../contracts/narration-class');
+const { CAPTION_LANGUAGE_MAP } = require('../../contracts/caption-language');
 
 const DIGIT_HAS_FINAL_MAP = {
   0: true, 1: true, 2: false, 3: true, 4: false,
@@ -212,7 +213,73 @@ const CLAIM_SECOND_PAIR_SLOT_LIST = [
   { key: 'value2', label: '그 대상의 근거 값 — 반드시 수치. 같거나 없으면 빈 문자열', minWordCount: 0, maxWordCount: 5 },
 ];
 
-function getSlotList({ narrationType, subKind, origin = null, hasSecondClaim = false }) {
+// 영어 캡션의 칸 설명. 칸 이름·어절(단어) 수는 한국어 칸과 같고, 설명만 영어 구에 맞게 바꾼다.
+const ENGLISH_SLOT_LABEL_MAP = {
+  [NARRATION_TYPE_MAP.pageTransition]: {
+    [PAGE_TRANSITION_KIND_MAP.slide]: {
+      description: 'whole-slide description (topic + material type), ending with the material type (e.g. "quarterly sales comparison bar chart")',
+    },
+    [PAGE_TRANSITION_KIND_MAP.document]: {
+      screenForm: 'file/screen form (e.g. Excel sheet, HWP file, Naver web page)',
+      description: 'description (topic + screen form), ending with the screen form',
+    },
+  },
+  [NARRATION_TYPE_MAP.deixis]: {
+    [DEIXIS_FORM_MAP.simple]: {
+      target: 'the referenced item and its content, including the material type (e.g. "the two-year sales trend table")',
+      situation: 'short lead-in action phrase that mimics the speaker\'s verb and is read right before the target'
+        + ' (e.g. "Looking at", "Focusing on", "Comparing")',
+    },
+    [DEIXIS_FORM_MAP.complete]: {
+      mimicry: 'speaker mimicry — wording taken from the utterance',
+      target: 'the referenced item — with a brief topic',
+      explanation: 'explanation — what it shows or how it relates to the item',
+      sentence: 'one natural sentence that **includes all three** of the above (mimicry + item + explanation)'
+        + ' (the order may change)',
+    },
+  },
+  [NARRATION_TYPE_MAP.interpretation]: {
+    [INTERPRETATION_KIND_MAP.valueToMeaning]: {
+      value: 'the plain figure the speaker said (e.g. 73%)',
+      frame: 'what the figure measures — the item/basis found on screen (e.g. "Company A\'s year-over-year valuation growth rate")',
+    },
+    [INTERPRETATION_KIND_MAP.claimToValue]: {
+      target: 'the item that changed or was compared — the item name written on screen; if the speaker grouped several items,'
+        + ' that group name (e.g. first response time, Q4 sales, staff)',
+      value: 'the supporting figure from the screen — must be a number. For a change, the value before to the value after'
+        + ' (only the value after if that is all there is); for a comparison, both items with their values; for a group,'
+        + ' up to 2 items with names and values (e.g. "9.2 hours to 3.1 hours", "downtown 33.8°C, suburbs 29.1°C",'
+        + ' "120 developers and 30 designers")',
+      target2: 'another item whose change the speaker mentioned — only if it differs from the first item; empty string if same or none',
+      value2: 'that item\'s supporting figure — must be a number; empty string if same or none',
+    },
+  },
+  [NARRATION_TYPE_MAP.visualDescription]: {
+    [VISUAL_DESCRIPTION_KIND_MAP.reaction]: {
+      description: 'description of the image (including what triggers the reaction)',
+    },
+    [VISUAL_DESCRIPTION_KIND_MAP.scale]: {
+      comparison: 'comparison object (another object on screen, e.g. the pine tree)',
+      scale: 'scale — number only (e.g. 4). **Empty string if it cannot be estimated as a number**',
+      direction: 'direction — exactly "larger" or "smaller"',
+      target: 'the item itself (e.g. the Buddha statue)',
+    },
+  },
+  [NARRATION_TYPE_MAP.speakerIdentity]: {
+    [SPEAKER_IDENTITY_KIND_MAP.named]: {
+      speakerName: 'name on the participant name tag (without titles or honorifics)',
+    },
+    [SPEAKER_IDENTITY_KIND_MAP.positional]: {
+      position: 'tile position in English (e.g. top left, center, bottom right)',
+    },
+  },
+};
+const ENGLISH_SILENCE_DESCRIPTION_LABEL_MAP = {
+  description: 'description of the material the speaker asked to look at — for charts/tables the values and changes,'
+    + ' for structure/flow diagrams the main components and how they connect (end with the material type)',
+};
+
+function readSlotList({ narrationType, subKind, origin = null, hasSecondClaim = false }) {
   const isSilenceDescription = origin === NARRATION_ORIGIN_MAP.silence
     && narrationType === NARRATION_TYPE_MAP.visualDescription && subKind === VISUAL_DESCRIPTION_KIND_MAP.reaction;
   if (isSilenceDescription) return SILENCE_DESCRIPTION_SLOT_LIST;
@@ -227,6 +294,40 @@ function getSlotList({ narrationType, subKind, origin = null, hasSecondClaim = f
   ];
 }
 
+// 영어는 관사·전치사 때문에 같은 내용도 한국어 어절보다 단어가 많다. 영어 한 단어는 한국어 한 어절보다 짧게 읽히므로
+// 상한을 어절의 1.5배로 잡으면 들리는 길이가 비슷하다(9어절 상한에서는 영어 전환 묘사의 절반 가까이가 길어 버려졌다).
+// 하한은 그대로 둔다 — 영어가 한국어보다 단어가 적을 일은 드물고, 올리면 짧고 온전한 영어 구가 빈 칸으로 버려진다.
+const ENGLISH_WORD_SCALE = 1.5;
+
+function scaleMaxWordCount({ count, language }) {
+  if (language !== CAPTION_LANGUAGE_MAP.en || !Number.isFinite(count) || count <= 0) return count;
+  return Math.ceil(count * ENGLISH_WORD_SCALE);
+}
+
+// 렌더러가 모드별로 정한 어절 예산을 캡션 언어의 단어 수로 바꾼다. 한국어는 그대로다.
+function scaleWordBudget({ minWordCount, maxWordCount, language }) {
+  return { minWordCount, maxWordCount: scaleMaxWordCount({ count: maxWordCount, language }) };
+}
+
+// 영어 칸 가운데 어절 수를 그대로 옮기면 안 되는 칸. 지시 대상의 상황 칸은 대상 앞에 붙는 짧은 동작구("Looking at")다.
+const ENGLISH_WORD_RANGE_OVERRIDE_MAP = {
+  [NARRATION_TYPE_MAP.deixis]: { [DEIXIS_FORM_MAP.simple]: { situation: { minWordCount: 1, maxWordCount: 3 } } },
+};
+
+function getSlotList({ narrationType, subKind, origin = null, hasSecondClaim = false, language = CAPTION_LANGUAGE_MAP.ko }) {
+  const slotList = readSlotList({ narrationType, subKind, origin, hasSecondClaim });
+  if (!slotList || language !== CAPTION_LANGUAGE_MAP.en) return slotList;
+  const isSilenceDescription = slotList === SILENCE_DESCRIPTION_SLOT_LIST;
+  const labelMap = isSilenceDescription
+    ? ENGLISH_SILENCE_DESCRIPTION_LABEL_MAP : (ENGLISH_SLOT_LABEL_MAP[narrationType]?.[subKind] || {});
+  const overrideMap = isSilenceDescription ? {} : (ENGLISH_WORD_RANGE_OVERRIDE_MAP[narrationType]?.[subKind] || {});
+  return slotList.map((slot) => ({
+    ...slot,
+    label: labelMap[slot.key] || slot.label,
+    ...(overrideMap[slot.key] || scaleWordBudget({ minWordCount: slot.minWordCount, maxWordCount: slot.maxWordCount, language })),
+  }));
+}
+
 function computeSlotTotal({ slotList }) {
   const outputSlotList = slotList.filter((slot) => !slot.isDiagnostic);
   return {
@@ -235,14 +336,74 @@ function computeSlotTotal({ slotList }) {
   };
 }
 
-function buildSlotInstruction({ slotList }) {
+function buildSlotInstruction({ slotList, language = CAPTION_LANGUAGE_MAP.ko }) {
+  if (language === CAPTION_LANGUAGE_MAP.en) {
+    return slotList
+      .map((slot) => `  "${slot.key}": ${slot.label} — ${slot.minWordCount}–${slot.maxWordCount} words`
+        + (slot.isDiagnostic ? ' (for the record — material for the final sentence)' : ''))
+      .join('\n');
+  }
   return slotList
     .map((slot) => `  "${slot.key}": ${slot.label} — ${slot.minWordCount}~${slot.maxWordCount}어절`
       + (slot.isDiagnostic ? ' (근거 기록용 — 최종 문장의 재료)' : ''))
     .join('\n');
 }
 
-function normalizeSlotMap({ slotList, rawSlotMap }) {
+// 영어 구가 끊긴 꼴로 끝나지 않게, 잘린 끝에 남은 관사·전치사·접속사를 뗀다.
+const ENGLISH_DANGLING_WORD_SET = new Set([
+  'a', 'an', 'the', 'of', 'to', 'and', 'or', 'with', 'for', 'in', 'on', 'at', 'by', 'from', 'as', 'into', 'than',
+  'that', 'which', 'its', 'their', 'our', 'your', 'this', 'these', 'those', 'is', 'are', 'was', 'were',
+]);
+
+// 상한에서 자른 영어 구는 뒤쪽 절반에 쉼표가 있으면 그 마지막 쉼표에서 끊는다("…, and reduced" 처럼 말이 중간에 끊기지 않게).
+function cutAtLastClauseComma({ text }) {
+  const wordList = String(text || '').trim().split(/\s+/).filter(Boolean);
+  for (let index = wordList.length - 2; index >= Math.floor(wordList.length / 2); index -= 1) {
+    if (wordList[index].endsWith(',')) return wordList.slice(0, index + 1).join(' ');
+  }
+  return wordList.join(' ');
+}
+
+function trimEnglishDanglingTail({ text }) {
+  const wordList = cutAtLastClauseComma({ text }).split(/\s+/).filter(Boolean);
+  while (wordList.length > 1) {
+    const last = wordList[wordList.length - 1].replace(TRAILING_MARK_PATTERN, '');
+    if (!last || ENGLISH_DANGLING_WORD_SET.has(last.toLowerCase())) {
+      wordList.pop(); continue;
+    }
+    wordList[wordList.length - 1] = last;
+    break;
+  }
+  return wordList.join(' ').replace(TRAILING_MARK_PATTERN, '');
+}
+
+// 영어는 조사가 낱말로 떨어져 나와(관사·전치사) 한국어 어절보다 단어가 많다. 한국어 자료 명사 판정 대신
+// 상한 + 허용치(SLOT_OVERAGE_TOLERANCE_WORD_COUNT)까지는 그대로 두고, 넘으면 그 길이에서 자른 뒤 끊긴 끝만 뗀다.
+function normalizeEnglishSlotMap({ slotList, rawSlotMap }) {
+  const slotMap = {};
+  for (const slot of slotList) {
+    const raw = rawSlotMap?.[slot.key];
+    const text = typeof raw === 'string' ? raw : '';
+    const wordLimit = slot.maxWordCount + SLOT_OVERAGE_TOLERANCE_WORD_COUNT;
+    const truncated = truncateSlot({ text, maxWordCount: wordLimit });
+    if (countWord({ text }) > wordLimit) {
+      slotMap[slot.key] = trimEnglishDanglingTail({
+        text: slot.mustContainValue ? dropValuelessTailItem({ text: truncated }) : truncated,
+      });
+    }
+    else if (slot.tailNounList) slotMap[slot.key] = truncated.replace(TRAILING_PUNCTUATION_PATTERN, '');
+    else if (slot.isPhrase) slotMap[slot.key] = truncated.replace(TRAILING_MARK_PATTERN, '');
+    else slotMap[slot.key] = truncated;
+  }
+  return slotMap;
+}
+
+function isWithinEnglishSlotLimit({ text, maxWordCount }) {
+  return countWord({ text }) <= maxWordCount + SLOT_OVERAGE_TOLERANCE_WORD_COUNT;
+}
+
+function normalizeSlotMap({ slotList, rawSlotMap, language = CAPTION_LANGUAGE_MAP.ko }) {
+  if (language === CAPTION_LANGUAGE_MAP.en) return normalizeEnglishSlotMap({ slotList, rawSlotMap });
   const slotMap = {};
   for (const slot of slotList) {
     const raw = rawSlotMap?.[slot.key];
@@ -327,22 +488,27 @@ function dropRepeatedWordAtSeam({ text }) {
 // 대상 칸 이름이 값 칸에 모두 나오면("RSU, WAVE 단말기" + "RSU 79개, WAVE 단말기 3,000개") 이름이 두 번 읽힌다.
 // 이름은 낱말 첫머리에서 나와야 같은 것으로 본다("시간"은 "9.2시간"에 든 것이 아니다).
 const TARGET_ITEM_SEPARATOR = /\s*[,·]\s*|\s+및\s+/;
+// 영어 값은 대소문자가 섞여 나온다("Developers" ↔ "120 developers"). 소문자로 맞춰 견준다.
+const ENGLISH_TARGET_ITEM_SEPARATOR = /\s*[,·]\s*|\s+and\s+/i;
 
-function isTargetRepeatedInValue({ target, value }) {
-  const itemList = String(target || '').split(TARGET_ITEM_SEPARATOR).map((item) => item.trim()).filter(Boolean);
-  const spacedValue = ` ${String(value || '')}`;
+function isTargetRepeatedInValue({ target, value, language = CAPTION_LANGUAGE_MAP.ko }) {
+  const isEnglish = language === CAPTION_LANGUAGE_MAP.en;
+  const separator = isEnglish ? ENGLISH_TARGET_ITEM_SEPARATOR : TARGET_ITEM_SEPARATOR;
+  const toComparable = (text) => (isEnglish ? String(text || '').toLowerCase() : String(text || ''));
+  const itemList = toComparable(target).split(separator).map((item) => item.trim()).filter(Boolean);
+  const spacedValue = ` ${toComparable(value)}`;
   return itemList.length > 0 && itemList.every((item) => spacedValue.includes(` ${item}`));
 }
 
-function assembleClaimPair({ target, value }) {
-  return isTargetRepeatedInValue({ target, value }) ? value : `${target}, ${value}`;
+function assembleClaimPair({ target, value, language = CAPTION_LANGUAGE_MAP.ko }) {
+  return isTargetRepeatedInValue({ target, value, language }) ? value : `${target}, ${value}`;
 }
 
 // 둘째 쌍은 대상과 수치가 다 있을 때만 붙이고, 두 쌍이 어절 예산을 넘으면 첫 쌍만 읽는다.
-function assembleClaimToValue({ slotMap, maxWordCount }) {
-  const first = assembleClaimPair({ target: slotMap.target, value: slotMap.value });
+function assembleClaimToValue({ slotMap, maxWordCount, language = CAPTION_LANGUAGE_MAP.ko }) {
+  const first = assembleClaimPair({ target: slotMap.target, value: slotMap.value, language });
   if (!slotMap.target2 || !hasValueToken({ text: slotMap.value2 })) return first;
-  const both = `${first}. ${assembleClaimPair({ target: slotMap.target2, value: slotMap.value2 })}`;
+  const both = `${first}. ${assembleClaimPair({ target: slotMap.target2, value: slotMap.value2, language })}`;
   return Number.isFinite(maxWordCount) && countWord({ text: both }) > maxWordCount ? first : both;
 }
 
@@ -388,8 +554,69 @@ const NARRATION_ASSEMBLE_MAP = {
   },
 };
 
+// 영어 캡션의 조립 틀. 고정 문구(머리말·연결어)는 시스템이 붙이고, 칸에는 화면에서 읽은 구만 들어간다.
+// 모델이 형식 예시를 흉내 내 머리말("Image:")을 직접 쓰면 떼고 붙인다.
+const ENGLISH_IMAGE_PREFIX_PATTERN = /^\s*image\s*(?:presented|shown)?\s*[:,]\s*/i;
+const ENGLISH_SCALE_SUFFIX_PATTERN = /\s*(?:x|times)$/i;
+const ENGLISH_LEADING_ARTICLE_PATTERN = /^the\s+/i;
+
+const ENGLISH_NARRATION_ASSEMBLE_MAP = {
+  [NARRATION_TYPE_MAP.pageTransition]: {
+    [PAGE_TRANSITION_KIND_MAP.slide]: ({ slotMap, index }) => `Slide ${index}: ${slotMap.description}`,
+    [PAGE_TRANSITION_KIND_MAP.document]: ({ slotMap }) => `Page: ${slotMap.description}`,
+  },
+  [NARRATION_TYPE_MAP.deixis]: {
+    [DEIXIS_FORM_MAP.simple]: ({ slotMap }) => `${slotMap.situation} ${slotMap.target}`,
+    [DEIXIS_FORM_MAP.complete]: ({ slotMap }) => slotMap.sentence,
+  },
+  [NARRATION_TYPE_MAP.interpretation]: {
+    [INTERPRETATION_KIND_MAP.valueToMeaning]: ({ slotMap }) => `${slotMap.value} means ${slotMap.frame}`,
+    [INTERPRETATION_KIND_MAP.claimToValue]: ({ slotMap, maxWordCount }) => assembleClaimToValue({
+      slotMap, maxWordCount, language: CAPTION_LANGUAGE_MAP.en,
+    }),
+  },
+  [NARRATION_TYPE_MAP.visualDescription]: {
+    [VISUAL_DESCRIPTION_KIND_MAP.reaction]: ({ slotMap }) => (
+      `Image: ${String(slotMap.description || '').replace(ENGLISH_IMAGE_PREFIX_PATTERN, '')}`
+    ),
+    [VISUAL_DESCRIPTION_KIND_MAP.scale]: ({ slotMap }) => {
+      const scale = String(slotMap.scale || '').replace(ENGLISH_SCALE_SUFFIX_PATTERN, '');
+      return scale
+        ? `${slotMap.target}, ${scale} times ${slotMap.direction} than ${slotMap.comparison}`
+        : `${slotMap.target}, ${slotMap.direction} than ${slotMap.comparison}`;
+    },
+  },
+  [NARRATION_TYPE_MAP.speakerIdentity]: {
+    [SPEAKER_IDENTITY_KIND_MAP.named]: ({ slotMap }) => `${slotMap.speakerName} is speaking`,
+    [SPEAKER_IDENTITY_KIND_MAP.positional]: ({ slotMap }) => (
+      `The participant at the ${String(slotMap.position || '').replace(ENGLISH_LEADING_ARTICLE_PATTERN, '')} is speaking`
+    ),
+  },
+};
+
+function capitalizeFirst(text) {
+  return text ? `${text[0].toUpperCase()}${text.slice(1)}` : text;
+}
+
+// 한국어 끝맺음 검사(자료 명사·조사·관형형)와 상황 칸 보정은 영어에 맞지 않아 쓰지 않는다. 빈 칸·수치 검사는 같다.
+function assembleEnglishNarration({ narrationType, subKind, rawSlotMap, index, origin, hasSecondClaim, maxWordCount }) {
+  const slotList = getSlotList({ narrationType, subKind, origin, hasSecondClaim, language: CAPTION_LANGUAGE_MAP.en });
+  const assemble = ENGLISH_NARRATION_ASSEMBLE_MAP[narrationType]?.[subKind];
+  if (!slotList || !assemble) return null;
+  const slotMap = normalizeEnglishSlotMap({ slotList, rawSlotMap });
+  if (hasEmptyRequiredSlot({ slotList, slotMap })) return null;
+  if (hasValuelessSlot({ slotList, slotMap })) return null;
+  const joined = assemble({ slotMap, index, maxWordCount }).replace(/\s+/g, ' ').trim();
+  return { text: capitalizeFirst(dropRepeatedWordAtSeam({ text: joined })), slotMap };
+}
+
 function assembleNarration({ narrationType, subKind, rawSlotMap, index = '', origin = null,
-  hasSecondClaim = false, maxWordCount = null }) {
+  hasSecondClaim = false, maxWordCount = null, language = CAPTION_LANGUAGE_MAP.ko }) {
+  if (language === CAPTION_LANGUAGE_MAP.en) {
+    return assembleEnglishNarration({
+      narrationType, subKind, rawSlotMap, index, origin, hasSecondClaim, maxWordCount,
+    });
+  }
   const slotList = getSlotList({ narrationType, subKind, origin, hasSecondClaim });
   const assemble = NARRATION_ASSEMBLE_MAP[narrationType]?.[subKind];
   if (!slotList || !assemble) return null;
@@ -406,5 +633,6 @@ module.exports = {
   NARRATION_SLOT_MAP, getSlotList, computeSlotTotal, buildSlotInstruction, DESCRIPTION_TAIL_NOUN_LIST, hasCompleteTailNoun,
   cutAtTailNoun,
   normalizeSlotMap, hasEmptyRequiredSlot, hasValuelessSlot, hasValueToken, assembleNarration, countWord, truncateSlot,
-  trimToCompletePhrase, hasFinalConsonant, attachJosa,
+  trimToCompletePhrase, hasFinalConsonant, attachJosa, isWithinEnglishSlotLimit, SLOT_OVERAGE_TOLERANCE_WORD_COUNT,
+  scaleWordBudget, ENGLISH_WORD_SCALE,
 };

@@ -1,5 +1,7 @@
 const { NARRATION_TYPE_MAP } = require('../contracts/narration-types');
 const { GROUNDING_NONE_TOKEN, buildSlotOutputInstruction } = require('../agents/shared/caption-parser');
+const { DEFAULT_CAPTION_LANGUAGE } = require('../contracts/caption-language');
+const { buildOutputLanguageRuleList } = require('./output-language-rule');
 
 const DEFAULT_SPEAKER_MIN_WORD_COUNT = 2;
 const DEFAULT_SPEAKER_MAX_WORD_COUNT = 5;
@@ -9,6 +11,7 @@ const CONFIDENCE_MAP = { high: 'high', low: 'low' };
 function buildSpeakerIdentityPrompt({
   minWordCount = DEFAULT_SPEAKER_MIN_WORD_COUNT,
   maxWordCount = DEFAULT_SPEAKER_MAX_WORD_COUNT,
+  language = DEFAULT_CAPTION_LANGUAGE,
 } = {}) {
   return [
     '이 이미지는 화상회의 화면의 참가자 타일(프로필) 영역이다.',
@@ -35,6 +38,13 @@ function buildSpeakerIdentityPrompt({
     '**문장을 만들지 말고 아래 JSON 한 줄만 출력한다**(다른 텍스트 금지):',
     `{ "speakerName": "이름 또는 빈 문자열", "position": "타일 위치", "confidence": "${CONFIDENCE_MAP.high}|${CONFIDENCE_MAP.low}" }`,
     `발화자를 특정할 수 없으면 JSON 대신 정확히 "${GROUNDING_NONE_TOKEN}"만 출력한다.`,
+    ...buildOutputLanguageRuleList({
+      language,
+      detailLineList: [
+        '영어 캡션이면 시스템이 "… is speaking" 형태로 조립한다. position 은 영어 위치 표현으로 쓴다. 예) "top left", "center", "bottom right"',
+        `confidence 값은 "${CONFIDENCE_MAP.high}"·"${CONFIDENCE_MAP.low}" 그대로 쓴다.`,
+      ],
+    }),
   ].join('\n');
 }
 

@@ -56,7 +56,7 @@ const { classifyQuestion, QUESTION_ROUTE_MAP } = require('./context/question-cla
 const { createQuestionRouter } = require('./context/question-router');
 const { formatQaHistory, buildPresetQa } = require('./context/qa-history');
 const { buildCurrentScreenContextText } = require('./context/current-screen-context');
-const { createQuestionAnswerer, NOT_FOUND_TEXT } = require('./context/question-answerer');
+const { createQuestionAnswerer, readAnswerText, ANSWER_TEXT_KEY_MAP } = require('./context/question-answerer');
 const { OUT_DIR, CONTEXT_DIR } = require('../paths');
 
 const ASR_DRAIN_TIMEOUT_MS = 8000;
@@ -103,7 +103,11 @@ function registerPipeline({ getViewerView, meetingArchive = null }) {
   const sessionStore = createSessionStore();
   let pendingAsrCount = 0;
   let lastSession = null;
-  const agentFieldMap = createAgentFieldMap({ config });
+  // 사용자에게 들리는 말의 언어. 캡처를 시작할 때 설정 화면에서 고른 값이 넘어온다.
+  // 해설 에이전트·질문 답·무발화·전환 머리말이 부를 때마다 이 값을 읽는다.
+  let sessionCaptionLanguage = DEFAULT_CAPTION_LANGUAGE;
+  const getCaptionLanguage = () => sessionCaptionLanguage;
+  const agentFieldMap = createAgentFieldMap({ config, getCaptionLanguage });
   const embedClient = createEmbedClient({ config });
   const ttsClient = createTtsClient({ config });
 
@@ -133,7 +137,9 @@ function registerPipeline({ getViewerView, meetingArchive = null }) {
   const narrationHistory = createNarrationHistory();
   const silenceGate = createSilenceNarrationGate();
   const featureGate = createFeatureGate();
-  const silenceNarrator = createSilenceNarrator({ gate: silenceGate, judge: createSilenceJudge({ config }) });
+  const silenceNarrator = createSilenceNarrator({
+    gate: silenceGate, judge: createSilenceJudge({ config }), getCaptionLanguage,
+  });
   console.log(`[pipeline] 발화 축 판정 경로: ${config.routerMode}`);
   console.log(`[pipeline] 탐지 판정 LLM: ${config.judgeBackend === 'gpu'
     ? `GPU ${config.judgeGpuModel} (실패하면 판정 없이 넘어감)` : `Bedrock ${config.judgeModelId}`}`);
@@ -161,6 +167,7 @@ function registerPipeline({ getViewerView, meetingArchive = null }) {
       config, jpegBuffer, prompt, label, maxTokens,
     }),
     readImage: (filePath) => fs.promises.readFile(filePath).catch(() => null),
+    getCaptionLanguage,
   });
 
   function appendRecord(record) {
@@ -217,8 +224,6 @@ function registerPipeline({ getViewerView, meetingArchive = null }) {
 
   // 화면 글자 읽기 방법은 설정 화면에서 고른 값이 회의마다 넘어온다. 넘어오지 않으면 .env 값이다.
   let sessionSlideTextBackend = config.slideTextBackend;
-  // 사용자에게 들리는 말의 언어. 캡처를 시작할 때 설정 화면에서 고른 값이 넘어온다.
-  let sessionCaptionLanguage = DEFAULT_CAPTION_LANGUAGE;
   const slideTextAgent = createSlideTextAgent({
     config, ocrClient: createOcrClient({ config }), getBackend: () => sessionSlideTextBackend,
   });
@@ -495,7 +500,7 @@ function registerPipeline({ getViewerView, meetingArchive = null }) {
 
       if (isRevisitFinal) {
         const revisitNarration = buildRevisitNarration({
-          isSlide: isSlideScreen, displayNumber, topic: result.pageTopic || result.narration,
+          isSlide: isSlideScreen, displayNumber, topic: result.pageTopic || result.narration, language: getCaptionLanguage(),
         });
         await appendRecord({
           kind: RECORD_KIND_MAP.pageTransition, ts, slideLabel, screenType: result.screenType,
@@ -531,7 +536,9 @@ function registerPipeline({ getViewerView, meetingArchive = null }) {
       }
       // 고지를 끈 상태면 사용자가 듣지 못한 요소이므로 지시 해설이 "이미 설명함"으로 건너뛰지 않게 등록하지 않는다.
       const isTransitionEnabled = featureGate.isEnabled(NARRATION_CLASS_MAP.pageTransition);
-      const narration = buildTransitionNarration({ isSlide: isSlideScreen, displayNumber, narration: result.narration });
+      const narration = buildTransitionNarration({
+        isSlide: isSlideScreen, displayNumber, narration: result.narration, language: getCaptionLanguage(),
+      });
       if (isTransitionEnabled) {
         captionDescribed.add({ ts, text: narration, slideLabel, elementList: result.describedElementList });
       }
@@ -643,7 +650,7 @@ function registerPipeline({ getViewerView, meetingArchive = null }) {
     try {
       const isDomPath = source === SPEAKER_SOURCE_MAP.dom;
       const result = isDomPath
-        ? buildSpeakerIdentityFromDom({ speakerName, position, participantId })
+        ? buildSpeakerIdentityFromDom({ speakerName, position, participantId, language: getCaptionLanguage() })
         : await agentFieldMap[NARRATION_TYPE_MAP.speakerIdentity].generate({
           jpegBuffer: Buffer.from(buffer),
           minWordCount: wordBudget?.minWordCount, maxWordCount: wordBudget?.maxWordCount,
@@ -1051,6 +1058,7 @@ function registerPipeline({ getViewerView, meetingArchive = null }) {
           if (secondVerdict.verdict === VALUE_PRESENCE_VERDICT_MAP.absent) {
             const firstPair = assembleNarration({
               narrationType, subKind: selectedCandidate?.subKind, rawSlotMap: { ...slotMap, target2: '', value2: '' },
+              language: getCaptionLanguage(),
             });
             markDebug({
               stage: DEBUG_STAGE_MAP.valueCheck, verdict: DEBUG_VERDICT_MAP.skip, ts, narrationType,
@@ -1184,7 +1192,8 @@ function registerPipeline({ getViewerView, meetingArchive = null }) {
           route: routed.route, slideMajorList: routed.slideMajorList, questionText, wordBudget, speakerHintNow,
           heardWallTs, heardVideoTimeMs,
         });
-      const text = result.isGrounded && result.text ? result.text : NOT_FOUND_TEXT;
+      const text = result.isGrounded && result.text
+        ? result.text : readAnswerText({ key: ANSWER_TEXT_KEY_MAP.notFound, language: getCaptionLanguage() });
       contextStore.addQa({
         ts, question: questionText, answer: text, route: routed.route, slideMajorList: routed.slideMajorList,
       });
