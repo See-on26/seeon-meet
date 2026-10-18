@@ -108,7 +108,7 @@ test('칸 출력 형식: 영어는 영어 칸 설명·단어 수·NONE 꼴, 한�
   const english = buildSlotOutputInstruction({ ...option, language: 'en' });
   assert.match(english, /"target": the referenced item/);
   assert.match(english, /"situation": short lead-in action phrase/);
-  assert.match(english, /"target": .* — 2–8 words/);
+  assert.match(english, /"target": .* — 2–10 words/);
   assert.match(english, /"situation": .* — 1–3 words/);
   assert.match(english, /NONE: \(reason\)/);
   assert.match(english, /Chinese characters/);
@@ -117,8 +117,8 @@ test('칸 출력 형식: 영어는 영어 칸 설명·단어 수·NONE 꼴, 한�
 });
 
 // 영어는 관사·전치사 때문에 같은 내용도 한국어 어절보다 단어가 많다(GPU 시험: 9어절 상한에 영어 전환 묘사 6/15 가 길어 버려짐).
-// 영어 한 단어는 한국어 한 어절보다 짧게 읽히므로 단어 수를 1.5배로 잡으면 들리는 길이가 비슷하다.
-test('칸 목록: 영어는 같은 칸 이름에 영어 설명, 단어 상한은 한국어 어절의 1.5배(올림)·하한은 그대로', () => {
+// 상한은 들리는 길이가 한국어와 같도록 TTS 실측 비율(어절 0.45초 ÷ 영어 단어 0.238초 ≈ 1.9)로 잡는다.
+test('칸 목록: 영어는 같은 칸 이름에 영어 설명, 단어 상한은 한국어 어절의 1.9배(올림)·하한은 그대로', () => {
   const caseList = [
     [NARRATION_TYPE_MAP.pageTransition, PAGE_TRANSITION_KIND_MAP.slide],
     [NARRATION_TYPE_MAP.pageTransition, PAGE_TRANSITION_KIND_MAP.document],
@@ -142,7 +142,7 @@ test('칸 목록: 영어는 같은 칸 이름에 영어 설명, 단어 상한은
     for (const slot of english) assert.ok(!HANGUL_PATTERN.test(slot.label), `${narrationType}/${subKind}/${slot.key} 영어 설명`);
   }
   const instruction = buildSlotInstruction({ slotList: getSlotList({ narrationType: NARRATION_TYPE_MAP.deixis, subKind: DEIXIS_FORM_MAP.complete, language: 'en' }), language: 'en' });
-  assert.match(instruction, /"sentence": .* — 6–15 words$/m);
+  assert.match(instruction, /"sentence": .* — 6–19 words$/m);
   assert.match(instruction, /for the record/);
 });
 
@@ -193,10 +193,10 @@ test('영어 조립: 지시 단순형은 상황(머리 동작구) 뒤에 대상,
 test('영어 조립: 상한을 크게 넘긴 칸은 잘라 끝에 남은 관사·전치사를 뗀다', () => {
   const slotList = getSlotList({ narrationType: NARRATION_TYPE_MAP.deixis, subKind: DEIXIS_FORM_MAP.simple, ...en });
   const slotMap = normalizeSlotMap({
-    slotList, rawSlotMap: { target: 'the big chart of quarterly sales figures broken down by the region across years', situation: 'Looking at' }, ...en,
+    slotList, rawSlotMap: { target: 'the big chart of quarterly sales figures broken down by region and by the year', situation: 'Looking at' }, ...en,
   });
-  // 상한 8단어 + 여유 2단어에서 잘라 "… down by" 가 되고, 끝에 남은 전치사 by 를 뗀다.
-  assert.equal(slotMap.target, 'the big chart of quarterly sales figures broken down');
+  // 상한 10단어 + 여유 2단어에서 잘라 "… region and" 이 되고, 끝에 남은 접속사 and 를 뗀다.
+  assert.equal(slotMap.target, 'the big chart of quarterly sales figures broken down by region');
   assert.equal(slotMap.situation, 'Looking at');
 });
 
@@ -266,14 +266,14 @@ test('영어 칸 해설 파싱: JSON 은 영어로 조립하고 NONE 은 거절�
   assert.equal(rejected.rejectKind, 'none');
 });
 
-test('어절 예산: 영어 캡션이면 상한을 1.5배(올림)로, 하한과 한국어는 그대로', () => {
-  assert.equal(ENGLISH_WORD_SCALE, 1.5);
-  assert.deepEqual(scaleWordBudget({ minWordCount: 4, maxWordCount: 7, language: 'en' }), { minWordCount: 4, maxWordCount: 11 });
+test('어절 예산: 영어 캡션이면 상한을 1.9배(올림)로, 하한과 한국어는 그대로', () => {
+  assert.equal(ENGLISH_WORD_SCALE, 1.9);
+  assert.deepEqual(scaleWordBudget({ minWordCount: 4, maxWordCount: 7, language: 'en' }), { minWordCount: 4, maxWordCount: 14 });
   assert.deepEqual(scaleWordBudget({ minWordCount: 4, maxWordCount: 7, language: 'ko' }), { minWordCount: 4, maxWordCount: 7 });
   assert.deepEqual(scaleWordBudget({ minWordCount: undefined, maxWordCount: 0, language: 'en' }), { minWordCount: undefined, maxWordCount: 0 });
 });
 
-test('영어 전환: 13단어 묘사는 받는다(9어절 상한의 1.5배 + 여유)', () => {
+test('영어 전환: 13단어 묘사는 받는다(9어절 상한의 1.9배)', () => {
   const thirteen = parsePageTransitionText(JSON.stringify({
     screenType: 'web', screenForm: 'web page', description: 'Kimchi information page with six photos of kimchi dishes and a short recipe',
   }), en);
@@ -317,7 +317,7 @@ function mockVlm(replyList) {
 }
 
 test('영어 전환: 묘사가 길면 영어로 한 번 다시 묻고, 쓸 만한 답을 고지한다', async () => {
-  const long = 'A very long description of the domestic development status slide with a map, several text boxes and a legend';
+  const long = 'A very long description of the domestic development status slide with a large map, several text boxes, a color legend and two footnotes at the bottom';
   const promptList = mockVlm([
     JSON.stringify({ screenType: 'ppt', pageTopic: 'Domestic development', description: long }),
     JSON.stringify({ screenType: 'ppt', pageTopic: 'Domestic development', description: 'Domestic C-ITS pilot project status map' }),
@@ -326,8 +326,8 @@ test('영어 전환: 묘사가 길면 영어로 한 번 다시 묻고, 쓸 만�
   const result = await agent.generate({ jpegBuffer: Buffer.from('x'), ts: 1, minWordCount: 6, maxWordCount: 9 });
   assert.equal(promptList.length, 2);
   assert.ok(promptList[0].includes(RULE_MARK));
-  assert.match(promptList[1], /is 19 words — too long/);
-  assert.match(promptList[1], /at most 14 words/);
+  assert.match(promptList[1], /is 26 words — too long/);
+  assert.match(promptList[1], /at most 18 words/);
   assert.equal(result.narration, 'Domestic C-ITS pilot project status map');
   assert.equal(result.isRetried, true);
 });
@@ -340,7 +340,7 @@ test('에이전트: 캡션 언어를 읽어 프롬프트·조립에 넘긴다(�
   let promptList = mockVlm(['{"target":"the two-year sales trend table","situation":"Looking at"}']);
   const deixis = await agentFieldMap[NARRATION_TYPE_MAP.deixis].generate({ jpegBuffer, utterance: '여기 보시면', subKind: DEIXIS_FORM_MAP.simple });
   assert.ok(promptList[0].includes(RULE_MARK));
-  assert.match(promptList[0], /2–8 words/);
+  assert.match(promptList[0], /2–10 words/);
   assert.equal(deixis.text, 'Looking at the two-year sales trend table');
 
   promptList = mockVlm(['{"value":"73%","frame":"year-over-year valuation growth rate"}']);
@@ -500,7 +500,7 @@ test('질문 답: 영어 캡션이면 어절 예산 상한을 1.5배로 바꿔 �
     requestImage: async () => 'NONE', readImage: async () => null,
   });
   await answerer.answer({ route: QUESTION_ROUTE_MAP.pastSlide, slideMajorList: [3], questionText: 'B grade?', wordBudget: { minWordCount: 3, maxWordCount: 10 } });
-  assert.match(promptList[0], /3~15/);
+  assert.match(promptList[0], /3~19/);
 });
 
 // GPU 확인(10/18): 무발화 묘사가 상한에서 잘려 "…customer satisfaction, and reduced" 처럼 말이 끊겼다.

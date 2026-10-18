@@ -294,10 +294,11 @@ function readSlotList({ narrationType, subKind, origin = null, hasSecondClaim = 
   ];
 }
 
-// 영어는 관사·전치사 때문에 같은 내용도 한국어 어절보다 단어가 많다. 영어 한 단어는 한국어 한 어절보다 짧게 읽히므로
-// 상한을 어절의 1.5배로 잡으면 들리는 길이가 비슷하다(9어절 상한에서는 영어 전환 묘사의 절반 가까이가 길어 버려졌다).
+// 영어는 관사·전치사 때문에 같은 내용도 한국어 어절보다 단어가 많다(9어절 상한에서는 영어 전환 묘사의 절반 가까이가 길어 버려졌다).
+// 상한은 들리는 길이가 한국어와 같도록 TTS 2배속 실측 비율로 잡는다: 한국어 어절당 0.45초(mode-policy SPEECH_MS_PER_WORD)
+// ÷ 영어 단어당 0.238초(MeloTTS EN-US, 10/18 6문장 72단어) ≈ 1.9.
 // 하한은 그대로 둔다 — 영어가 한국어보다 단어가 적을 일은 드물고, 올리면 짧고 온전한 영어 구가 빈 칸으로 버려진다.
-const ENGLISH_WORD_SCALE = 1.5;
+const ENGLISH_WORD_SCALE = 1.9;
 
 function scaleMaxWordCount({ count, language }) {
   if (language !== CAPTION_LANGUAGE_MAP.en || !Number.isFinite(count) || count <= 0) return count;
