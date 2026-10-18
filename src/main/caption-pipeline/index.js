@@ -721,7 +721,7 @@ function registerPipeline({ getViewerView, meetingArchive = null }) {
     }
   });
 
-  // 렌더러 재생 대기 줄이 버리거나 질문 답이 끊은 해설. 듣지 못했으므로 중복 억제·재설명 금지 기록을 되돌린다.
+  // 렌더러 재생 대기 줄이 버린 해설(대기 시간 초과·트리거에서 멀어짐·슬라이드 변경·TTS 실패 등). 듣지 못했으므로 중복 억제·재설명 금지 기록을 되돌린다.
   ipcMain.on('pipeline-narration-dropped', (_event, {
     ts, text, slideLabel = null, narrationClass = null, reason = '',
   } = {}) => {
