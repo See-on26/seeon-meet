@@ -1,5 +1,25 @@
 
-function buildSummarySystemPrompt() {
+const { buildOutputLanguageRuleList } = require('./output-language-rule');
+
+// 한국어 합성음 낭독용 규칙(영문 약어 음차·"퍼센트" 표기와 그 예시). 영어 요약에서는 빼고 영어 규칙을 붙인다.
+const KOREAN_READING_RULE_PATTERN = /음차|엔에프티|한글 표기|퍼센트/;
+
+const ENGLISH_SUMMARY_RULE_LINE_LIST = [
+  '요약 전체를 자연스러운 영어로 쓴다(스크립트·화면 설명이 한국어여도 영어로 옮긴다). 구성 제목도 영어로 쓴다:'
+    + ' Overview, Topics, Slide by slide, Decisions and next steps.',
+  '숫자는 읽는 대로 쓴다(42% → 42 percent). 영문 약어·상표는 그대로 둔다(영어 목소리가 읽는다).',
+];
+
+function buildSummarySystemPrompt({ language = 'ko' } = {}) {
+  const lineList = buildKoreanSummaryLineList();
+  if (language === 'ko') return lineList.join('\n');
+  return [
+    ...lineList.filter((line) => !KOREAN_READING_RULE_PATTERN.test(line)),
+    ...buildOutputLanguageRuleList({ language, detailLineList: ENGLISH_SUMMARY_RULE_LINE_LIST }),
+  ].join('\n');
+}
+
+function buildKoreanSummaryLineList() {
   return [
     '너는 온라인 회의를 요약해 시각장애인 참석자에게 전달하는 역할이다.',
     '독자는 회의에 함께 있었지만 화면을 볼 수 없었다. 발표 자료에 무엇이 있었는지,',
@@ -69,7 +89,7 @@ function buildSummarySystemPrompt() {
     '  · 인사말·잡담처럼 회의 내용이 아닌 것은 넣지 마라.',
     '',
     '요약본 본문만 출력한다. 머리말이나 설명을 덧붙이지 마라.',
-  ].join('\n');
+  ];
 }
 
 module.exports = { buildSummarySystemPrompt };

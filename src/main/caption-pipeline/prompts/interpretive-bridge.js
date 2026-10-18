@@ -2,6 +2,8 @@ const { NARRATION_TYPE_MAP, INTERPRETATION_KIND_MAP } = require('../contracts/na
 const {
   GROUNDING_NONE_TOKEN, computeMaxChars, buildSlotOutputInstruction, SPEECH_GAP_DECIDED_RULE,
 } = require('../agents/shared/caption-parser');
+const { DEFAULT_CAPTION_LANGUAGE } = require('../contracts/caption-language');
+const { buildOutputLanguageRuleList } = require('./output-language-rule');
 
 const DEFAULT_INTERPRETATION_MIN_WORD_COUNT = 6;
 const DEFAULT_INTERPRETATION_MAX_WORD_COUNT = 12;
@@ -34,8 +36,9 @@ const INTERPRETATION_RULE_MAP = {
 function buildInterpretationPrompt({ utterance, recentTranscript = '', subKind = null,
   minWordCount = DEFAULT_INTERPRETATION_MIN_WORD_COUNT,
   maxWordCount = DEFAULT_INTERPRETATION_MAX_WORD_COUNT,
-  maxChars = null, describedElementList = [], mergedAnchorList = [], mergedClaimList = [] }) {
-  const effectiveMaxChars = Number.isFinite(maxChars) ? maxChars : computeMaxChars({ maxWordCount });
+  maxChars = null, describedElementList = [], mergedAnchorList = [], mergedClaimList = [],
+  language = DEFAULT_CAPTION_LANGUAGE }) {
+  const effectiveMaxChars = Number.isFinite(maxChars) ? maxChars : computeMaxChars({ maxWordCount, language });
   const ruleList = INTERPRETATION_RULE_MAP[subKind]
     || [...INTERPRETATION_RULE_MAP[INTERPRETATION_KIND_MAP.valueToMeaning],
       ...INTERPRETATION_RULE_MAP[INTERPRETATION_KIND_MAP.claimToValue]];
@@ -63,6 +66,7 @@ function buildInterpretationPrompt({ utterance, recentTranscript = '', subKind =
       narrationType: NARRATION_TYPE_MAP.interpretation,
       subKind: subKind || INTERPRETATION_KIND_MAP.valueToMeaning,
       hasSecondClaim: mergedClaimList.length > 0,
+      language,
     }),
     '',
     '규칙:',
@@ -72,6 +76,10 @@ function buildInterpretationPrompt({ utterance, recentTranscript = '', subKind =
     '    "이 상태가 달라집니다" → "준비 상태에 따른 차이"',
     '    지시어("이·그·저·여기·이런")는 넣지 않는다 — 청자는 그것을 볼 수 없다.',
     `(참고: 조립 후 총 ${minWordCount}~${maxWordCount}어절, 최대 ${effectiveMaxChars}자 분량이다.)`,
+    ...buildOutputLanguageRuleList({
+      language,
+      detailLineList: ['수치는 화면 그대로 아라비아 숫자로 쓴다(예: 73%, 9.2 hours). 시스템이 "… means …"·"대상, 값" 꼴로 조립한다.'],
+    }),
   ].filter(Boolean).join('\n');
 }
 

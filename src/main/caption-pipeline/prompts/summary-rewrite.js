@@ -1,5 +1,24 @@
 
-function buildSummaryRewriteSystemPrompt() {
+const { buildOutputLanguageRuleList } = require('./output-language-rule');
+
+// 한국어 합성음 낭독용 규칙(영문 약어 음차·"퍼센트" 표기). 영어로 다듬을 때는 빼고 영어 규칙을 붙인다.
+const KOREAN_READING_RULE_PATTERN = /음차|엔에프티|퍼센트/;
+
+const ENGLISH_REWRITE_RULE_LINE_LIST = [
+  '다듬은 글은 자연스러운 영어로 쓴다(초안에 한국어가 남아 있으면 영어로 옮긴다). 구성 제목도 영어로 쓴다.',
+  '숫자는 읽는 대로 쓴다(42% → 42 percent). 영문 약어·상표는 그대로 둔다(영어 목소리가 읽는다).',
+];
+
+function buildSummaryRewriteSystemPrompt({ language = 'ko' } = {}) {
+  const lineList = buildKoreanRewriteLineList();
+  if (language === 'ko') return lineList.join('\n');
+  return [
+    ...lineList.filter((line) => !KOREAN_READING_RULE_PATTERN.test(line)),
+    ...buildOutputLanguageRuleList({ language, detailLineList: ENGLISH_REWRITE_RULE_LINE_LIST }),
+  ].join('\n');
+}
+
+function buildKoreanRewriteLineList() {
   return [
     '너는 이미 작성된 회의 요약 초안을 소리 내어 듣기 좋은 글로 다듬는 역할이다.',
     '독자는 회의에 함께 있었지만 화면을 볼 수 없었던 시각장애인 참석자다.',
@@ -24,12 +43,13 @@ function buildSummaryRewriteSystemPrompt() {
     '  초안이 이미 이 순서라면 순서를 바꾸지 말고 문장만 다듬는다.',
     '',
     '다듬은 본문만 출력한다. 머리말이나 설명을 덧붙이지 마라.',
-  ].join('\n');
+  ];
 }
 
-function buildSummaryRewriteInput({ draftText }) {
+function buildSummaryRewriteInput({ draftText, language = 'ko' }) {
   return [
-    '아래는 회의 요약 초안이다. 위 원칙에 따라 낭독하기 좋게 다듬어라.',
+    language === 'ko' ? '아래는 회의 요약 초안이다. 위 원칙에 따라 낭독하기 좋게 다듬어라.'
+      : '아래는 회의 요약 초안이다. 위 원칙에 따라 영어로 낭독하기 좋게 다듬어라.',
     '',
     draftText,
   ].join('\n');

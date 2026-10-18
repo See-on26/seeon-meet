@@ -1,4 +1,5 @@
 import { NarrationQueue, QUEUE_DROP_REASON_MAP, readEntryAudio } from './narration-queue.js';
+import { defaultUiText } from '../i18n/ui-text.js';
 
 export const DEFAULT_DUCK_DB = -12;
 const DEFAULT_RAMP_MS = 120;
@@ -41,8 +42,9 @@ export function createSidePanner({ audioContext, positionX }) {
 export class NarrationMixer {
   constructor({ onStatus = null, onDrop = null, onPlayStart = null, duckDecibel = DEFAULT_DUCK_DB,
     createAudioContext = () => new AudioContext(), now = () => performance.now(), wallNow = () => Date.now(),
-    isEntryEnabled = () => true, prepareAudio = readEntryAudio, getPlaybackTimeMs = () => null } = {}) {
+    isEntryEnabled = () => true, prepareAudio = readEntryAudio, getPlaybackTimeMs = () => null, t = defaultUiText } = {}) {
     this.onStatus = onStatus || (() => {});
+    this.t = t;
     this.prepareAudio = prepareAudio;
     this.onDrop = onDrop || (() => {});
     this.onPlayStart = onPlayStart || (() => {});
@@ -84,7 +86,7 @@ export class NarrationMixer {
         this.meetingSource.connect(this.duckGainNode);
       }
     } catch (error) {
-      this.onStatus(`회의음 연결 실패(무시): ${error.message}`);
+      this.onStatus(this.t('narration.meetingAudioFailed', { message: error.message }));
     }
   }
 
@@ -139,10 +141,10 @@ export class NarrationMixer {
       this.currentSource = source;
       source.start(this.audioContext.currentTime + START_LEAD_SEC);
       this.notifyPlayStart({ entry, durationSec: audioBuffer.duration });
-      this.onStatus('내레이션 재생 중(회의음 덕킹)…');
+      this.onStatus(this.t('narration.mixPlaying'));
     } catch (error) {
       if (token !== this.playToken) return;
-      this.onStatus(`내레이션 재생 실패: ${error.message}`);
+      this.onStatus(this.t('narration.playFailed', { message: error.message }));
       this.handleNarrationEnded();
     }
   }

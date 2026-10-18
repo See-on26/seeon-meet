@@ -25,8 +25,9 @@ const DEFAULT_SUMMARY_MODEL_ID = 'anthropic.claude-opus-4-7';
 
 
 // ASR 전사 언어. auto 는 GPU 서버가 ko·en 중 감지 확률이 높은 쪽으로 전사한다.
+// 회의·질문 모두 기본 자동이다(사용자가 고르는 것은 캡션 언어뿐). 실험·평가는 환경변수나 세션 시작 값으로 고정할 수 있다.
 const ASR_LANGUAGE_LIST = ['ko', 'en', 'auto'];
-const DEFAULT_ASR_LANGUAGE = 'ko';
+const DEFAULT_ASR_LANGUAGE = 'auto';
 
 function isAsrLanguage(language) {
   return ASR_LANGUAGE_LIST.includes(language);
@@ -93,7 +94,7 @@ function readPipelineConfig(env = process.env) {
     vlmUrl,
     vlmModel,
     asrUrl: env.SEEON_ASR_URL || DEFAULT_ASR_URL,
-    // 회의 음성과 마이크 질문(한국어 사용자)은 말하는 사람이 달라 언어를 따로 둔다.
+    // 회의 음성과 마이크 질문은 말하는 사람이 달라 언어를 따로 둔다(둘 다 기본 자동).
     asrLanguage: readAsrLanguage({ env, envName: 'SEEON_ASR_LANGUAGE' }),
     questionAsrLanguage: readAsrLanguage({ env, envName: 'SEEON_QUESTION_ASR_LANGUAGE' }),
     ttsUrl: env.SEEON_TTS_URL || DEFAULT_TTS_URL,

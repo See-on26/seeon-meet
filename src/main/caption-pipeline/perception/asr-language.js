@@ -1,7 +1,7 @@
 const { isAsrLanguage, ASR_LANGUAGE_LIST } = require('../config');
 
 // 회의 음성과 마이크 질문의 ASR 언어를 따로 들고 요청에 실어 보낸다.
-// 회의 언어는 영어 회의·평가 영상처럼 세션마다 달라 바꿀 수 있고, 질문은 한국어 사용자가 하므로 설정값에 고정한다.
+// 둘 다 기본 자동이다. 회의 언어는 실험·평가에서 세션마다 고정할 수 있고, 질문 언어는 설정값(SEEON_QUESTION_ASR_LANGUAGE)을 쓴다.
 function createAsrLanguageSession({ asrClient, config }) {
   let meetingLanguage = config.asrLanguage;
 

@@ -3,21 +3,26 @@ const { NARRATION_ORIGIN_MAP } = require('../contracts/narration-class');
 const {
   GROUNDING_NONE_TOKEN, computeMaxChars, buildSlotOutputInstruction,
 } = require('../agents/shared/caption-parser');
+const { DEFAULT_CAPTION_LANGUAGE } = require('../contracts/caption-language');
+const { buildOutputLanguageRuleList } = require('./output-language-rule');
 
 const DEFAULT_VISUAL_WORD_RANGE_MAP = {
   [VISUAL_DESCRIPTION_KIND_MAP.reaction]: { minWordCount: 5, maxWordCount: 12 },
   [VISUAL_DESCRIPTION_KIND_MAP.scale]: { minWordCount: 4, maxWordCount: 8 },
 };
 
+const ENGLISH_IMAGE_PREFIX_RULE = '머리말 "Image:"(이미지 제시)는 시스템이 붙이므로 description 에 넣지 마라.';
+const ENGLISH_MATERIAL_TAIL_RULE = 'description 은 자료 종류를 나타내는 영어 낱말(photo·chart·table·diagram·flowchart 등)로 끝맺는다.';
+
 function buildVisualDescriptionPrompt({ subKind = VISUAL_DESCRIPTION_KIND_MAP.reaction,
   utterance = '', recentTranscript = '', minWordCount, maxWordCount, maxChars = null,
-  describedElementList = [], mergedAnchorList = [], origin = null }) {
+  describedElementList = [], mergedAnchorList = [], origin = null, language = DEFAULT_CAPTION_LANGUAGE }) {
   const defaultRange = DEFAULT_VISUAL_WORD_RANGE_MAP[subKind]
     || DEFAULT_VISUAL_WORD_RANGE_MAP[VISUAL_DESCRIPTION_KIND_MAP.reaction];
   const effectiveMinWordCount = Number.isFinite(minWordCount) ? minWordCount : defaultRange.minWordCount;
   const effectiveMaxWordCount = Number.isFinite(maxWordCount) ? maxWordCount : defaultRange.maxWordCount;
   const effectiveMaxChars = Number.isFinite(maxChars)
-    ? maxChars : computeMaxChars({ maxWordCount: effectiveMaxWordCount });
+    ? maxChars : computeMaxChars({ maxWordCount: effectiveMaxWordCount, language });
   const isScale = subKind === VISUAL_DESCRIPTION_KIND_MAP.scale;
 
   const isSilence = origin === NARRATION_ORIGIN_MAP.silence;
@@ -29,7 +34,7 @@ function buildVisualDescriptionPrompt({ subKind = VISUAL_DESCRIPTION_KIND_MAP.re
     : `· 이미 안내된 요소(${describedElementList.join(', ')})면 반복하지 말고 "${GROUNDING_NONE_TOKEN}"만 출력한다.`;
   const commonTailList = [
     '',
-    buildSlotOutputInstruction({ narrationType: NARRATION_TYPE_MAP.visualDescription, subKind, origin }),
+    buildSlotOutputInstruction({ narrationType: NARRATION_TYPE_MAP.visualDescription, subKind, origin, language }),
     '',
     '규칙:',
     describedElementList.length ? describedRule : '',
@@ -55,6 +60,10 @@ function buildVisualDescriptionPrompt({ subKind = VISUAL_DESCRIPTION_KIND_MAP.re
       ...commonTailList,
       '· 화면에 실제로 보이는 것만 쓴다. 크기를 지어내지 않는다.',
       `· **비교 대상을 찾을 수 없으면 "${GROUNDING_NONE_TOKEN}"만 출력한다.** 배수를 모르면 scale을 빈 문자열로 둔다.`,
+      ...buildOutputLanguageRuleList({
+        language,
+        detailLineList: ['시스템이 "(target), 4 times larger than (comparison)" 꼴로 조립한다. direction 은 "larger" 또는 "smaller" 다.'],
+      }),
     ].filter(Boolean).join('\n');
   }
 
@@ -80,6 +89,7 @@ function buildVisualDescriptionPrompt({ subKind = VISUAL_DESCRIPTION_KIND_MAP.re
         + ' 주요 구성 요소 3~4개가 무엇을 가운데 두고 어떻게 연결·흐르는지를 묘사한다.',
       '· 묘사는 "…사진", "…그래프", "…표", "…구조도"처럼 자료 종류로 끝맺는다.',
       `· 보라고 한 대상을 화면에서 찾을 수 없거나 글만 있는 화면이면 "${GROUNDING_NONE_TOKEN}"만 출력한다.`,
+      ...buildOutputLanguageRuleList({ language, detailLineList: [ENGLISH_IMAGE_PREFIX_RULE, ENGLISH_MATERIAL_TAIL_RULE] }),
     ].filter(Boolean).join('\n');
   }
 
@@ -99,6 +109,7 @@ function buildVisualDescriptionPrompt({ subKind = VISUAL_DESCRIPTION_KIND_MAP.re
     '    "잔인한"·"귀여운"·"앙상한"처럼 **보이는 것에 대한 감각적 수식은 허용한다.**',
     '    (수식은 허용, 사실 조작은 금지 — 이 구분을 지켜라.)',
     `· 반응을 일으킬 만한 요소가 없는 평범한 화면이면 "${GROUNDING_NONE_TOKEN}"만 출력한다.`,
+    ...buildOutputLanguageRuleList({ language, detailLineList: [ENGLISH_IMAGE_PREFIX_RULE] }),
   ].filter(Boolean).join('\n');
 }
 
