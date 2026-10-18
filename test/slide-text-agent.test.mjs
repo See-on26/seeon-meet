@@ -6,7 +6,7 @@ const require = createRequire(import.meta.url);
 const {
   createSlideTextAgent, OCR_MIN_MEAN_SCORE, OCR_MAX_VERTICAL_BOX_RATIO, OCR_BYPASS_MS,
 } = require('../src/main/caption-pipeline/agents/slide-text-agent.js');
-const { OcrRequestError } = require('../src/main/caption-pipeline/agents/shared/ocr-client.js');
+const { OcrRequestError, createOcrClient } = require('../src/main/caption-pipeline/agents/shared/ocr-client.js');
 
 const jpegBuffer = Buffer.from('x');
 const vlmConfig = { vlmUrl: 'http://x', vlmModel: 'm', bedrockApiKey: '' };
@@ -37,8 +37,8 @@ function fakeOcrClient(behavior) {
   };
 }
 
-function ocrAgent({ ocrClient, now = () => 0 }) {
-  return createSlideTextAgent({ config: { ...vlmConfig, slideTextBackend: 'ocr' }, ocrClient, now });
+function ocrAgent({ ocrClient }) {
+  return createSlideTextAgent({ config: { ...vlmConfig, slideTextBackend: 'ocr' }, ocrClient });
 }
 
 test('기준값: 점수 0.8, 세로 글씨 0.2, 우회 60초', () => {
@@ -83,21 +83,30 @@ test('ocr 백엔드: 점수가 낮거나 세로 글씨가 많으면 VLM 으로 �
   assert.equal(vertical.source, 'vlm');
 });
 
+// 우회 창은 OCR 클라이언트가 들고 있다(수치 해설 근거와 같은 상태). 전사 쪽 동작은 그대로다.
 test('ocr 백엔드: 서비스 다운이면 VLM 으로 넘기고 60초 동안 OCR 을 건너뛴다', async () => {
-  mockVlm('VLM 글');
+  const ocrUrl = 'http://127.0.0.1:8804/ocr';
+  let ocrFetchCount = 0;
+  globalThis.fetch = async (url) => {
+    if (url === ocrUrl) { ocrFetchCount += 1; throw new Error('fetch failed'); }
+    vlmCallCount += 1;
+    return { ok: true, status: 200, json: async () => ({ choices: [{ message: { content: 'VLM 글' } }] }) };
+  };
   let nowMs = 1000;
-  const ocrClient = fakeOcrClient(() => { throw new OcrRequestError('OCR 연결 실패: fetch failed', { isServiceDown: true }); });
-  const agent = ocrAgent({ ocrClient, now: () => nowMs });
+  const ocrClient = createOcrClient({ config: { ocrUrl }, now: () => nowMs });
+  const agent = ocrAgent({ ocrClient });
   const first = await agent.transcribe({ jpegBuffer });
   assert.equal(first.source, 'vlm');
   assert.equal(first.fallbackReason, 'ocr_error:OCR 연결 실패: fetch failed');
   nowMs += OCR_BYPASS_MS - 1;
   const second = await agent.transcribe({ jpegBuffer });
   assert.equal(second.fallbackReason, 'ocr_bypass');
-  assert.equal(ocrClient.calls.length, 1);
+  assert.equal(second.source, 'vlm');
+  assert.equal(ocrFetchCount, 1);
   nowMs += 1;
   await agent.transcribe({ jpegBuffer });
-  assert.equal(ocrClient.calls.length, 2);
+  assert.equal(ocrFetchCount, 2);
+  assert.equal(vlmCallCount, 3);
 });
 
 test('ocr 백엔드: 4xx·형식 오류는 그 장만 VLM, 우회 창을 열지 않는다', async () => {

@@ -98,3 +98,46 @@ test('둘째 변화가 있으면 값 칸을 넓혀 한 칸에 몰아넣은 두 �
   assert.equal(assemble({ target: '응답 품질 변화', value: '첫 응답 시간 9.2시간에서 3.1시간, 고객 만족도 72점에서 88점' }),
     '응답 품질 변화, 첫 응답 시간 9.2시간에서 3.1시간, 고객 만족도 72점에서 88점');
 });
+
+// 둘째 변화의 대상("만족도")이 글자 많은 화면 아래쪽에 있어도 600자 상한 안에 남아야 둘째 값을 화면 글자로 확인할 수 있다.
+const fillerLineList = Array.from({ length: 24 }, (_, index) => ({
+  text: `${String(index + 1).padStart(2, '0')}. 운영 지표 항목의 이번 달 처리 건수는 ${index + 100}건이다.`, score: 0.95,
+}));
+const satisfactionLine = { text: '25. 고객 만족도는 72점에서 88점으로 올랐다.', score: 0.95 };
+
+test('둘째 변화 표현의 낱말이 든 OCR 줄도 상한 안에 먼저 넣는다', () => {
+  const screenLineList = [...fillerLineList, satisfactionLine];
+  const withSecond = buildInterpretationPrompt({
+    utterance: '응답 속도는 훨씬 빨라졌습니다.', subKind: 'claim_to_value', mergedClaimList: ['만족도도 꽤 많이 올랐습니다'], screenLineList,
+  });
+  assert.ok(withSecond.includes(satisfactionLine.text));
+  const single = buildInterpretationPrompt({ utterance: '응답 속도는 훨씬 빨라졌습니다.', subKind: 'claim_to_value', screenLineList });
+  assert.ok(!single.includes(satisfactionLine.text), '둘째 표현이 없으면 위에서부터 600자');
+});
+
+test('수치 에이전트는 OCR 줄을 프롬프트에 싣고, 넣은 줄 수·글자 수를 돌려준다', async () => {
+  const requestBodyList = [];
+  globalThis.fetch = async (_url, option) => {
+    requestBodyList.push(JSON.parse(option.body));
+    const content = JSON.stringify({ target: '고객 만족도', value: '72점에서 88점' });
+    return { ok: true, status: 200, json: async () => ({ choices: [{ message: { content } }] }) };
+  };
+  const screenLineList = [{ text: '고객 응답 품질', score: 0.95 }, satisfactionLine];
+  const agent = createInterpretiveBridgeAgent({ config: vlmConfig });
+  const result = await agent.generate({
+    jpegBuffer: Buffer.from('x'), utterance: '만족도가 꽤 많이 올랐습니다.', subKind: 'claim_to_value',
+    minWordCount: 6, maxWordCount: 12, screenLineList,
+  });
+  assert.equal(result.text, '고객 만족도, 72점에서 88점');
+  const promptText = JSON.stringify(requestBodyList[0]);
+  assert.ok(promptText.includes('글자 인식기(OCR)'));
+  assert.ok(promptText.includes(satisfactionLine.text));
+  assert.deepEqual(result.screenTextBlock, {
+    lineCount: 2, charCount: '고객 응답 품질'.length + satisfactionLine.text.length, numberLineCount: 1,
+  });
+  const withoutScreenText = await agent.generate({
+    jpegBuffer: Buffer.from('x'), utterance: '만족도가 꽤 많이 올랐습니다.', subKind: 'claim_to_value', minWordCount: 6, maxWordCount: 12,
+  });
+  assert.deepEqual(withoutScreenText.screenTextBlock, { lineCount: 0, charCount: 0, numberLineCount: 0 });
+  assert.ok(!JSON.stringify(requestBodyList[1]).includes('글자 인식기'));
+});
