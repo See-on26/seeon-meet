@@ -52,10 +52,10 @@ export const UI_TEXT_MAP = {
 
     'card.pageTransition': '페이지 전환',
     'card.deixis': '지시 대상',
-    'card.interpretation': '수치 의미',
-    'card.visualDescription': '시각 정보',
-    'card.userCommand': '명령 응답',
-    'card.speakerIdentity': '발화자',
+    'card.speechBased': '발화 기반',
+    'card.silenceBased': '무발화 기반',
+    'card.speakerIdentity': '화자 식별',
+    'card.userCommand': '질문 답',
     'card.default': '화면 해설',
 
     'question.chipsAriaLabel': '질문 프리셋',
@@ -264,10 +264,10 @@ export const UI_TEXT_MAP = {
 
     'card.pageTransition': 'Page change',
     'card.deixis': 'Pointed item',
-    'card.interpretation': 'Number insight',
-    'card.visualDescription': 'Visual info',
-    'card.userCommand': 'Command reply',
+    'card.speechBased': 'Speech-based',
+    'card.silenceBased': 'Silence-based',
     'card.speakerIdentity': 'Speaker',
+    'card.userCommand': 'Answer',
     'card.default': 'Screen description',
 
     'question.chipsAriaLabel': 'Question presets',

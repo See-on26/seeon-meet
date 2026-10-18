@@ -582,11 +582,11 @@ function registerPipeline({ getViewerView, meetingArchive = null }) {
               slideLabel, narrationType: NARRATION_TYPE_MAP.visualDescription,
               subKind: VISUAL_DESCRIPTION_KIND_MAP.reaction,
             });
-            console.log(`[pipeline]   2-4A 반응 묘사 "${truncateForLog(visual.text)}"`);
+            console.log(`[pipeline]   사진 단독 화면 묘사(페이지 전환) "${truncateForLog(visual.text)}"`);
             markDebug({
               stage: DEBUG_STAGE_MAP.vlm, verdict: DEBUG_VERDICT_MAP.pass, ts,
               narrationType: NARRATION_TYPE_MAP.visualDescription,
-              reason: '2-4A 반응 묘사 생성 (사진 단독 제시)', detail: `"${visual.text}"`,
+              reason: '사진 단독 화면 묘사(페이지 전환) 생성', detail: `"${visual.text}"`,
             });
             await sendCaption({
               ts, text: visual.text, source: NARRATION_TYPE_MAP.visualDescription, slideLabel,
@@ -600,15 +600,15 @@ function registerPipeline({ getViewerView, meetingArchive = null }) {
             markDebug({
               stage: DEBUG_STAGE_MAP.vlm, verdict: DEBUG_VERDICT_MAP.skip, ts,
               narrationType: NARRATION_TYPE_MAP.visualDescription,
-              reason: '2-4A NONE (묘사할 것 없음)', detail: `슬라이드=${slideLabel}`,
+              reason: '사진 단독 화면 묘사(페이지 전환) — 묘사할 것 없음', detail: `슬라이드=${slideLabel}`,
             });
           }
         } catch (visualError) {
-          console.warn(`[pipeline]   2-4A 반응 묘사 실패(무시): ${visualError.message}`);
+          console.warn(`[pipeline]   사진 단독 화면 묘사(페이지 전환) 실패(무시): ${visualError.message}`);
           markDebug({
             stage: DEBUG_STAGE_MAP.vlm, verdict: DEBUG_VERDICT_MAP.fail, ts,
             narrationType: NARRATION_TYPE_MAP.visualDescription,
-            reason: '2-4A 생성 실패(무시)', detail: visualError.message,
+            reason: '사진 단독 화면 묘사(페이지 전환) 생성 실패(무시)', detail: visualError.message,
           });
         }
       }
@@ -712,7 +712,6 @@ function registerPipeline({ getViewerView, meetingArchive = null }) {
     }
   });
 
-  // 무발화(4-1): 발표자가 화면을 보라고 한 뒤 5초 이상 침묵하면 화면을 묘사한다. 애매하면 내지 않는다.
   // 렌더러 재생 대기 줄이 버리거나 질문 답이 끊은 해설. 듣지 못했으므로 중복 억제·재설명 금지 기록을 되돌린다.
   ipcMain.on('pipeline-narration-dropped', (_event, {
     ts, text, slideLabel = null, narrationClass = null, reason = '',
@@ -751,6 +750,7 @@ function registerPipeline({ getViewerView, meetingArchive = null }) {
     return { isOk: true, disabledClassList: appliedList };
   });
 
+  // 무발화 기반: 발표자가 화면을 보라고 한 뒤 5초 이상 침묵하면 화면을 묘사한다. 애매하면 내지 않는다.
   ipcMain.handle('pipeline-silence', async (_event, {
     ts, buffer, slideLabel, recentTranscript = '', silenceMs = 0, wordBudget = null, eventVideoTimeMs = null,
   }) => {

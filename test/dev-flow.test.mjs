@@ -1,14 +1,16 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
+import fs from 'node:fs';
 import { createRequire } from 'node:module';
 import {
   formatClock, truncateText, filterFlowList, buildTimelineItemList, isNearBottom, MAX_RENDERED_ITEM_COUNT,
-  createNodeCache, isSameNodeList, planNodeListUpdate, OUTCOME_LABEL_MAP,
+  createNodeCache, isSameNodeList, planNodeListUpdate, OUTCOME_LABEL_MAP, FLOW_TYPE_OPTION_LIST,
 } from '../src/renderer/dev-flow/flow-view.js';
 
 const require = createRequire(import.meta.url);
 const {
   buildFlowList, buildFlowView, summarizeTrackList, normalizeNarrationType, STEP_KIND_MAP, OUTCOME_KIND_MAP,
+  FLOW_TYPE_LABEL_MAP,
 } = require('../src/main/dev-flow/flow-builder.js');
 
 const BASE_MS = 1_000_000;
@@ -149,7 +151,7 @@ test('라우터가 후보=[없음] 으로 건너뛰면 해설 없이 막힌 흐�
 test('무발화는 무발화 판단과 무발화 에이전트를 거쳐 들리고, 상한에 걸리면 막힌다', () => {
   const flowList = buildFlowList(buildInput());
   const played = findFlow(flowList, 40000);
-  assert.equal(played.typeLabel, '무발화');
+  assert.equal(played.typeLabel, '무발화 기반');
   assert.deepEqual(stageListOf(played), ['input', 'silence', 'silence', 'tts', 'playback']);
   assert.equal(played.stepList[1].label, '경량 LLM 판단(무발화)');
   assert.equal(played.stepList[2].label, '무발화 기반 설명 에이전트');
@@ -205,7 +207,7 @@ test('라우터가 고른 유형으로 발화 기반 흐름 이름을 붙인다'
     ],
     toMediaMs: () => null,
   });
-  assert.deepEqual(flowList.map((flow) => flow.typeLabel), ['발화 기반(척도·시각)', '발화 기반(수치·변화)']);
+  assert.deepEqual(flowList.map((flow) => flow.typeLabel), ['발화 기반(척도)', '발화 기반(수치·변화)']);
   assert.equal(flowList[1].stepList.find((step) => step.stage === 'vlm').label, '발화 기반 설명 에이전트');
 });
 
@@ -312,7 +314,7 @@ test('카드 시각은 사건 시각(eventMediaMs)이다: 해설은 ad-timeline 
   ]);
 });
 
-test('사진 단독 제시의 2-4A 묘사는 전환 흐름 안에서 자기 에이전트 이름을 쓰고 해설마다 결과가 따로 보인다', () => {
+test('사진 단독 제시의 화면 묘사는 전환 흐름 안에서 페이지 전환 에이전트의 사진 묘사로 보이고 해설마다 결과가 따로 보인다', () => {
   const leaderText = '슬라이드 4: 여행 사진';
   const followerText = '해변에서 웃는 사람들 사진';
   const debugList = [
@@ -322,7 +324,7 @@ test('사진 단독 제시의 2-4A 묘사는 전환 흐름 안에서 자기 에�
     debug(3020, 'slide', 'info', '주제 판정 fresh', '주제="여행" 번호=4(안내순서) 임베딩라벨=4', 'page_transition'),
     debug(3020, 'vlm', 'pass', '전환 내레이션 생성', `"${leaderText}" (3000ms, 묘사="여행 사진")`, 'page_transition'),
     debug(3020, 'tts', 'pass', '합성 완료', `100KB · "${leaderText}"`, 'page-transition'),
-    debug(3020, 'vlm', 'pass', '2-4A 반응 묘사 생성 (사진 단독 제시)', `"${followerText}"`, 'visual_description'),
+    debug(3020, 'vlm', 'pass', '사진 단독 화면 묘사(페이지 전환) 생성', `"${followerText}"`, 'visual_description'),
     debug(3020, 'tts', 'pass', '합성 완료', `120KB · "${followerText}"`, 'visual_description'),
   ];
   const captionEventList = [
@@ -335,7 +337,7 @@ test('사진 단독 제시의 2-4A 묘사는 전환 흐름 안에서 자기 에�
   ];
   const [flow] = buildFlowList({ debugList, captionEventList, playbackList, toMediaMs: (wallMs) => wallMs - BASE_MS, isFinal: true });
   assert.equal(flow.typeKey, 'page_transition');
-  assert.deepEqual(flow.stepList.filter((step) => step.stage === 'vlm').map((step) => step.label), ['페이지 전환 설명 에이전트', '발화 기반 설명 에이전트']);
+  assert.deepEqual(flow.stepList.filter((step) => step.stage === 'vlm').map((step) => step.label), ['페이지 전환 설명 에이전트', '페이지 전환 설명 에이전트(사진 묘사)']);
   assert.deepEqual(pickOutcome(flow.outcome), { kind: OUTCOME_KIND_MAP.played, reason: null, text: leaderText, playedMediaMs: 5000 });
   assert.deepEqual(flow.outcome.captionList, [
     { text: leaderText, kind: OUTCOME_KIND_MAP.played, reason: null, playedMediaMs: 5000 },
@@ -349,6 +351,30 @@ test('사진 단독 제시의 2-4A 묘사는 전환 흐름 안에서 자기 에�
   });
   assert.equal(partial.outcome.kind, OUTCOME_KIND_MAP.played);
   assert.deepEqual(partial.outcome.captionList.map((caption) => [caption.kind, caption.reason]), [['played', null], ['dropped', 'stale']]);
+});
+
+test('흐름 유형 이름은 아키텍처 에이전트 묶음 이름이고, 흐름 창 거르기 목록도 같은 이름이다', () => {
+  assert.deepEqual(FLOW_TYPE_LABEL_MAP, {
+    page_transition: '페이지 전환',
+    deixis: '지시 대상',
+    interpretation: '발화 기반(수치·변화)',
+    visual_description: '발화 기반(척도)',
+    silence: '무발화 기반',
+    user_command: '질문 답',
+    speaker_identity: '화자 식별',
+    unknown: '기타',
+  });
+  assert.deepEqual(
+    Object.fromEntries(FLOW_TYPE_OPTION_LIST.map(({ key, label }) => [key, label])),
+    FLOW_TYPE_LABEL_MAP,
+  );
+});
+
+test('파이프라인의 사진 단독 화면 묘사 사유는 옛 번호(2-4A) 대신 페이지 전환 소속을 적는다', () => {
+  const source = fs.readFileSync(new URL('../src/main/caption-pipeline/index.js', import.meta.url), 'utf8');
+  assert.doesNotMatch(source, /2-4A/);
+  assert.doesNotMatch(source, /무발화\(4-1\)/);
+  assert.match(source, /reason: '사진 단독 화면 묘사\(페이지 전환\) 생성'/);
 });
 
 test('흐름 창은 바뀌지 않은 갱신값이면 같은 노드 목록이라 목록을 다시 넣지 않는다', () => {

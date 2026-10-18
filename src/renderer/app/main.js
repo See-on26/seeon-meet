@@ -48,6 +48,7 @@ import { CaptionNarrator } from '../core/audio-renderer/caption-narrator.js';
 import { NarrationMixer } from '../core/audio-renderer/narration-mixer.js';
 import { buildMeetReloadNotice } from '../core/ui/meet-reload-notice.js';
 import { buildSlideTransitionNotice } from '../core/ui/slide-transition-notice.js';
+import { resolveAdCardTag } from '../core/ui/ad-card-tag.js';
 import {
   TransitionOrderGate, LEADER_STATUS_MAP, resolveFollowerInsertMs,
   PendingTransitionTracker, resolveAfterTransitionInsertMs,
@@ -206,16 +207,6 @@ function markDebug({ stage, verdict, reason, detail = '', narrationType = null }
   window.seeon.appendDebugLog({ stage, verdict, reason, detail, narrationType, ts: Date.now() });
 }
 
-const LOG_TAG_MAP = {
-  'page-transition': { aid: 'A1', labelKey: 'card.pageTransition' },
-  [NARRATION_TYPE_MAP.pageTransition]: { aid: 'A1', labelKey: 'card.pageTransition' },
-  [NARRATION_TYPE_MAP.deixis]: { aid: 'A2', labelKey: 'card.deixis' },
-  [NARRATION_TYPE_MAP.interpretation]: { aid: 'A3', labelKey: 'card.interpretation' },
-  [NARRATION_TYPE_MAP.visualDescription]: { aid: 'A4', labelKey: 'card.visualDescription' },
-  [NARRATION_TYPE_MAP.userCommand]: { aid: 'Q', labelKey: 'card.userCommand' },
-  [NARRATION_TYPE_MAP.speakerIdentity]: { aid: 'S', labelKey: 'card.speakerIdentity' },
-};
-
 const pad2 = (n) => String(n).padStart(2, '0');
 function formatClock(ts) {
   const d = new Date(ts);
@@ -231,11 +222,12 @@ function scrollStreamToBottom() {
   if (stream) stream.scrollTop = stream.scrollHeight;
 }
 
-function appendLogCard({ source, text, ts = Date.now() }) {
+// 카드 코드는 재생 분류(아키텍처 에이전트)로 고르고, 분류가 없을 때만 source 로 찾는다.
+function appendLogCard({ narrationClass = null, source, text, ts = Date.now() }) {
   const stream = $('logStream');
   if (!stream) return;
   clearStreamEmpty();
-  const tag = LOG_TAG_MAP[source] || { aid: '·', labelKey: 'card.default' };
+  const tag = resolveAdCardTag({ narrationClass, source });
   const card = document.createElement('div');
   card.className = 'card';
   const meta = document.createElement('div');
@@ -1254,8 +1246,8 @@ function handleAsrTranscript({ text, ts, endTs, segmentList = [], triggerCandida
 
 const CAPTION_SOURCE_TRANSITION = 'page-transition';
 
-function handleCaption({ text, source, eventVideoTimeMs = null }) {
-  appendLogCard({ source, text });
+function handleCaption({ text, source, narrationClass = null, eventVideoTimeMs = null }) {
+  appendLogCard({ narrationClass, source, text });
   if (source === CAPTION_SOURCE_TRANSITION) lastScreenNarration = text;
   return Number.isFinite(eventVideoTimeMs) ? eventVideoTimeMs : captureSource.videoTimeMs;
 }
