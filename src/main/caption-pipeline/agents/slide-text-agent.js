@@ -1,6 +1,7 @@
 const { requestVlmContent } = require('./shared/vlm-gateway');
 const { GROUNDING_NONE_TOKEN } = require('./shared/caption-parser');
 const { buildSlideTextPrompt } = require('../prompts/slide-text');
+const { OCR_BYPASS_MS } = require('./shared/ocr-client');
 
 const AGENT_LABEL = '슬라이드전사';
 const SLIDE_TEXT_MAX_TOKENS = 600;
@@ -9,16 +10,13 @@ const CODE_FENCE_PATTERN = /```[a-zA-Z]*\n?|```/g;
 // OCR 결과를 믿지 않고 VLM 으로 다시 전사하는 기준. 합성 슬라이드로 정한 시작값이며 실제 자료로 다시 정한다.
 const OCR_MIN_MEAN_SCORE = 0.8;
 const OCR_MAX_VERTICAL_BOX_RATIO = 0.2;
-// OCR 서비스가 응답하지 않으면 이 시간 동안 OCR 을 건너뛰고 바로 VLM 으로 전사한다. 장마다 상한까지 기다리지 않기 위해서다.
-const OCR_BYPASS_MS = 60000;
 
 const SLIDE_TEXT_SOURCE_MAP = { ocr: 'ocr', vlm: 'vlm' };
 const OCR_FALLBACK_REASON_MAP = { lowScore: 'low_score', verticalText: 'vertical_text', bypass: 'ocr_bypass' };
 
 // getBackend: 지금 회의의 전사 백엔드. 설정 화면에서 고른 값이 회의 시작 때 바뀌므로 읽을 때마다 묻는다.
-function createSlideTextAgent({ config, ocrClient = null, now = Date.now, getBackend = () => config.slideTextBackend }) {
-  let ocrBypassUntil = 0;
-
+// OCR 서비스가 응답하지 않을 때의 건너뛰기(OCR_BYPASS_MS)는 OCR 클라이언트가 정하고, 그동안은 바로 VLM 으로 전사한다.
+function createSlideTextAgent({ config, ocrClient = null, getBackend = () => config.slideTextBackend }) {
   async function transcribeWithVlm({ jpegBuffer }) {
     const content = await requestVlmContent({
       config, jpegBuffer, label: AGENT_LABEL, prompt: buildSlideTextPrompt(),
@@ -36,12 +34,11 @@ function createSlideTextAgent({ config, ocrClient = null, now = Date.now, getBac
   // 글자가 없는 장(사진만 있는 화면)은 VLM 으로 넘기지 않는다. 넘김은 OCR 이 실패했거나 결과를 믿기 어려울 때만이다.
   async function transcribeWithOcr({ jpegBuffer }) {
     if (!ocrClient) return fallbackToVlm({ jpegBuffer, fallbackReason: 'ocr_error:OCR 클라이언트 없음' });
-    if (now() < ocrBypassUntil) return fallbackToVlm({ jpegBuffer, fallbackReason: OCR_FALLBACK_REASON_MAP.bypass });
     let ocrResult;
     try {
       ocrResult = await ocrClient.recognize({ jpegBuffer });
     } catch (error) {
-      if (error.isServiceDown) ocrBypassUntil = now() + OCR_BYPASS_MS;
+      if (error.isBypassed) return fallbackToVlm({ jpegBuffer, fallbackReason: OCR_FALLBACK_REASON_MAP.bypass });
       return fallbackToVlm({ jpegBuffer, fallbackReason: `ocr_error:${error.message}` });
     }
     const lineList = ocrResult.lineList.filter((line) => String(line?.text || '').trim());

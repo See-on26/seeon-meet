@@ -46,7 +46,10 @@ const { describeAgentRejection } = require('./agents/shared/caption-parser');
 const { assembleNarration } = require('./agents/shared/narration-format');
 const { createOcrClient } = require('./agents/shared/ocr-client');
 const { createSlideTextStore } = require('./orchestrator/slide-text-store');
-const { verifyValuePresence, VALUE_PRESENCE_VERDICT_MAP } = require('./orchestrator/value-presence');
+const { verifyValuePresence, VALUE_PRESENCE_VERDICT_MAP, VALUE_CHECK_SOURCE_MAP } = require('./orchestrator/value-presence');
+const {
+  createScreenTextGrounding, shouldStartScreenTextGrounding, finalizeScreenTextRecord, formatScreenTextSummary,
+} = require('./orchestrator/screen-text-grounding');
 const { createContextStore, toSlideMajor, LABEL_STATUS_MAP } = require('./context/context-store');
 const { createSlideLabeler } = require('./context/slide-labeler');
 const { createContextFileWriter } = require('./context/context-file');
@@ -224,8 +227,14 @@ function registerPipeline({ getViewerView, meetingArchive = null }) {
 
   // 화면 글자 읽기 방법은 설정 화면에서 고른 값이 회의마다 넘어온다. 넘어오지 않으면 .env 값이다.
   let sessionSlideTextBackend = config.slideTextBackend;
+  // 슬라이드 전사와 수치 해설 근거가 OCR 클라이언트 하나를 같이 써서, 서비스가 응답하지 않을 때의 건너뛰기 상태를 나눈다.
+  const ocrClient = createOcrClient({ config });
   const slideTextAgent = createSlideTextAgent({
-    config, ocrClient: createOcrClient({ config }), getBackend: () => sessionSlideTextBackend,
+    config, ocrClient, getBackend: () => sessionSlideTextBackend,
+  });
+  // 수치 해설 근거 OCR 은 「화면 글자 읽기」 설정과 상관없이 돈다(그 설정은 슬라이드 전사 엔진만 고른다).
+  const screenTextGrounding = createScreenTextGrounding({
+    ocrClient, isEnabled: () => config.isScreenTextGroundingEnabled,
   });
   ipcMain.handle('pipeline-slide-text-backend-default', async () => ({ backend: config.slideTextBackend }));
   const slideTextStore = createSlideTextStore({
@@ -911,6 +920,10 @@ function registerPipeline({ getViewerView, meetingArchive = null }) {
     const beforeText = typeof beforeTranscript === 'string' ? beforeTranscript : (recentTranscript || '');
     const afterText = typeof afterTranscript === 'string' ? afterTranscript : '';
     try {
+      // 수치 해설이 될 수 있는 요청이면 판단 LLM 과 함께 같은 프레임의 OCR 을 시작한다. 수치 해설이 아니면 결과를 버린다.
+      const screenTextTask = isRouterMode && shouldStartScreenTextGrounding({ triggerCandidateList })
+        ? screenTextGrounding.start({ jpegBuffer: Buffer.from(buffer) })
+        : null;
       let judgeReason = null;
       let selectedCandidate = null;
       let narrationEventVideoTimeMs = eventVideoTimeMs;
@@ -986,6 +999,10 @@ function registerPipeline({ getViewerView, meetingArchive = null }) {
       stage = PIPELINE_STAGE_MAP.vlm;
 
       const narrationType = selectedCandidate?.type || NARRATION_TYPE_MAP.deixis;
+      // 수치 해설이면 판단 뒤 상한까지만 OCR 을 기다려 그 줄을 근거로 넘긴다. 늦거나 없으면 덩어리 없이(지금 프롬프트로) 만든다.
+      const screenText = narrationType === NARRATION_TYPE_MAP.interpretation && screenTextTask
+        ? await screenTextTask.waitForPrompt()
+        : null;
 
       const wordBudget = wordBudgetMap?.[narrationType] || null;
       const generatorArgs = {
@@ -1001,18 +1018,23 @@ function registerPipeline({ getViewerView, meetingArchive = null }) {
           subKind: selectedCandidate?.subKind || VISUAL_DESCRIPTION_KIND_MAP.scale,
         },
         [NARRATION_TYPE_MAP.deixis]: { hasPointingRegion, pointingOrderHint },
+        [NARRATION_TYPE_MAP.interpretation]: { screenLineList: screenText?.lineList || [] },
       };
       const agent = agentFieldMap[narrationType] || agentFieldMap[NARRATION_TYPE_MAP.deixis];
       const {
         text: generatedText, isGrounded, slotMap, rejectKind = null, rejectReason = '', rawContent = '',
+        screenTextBlock = null,
       } = await agent.generate({
         ...generatorArgs, ...(extraArgByTypeMap[narrationType] || {}),
       });
       let text = generatedText;
+      const screenTextRecord = screenText ? finalizeScreenTextRecord({ record: screenText.record, screenTextBlock }) : null;
+      const screenTextDetail = screenTextRecord ? ` · ${formatScreenTextSummary(screenTextRecord)}` : '';
       await appendRecord({
         kind: RECORD_KIND_MAP.deixis, ts, utterance, caption: text, isGrounded, judgeReason, slideLabel,
         routerMode: config.routerMode, narrationType, subKind: selectedCandidate?.subKind || null,
         ...(isGrounded && text ? {} : { rejectKind, rejectReason, rawContent }),
+        ...(screenTextRecord ? { screenText: screenTextRecord } : {}),
       });
       if (!isGrounded || !text) {
         const rejection = describeAgentRejection({ rejectKind, rejectReason, rawContent });
@@ -1020,14 +1042,17 @@ function registerPipeline({ getViewerView, meetingArchive = null }) {
         markDebug({
           stage: DEBUG_STAGE_MAP.vlm, verdict: DEBUG_VERDICT_MAP.skip, ts, narrationType,
           reason: rejection.reason,
-          detail: `${rejection.detailPrefix}발화="${utterance}" 세부=${selectedCandidate?.subKind || '-'} (${Date.now() - startedAt}ms)`,
+          detail: `${rejection.detailPrefix}발화="${utterance}" 세부=${selectedCandidate?.subKind || '-'} (${Date.now() - startedAt}ms)`
+            + screenTextDetail,
         });
         return { isOk: true, isGrounded: false };
       }
       if (narrationType === NARRATION_TYPE_MAP.interpretation && slotMap?.value) {
         const slideText = slideTextStore.get(slideLabel);
+        // 해설이 본 것과 같은 프레임의 OCR 글자(믿을 줄만)가 끝나 있으면 저장 전사보다 먼저 그것과 대조한다.
+        const frameText = screenTextTask?.peekFrameText() ?? null;
         const verifyValueOnSlide = (value) => verifyValuePresence({
-          value, slideText: slideText.text, slideTextStatus: slideText.status,
+          value, slideText: slideText.text, slideTextStatus: slideText.status, frameText,
           utterance, contextText: [beforeText, afterText].filter(Boolean).join(' '),
           subKind: selectedCandidate?.subKind || INTERPRETATION_KIND_MAP.valueToMeaning,
           // 값이 없다고 나오면 지금 화면을 OCR 과 다른 엔진(VLM)으로 다시 읽어, 클릭으로 나타난 값과 OCR 오독을 함께 거른다.
@@ -1043,12 +1068,14 @@ function registerPipeline({ getViewerView, meetingArchive = null }) {
           stage: DEBUG_STAGE_MAP.valueCheck, verdict: verdictByValueMap[valueVerdict.verdict], ts, narrationType,
           reason: `값 존재 검사 ${valueVerdict.verdict}`,
           detail: `값="${slotMap.value}" 슬라이드=${slideLabel || '-'} 전사=${slideText.status}`
+            + ` 대조=${valueVerdict.checkedSource === VALUE_CHECK_SOURCE_MAP.frameOcr ? '같은 프레임 OCR' : '저장 전사'}`
             + `${valueVerdict.reason ? ` · ${valueVerdict.reason}` : ''} → "${text}"`,
         });
         if (valueVerdict.verdict === VALUE_PRESENCE_VERDICT_MAP.absent) {
           await appendRecord({
             kind: RECORD_KIND_MAP.deixis, ts, utterance, caption: text, isGrounded: false, slideLabel,
             narrationType, subKind: selectedCandidate?.subKind || null, skipReason: 'value-absent',
+            ...(screenTextRecord ? { screenText: screenTextRecord } : {}),
           });
           return { isOk: true, isGrounded: false };
         }
@@ -1072,7 +1099,8 @@ function registerPipeline({ getViewerView, meetingArchive = null }) {
       markDebug({
         stage: DEBUG_STAGE_MAP.vlm, verdict: DEBUG_VERDICT_MAP.pass, ts, narrationType,
         reason: `생성 ${narrationType}/${selectedCandidate?.subKind || '-'}`,
-        detail: `발화="${utterance}" → "${text}" (${Date.now() - startedAt}ms, 예산 ${wordBudget?.minWordCount ?? '-'}~${wordBudget?.maxWordCount ?? '-'}어절)`,
+        detail: `발화="${utterance}" → "${text}" (${Date.now() - startedAt}ms, 예산 ${wordBudget?.minWordCount ?? '-'}~${wordBudget?.maxWordCount ?? '-'}어절)`
+          + screenTextDetail,
       });
 
       captionDescribed.add({ ts, text, slideLabel, elementList: [text] });

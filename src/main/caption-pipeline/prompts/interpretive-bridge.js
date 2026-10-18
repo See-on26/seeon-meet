@@ -4,6 +4,7 @@ const {
 } = require('../agents/shared/caption-parser');
 const { DEFAULT_CAPTION_LANGUAGE } = require('../contracts/caption-language');
 const { buildOutputLanguageRuleList } = require('./output-language-rule');
+const { buildScreenTextBlock } = require('./screen-text-block');
 
 const DEFAULT_INTERPRETATION_MIN_WORD_COUNT = 6;
 const DEFAULT_INTERPRETATION_MAX_WORD_COUNT = 12;
@@ -33,12 +34,26 @@ const INTERPRETATION_RULE_MAP = {
   ],
 };
 
+// 같은 화면을 OCR 로 읽은 줄(screenLineList)로 프롬프트에 넣을 덩어리를 만든다. 줄 고르기는 발화와
+// 해설이 함께 다루는 표현(지시 구·둘째 변화 구)의 낱말을 본다. 줄이 없으면 빈 덩어리다.
+function buildInterpretationScreenTextBlock({ screenLineList = [], utterance = '', subKind = null,
+  mergedAnchorList = [], mergedClaimList = [] }) {
+  return buildScreenTextBlock({
+    lineList: screenLineList,
+    keywordSourceList: [utterance || '', ...mergedAnchorList, ...mergedClaimList],
+    isClaimToValue: subKind === INTERPRETATION_KIND_MAP.claimToValue,
+  });
+}
+
 function buildInterpretationPrompt({ utterance, recentTranscript = '', subKind = null,
   minWordCount = DEFAULT_INTERPRETATION_MIN_WORD_COUNT,
   maxWordCount = DEFAULT_INTERPRETATION_MAX_WORD_COUNT,
   maxChars = null, describedElementList = [], mergedAnchorList = [], mergedClaimList = [],
-  language = DEFAULT_CAPTION_LANGUAGE }) {
+  screenLineList = [], language = DEFAULT_CAPTION_LANGUAGE }) {
   const effectiveMaxChars = Number.isFinite(maxChars) ? maxChars : computeMaxChars({ maxWordCount, language });
+  const screenTextBlock = buildInterpretationScreenTextBlock({
+    screenLineList, utterance, subKind, mergedAnchorList, mergedClaimList,
+  });
   const ruleList = INTERPRETATION_RULE_MAP[subKind]
     || [...INTERPRETATION_RULE_MAP[INTERPRETATION_KIND_MAP.valueToMeaning],
       ...INTERPRETATION_RULE_MAP[INTERPRETATION_KIND_MAP.claimToValue]];
@@ -57,6 +72,8 @@ function buildInterpretationPrompt({ utterance, recentTranscript = '', subKind =
         + ' 그 대상이 첫 변화의 대상과 다르면(예: 매출과 방문자 수) "target2"·"value2"에 그 대상과 화면의 값을 쓴다.'
         + ' 같은 대상·같은 값을 다시 말한 것이면 "target2"·"value2"는 빈 문자열로 둔다.'
       : '',
+    // 화면 글자 덩어리는 규칙 바로 앞에 빈 줄 하나를 두고 넣는다. 덩어리가 없으면 프롬프트는 글자 하나까지 그대로다.
+    screenTextBlock.text ? `${screenTextBlock.text}\n` : '',
     '',
     '청자는 화면을 볼 수 없다.',
     SPEECH_GAP_DECIDED_RULE,
@@ -83,4 +100,7 @@ function buildInterpretationPrompt({ utterance, recentTranscript = '', subKind =
   ].filter(Boolean).join('\n');
 }
 
-module.exports = { buildInterpretationPrompt, INTERPRETATION_RULE_MAP, DEFAULT_INTERPRETATION_MIN_WORD_COUNT, DEFAULT_INTERPRETATION_MAX_WORD_COUNT };
+module.exports = {
+  buildInterpretationPrompt, buildInterpretationScreenTextBlock, INTERPRETATION_RULE_MAP,
+  DEFAULT_INTERPRETATION_MIN_WORD_COUNT, DEFAULT_INTERPRETATION_MAX_WORD_COUNT,
+};

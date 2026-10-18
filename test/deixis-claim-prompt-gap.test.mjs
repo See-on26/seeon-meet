@@ -85,3 +85,75 @@ test('대상 칸의 이름이 모두 값 칸에 나오면 대상 칸을 빼고 �
   assert.equal(assemble({ target: '시간', value: '9.2시간에서 3.1시간' }), '시간, 9.2시간에서 3.1시간');
   assert.equal(assemble({ target: '설치 장비', value: 'RSU 79개와 WAVE 단말기 3,000개' }), '설치 장비, RSU 79개와 WAVE 단말기 3,000개');
 });
+
+// 수치 해설에 같은 화면의 OCR 글자를 근거로 넣는다(값·항목 이름의 철자 확인용, 짝은 이미지에서).
+// 실측 때 프롬프트에 끼운 모양 그대로 "청자는 화면을 볼 수 없다." 바로 앞에 덩어리와 빈 줄을 넣는다.
+const { buildScreenTextBlock } = require('../src/main/caption-pipeline/prompts/screen-text-block.js');
+const { createDeixisResolutionAgent } = require('../src/main/caption-pipeline/agents/deixis-resolution-agent.js');
+
+const LISTENER_LINE = '청자는 화면을 볼 수 없다.';
+const screenLineList = [
+  { text: '국내 개발 현황', score: 0.95 }, { text: '·체험단 모집 및 단말기 배포 제주 ·79개 RSU 설치', score: 0.93 },
+  { text: 'WAVE 단말기 3,000개', score: 0.9 },
+];
+
+test('수치 프롬프트: 같은 화면 OCR 줄이 있으면 "청자는 화면을 볼 수 없다." 바로 앞에 덩어리를 넣는다', () => {
+  for (const subKind of ['claim_to_value', 'value_to_meaning']) {
+    const utterance = '특히 장비가 크게 늘었습니다.';
+    const base = buildInterpretationPrompt({ utterance, subKind });
+    const withScreenText = buildInterpretationPrompt({ utterance, subKind, screenLineList });
+    const block = buildScreenTextBlock({
+      lineList: screenLineList, keywordSourceList: [utterance], isClaimToValue: subKind === 'claim_to_value',
+    }).text;
+    assert.ok(block, subKind);
+    assert.equal(withScreenText, base.replace(LISTENER_LINE, `${block}\n\n${LISTENER_LINE}`), subKind);
+    assert.ok(withScreenText.indexOf('글자 인식기(OCR)') < withScreenText.indexOf(LISTENER_LINE), subKind);
+  }
+});
+
+test('수치 프롬프트: 변화·비교에만 "숫자 줄이 있으면 NONE 을 내지 않는다" 문장, 값→의미에는 짚기도 없다', () => {
+  const claim = buildInterpretationPrompt({ utterance: '장비가 크게 늘었습니다.', subKind: 'claim_to_value', screenLineList });
+  assert.match(claim, /화면 글자에 숫자가 있는 줄이 2개 있다/);
+  const meaning = buildInterpretationPrompt({ utterance: '79개, 이 숫자가 의미가 큽니다.', subKind: 'value_to_meaning', screenLineList });
+  assert.match(meaning, /글자 인식기\(OCR\)/);
+  assert.doesNotMatch(meaning, /숫자가 있는 줄이|적힌 줄/);
+});
+
+test('OCR 줄이 없거나 비면 수치 프롬프트는 지금과 글자 하나까지 같다', () => {
+  for (const subKind of ['claim_to_value', 'value_to_meaning', null]) {
+    for (const language of ['ko', 'en']) {
+      const base = buildInterpretationPrompt({ utterance: '크게 늘었습니다.', subKind, language, mergedClaimList: ['방문자도 늘었습니다'] });
+      for (const emptyList of [undefined, null, [], [{ text: '' }, { text: '   ' }]]) {
+        assert.equal(
+          buildInterpretationPrompt({ utterance: '크게 늘었습니다.', subKind, language, mergedClaimList: ['방문자도 늘었습니다'], screenLineList: emptyList }),
+          base, `${subKind}/${language}/${JSON.stringify(emptyList)}`,
+        );
+      }
+      assert.doesNotMatch(base, /글자 인식기/);
+    }
+  }
+});
+
+// 지시 대상에 OCR 글자를 넣으면 옆 상자의 숫자를 대상에 붙였다(제주 영역 5/5 → 0/5). 지시 쪽은 받지 않는다.
+test('지시 프롬프트·에이전트는 OCR 줄을 받지 않는다', async () => {
+  for (const subKind of ['simple', 'complete']) {
+    const base = buildGroundingPrompt({ utterance: '여기 이 지역도', maxChars: 60, subKind, hasPointingRegion: true });
+    assert.equal(buildGroundingPrompt({ utterance: '여기 이 지역도', maxChars: 60, subKind, hasPointingRegion: true, screenLineList }), base);
+    assert.doesNotMatch(base, /글자 인식기/);
+  }
+  const originalFetch = globalThis.fetch;
+  const promptList = [];
+  globalThis.fetch = async (_url, option) => {
+    promptList.push(JSON.stringify(JSON.parse(option.body)));
+    return { ok: true, status: 200, json: async () => ({ choices: [{ message: { content: '{"target":"제주 지역","situation":"가리키며"}' } }] }) };
+  };
+  try {
+    await createDeixisResolutionAgent({ config: { vlmUrl: 'http://x', vlmModel: 'm', bedrockApiKey: '' } }).generate({
+      jpegBuffer: Buffer.from('x'), utterance: '여기 이 지역도 시범사업 들어가 있습니다', subKind: 'simple', screenLineList,
+    });
+  } finally {
+    globalThis.fetch = originalFetch;
+  }
+  assert.equal(promptList.length, 1);
+  assert.doesNotMatch(promptList[0], /글자 인식기|79개 RSU/);
+});

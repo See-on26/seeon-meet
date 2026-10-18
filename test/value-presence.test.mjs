@@ -127,3 +127,65 @@ test('처음부터 present·unchecked 면 다시 전사하지 않는다', async 
   await verifyValuePresence({ value: '80%', subKind: 'claim_to_value', slideText: '', slideTextStatus: 'pending', retranscribe });
   assert.equal(retranscribeCount, 0);
 });
+
+// 해설이 본 것과 같은 프레임의 OCR 글자로 먼저 본다. 저장 전사는 슬라이드 확정 순간의 화면이라 낡을 수 있다.
+const countingRetranscribe = (result) => {
+  const counter = { count: 0 };
+  counter.retranscribe = async () => { counter.count += 1; return result; };
+  return counter;
+};
+
+test('같은 프레임 OCR 글자에 값이 있으면 저장 전사·재전사를 보지 않고 present', async () => {
+  const counter = countingRetranscribe({ text: '', hasText: false });
+  const verdict = await verifyValuePresence({
+    value: '2,318건', subKind: 'claim_to_value', frameText: '신규 가입자\n체험 계정 2,318건은 제외했다',
+    slideText: '', slideTextStatus: 'pending', retranscribe: counter.retranscribe,
+  });
+  assert.equal(verdict.verdict, VALUE_PRESENCE_VERDICT_MAP.present);
+  assert.equal(verdict.checkedSource, 'frame_ocr');
+  assert.equal(verdict.isRetranscribed, false);
+  assert.equal(counter.count, 0);
+});
+
+test('같은 프레임 글자에 없으면 저장 전사가 아니라 VLM 재전사로 확인한다', async () => {
+  const present = countingRetranscribe({ text: '체험 계정 2,318건', hasText: true });
+  const confirmed = await verifyValuePresence({
+    value: '2,318건', subKind: 'claim_to_value', frameText: '체험 계정 2.318건',
+    slideText: '체험 계정 2,318건', slideTextStatus: ready, retranscribe: present.retranscribe,
+  });
+  assert.equal(present.count, 1, '저장 전사에 있어도 재전사로 확인한다');
+  assert.equal(confirmed.verdict, VALUE_PRESENCE_VERDICT_MAP.present);
+  assert.equal(confirmed.checkedSource, 'frame_ocr');
+  assert.equal(confirmed.isRetranscribed, true);
+  const absent = countingRetranscribe({ text: '지역별 신규 가입자 4,870명', hasText: true });
+  const rejected = await verifyValuePresence({
+    value: '2,318건', subKind: 'claim_to_value', frameText: '', slideText: '', slideTextStatus: 'pending',
+    retranscribe: absent.retranscribe,
+  });
+  assert.equal(absent.count, 1, '믿을 줄이 없는 같은 프레임 글자(빈 문자열)도 재전사로 확인한다');
+  assert.equal(rejected.verdict, VALUE_PRESENCE_VERDICT_MAP.absent);
+});
+
+test('같은 프레임 글자로 본 값→의미도 발화·맥락에 있는 값은 인정한다', async () => {
+  const counter = countingRetranscribe({ text: '', hasText: false });
+  const verdict = await verifyValuePresence({
+    value: '79개', subKind: 'value_to_meaning', utterance: '79개, 이 숫자가 의미가 큽니다.', frameText: 'RSU 설치',
+    slideTextStatus: 'pending', retranscribe: counter.retranscribe,
+  });
+  assert.equal(verdict.verdict, VALUE_PRESENCE_VERDICT_MAP.present);
+  assert.equal(counter.count, 0);
+});
+
+test('같은 프레임 글자가 없으면(null) 지금처럼 저장 전사 → 재전사', async () => {
+  const counter = countingRetranscribe({ text: '', hasText: false });
+  const stored = await verifyValuePresence({
+    value: '73%', subKind: 'claim_to_value', frameText: null, slideText, slideTextStatus: ready, retranscribe: counter.retranscribe,
+  });
+  assert.equal(stored.verdict, VALUE_PRESENCE_VERDICT_MAP.present);
+  assert.equal(stored.checkedSource, 'slide_text');
+  const pending = await verifyValuePresence({
+    value: '80%', subKind: 'claim_to_value', slideText: '', slideTextStatus: 'pending', retranscribe: counter.retranscribe,
+  });
+  assert.equal(pending.verdict, VALUE_PRESENCE_VERDICT_MAP.unchecked);
+  assert.equal(counter.count, 0);
+});
