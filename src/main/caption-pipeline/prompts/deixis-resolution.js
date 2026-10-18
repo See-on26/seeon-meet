@@ -84,11 +84,16 @@ function buildGroundingPrompt({ utterance, recentTranscript, maxChars,
     '      나쁨: "개인정보 유무 확인 가능한 지식"  ← "지식"은 화면에도 발화에도 없다',
     '      좋음: "민감정보 포함 여부 항목"        ← 화면에 그대로 적혀 있다',
     '    수식을 길게 잇지 마라("~할 수 있는 ~하는 ~"). 화면 문구 + 자료 종류면 충분하다.',
+    '    대상은 무엇인지(이름·값·뜻)로 쓴다. 상자·박스·도형·색 같은 화면 요소 이름으로 때우지 마라.',
     '(5) 상황 슬롯은 **발표자가 실제로 쓴 동사**를 모사한다.',
     '    "보시면" → "보는 중" / "주목해 주세요" → "주목 중" / "비교해 보면" → "비교 중"',
     '    **"가리키며 설명함"은 쓰지 마라.** 가리켰다는 사실은 청자에게 아무 정보도 아니다.',
     '    모사할 동사가 마땅치 않으면 "확인 중"처럼 짧게 둔다.',
     '(6) 가리킨 대상에 항목명과 수치가 같이 있으면 둘 다 넣는다.',
+    '    **대상 자신에 붙은 글자·수치만 쓴다.** 옆에 있는 상자·목록이라도 제목이 다른 지명·항목이면 그 내용은 대상의 것이 아니다'
+      + ' — 대상에 붙이지 마라. 대상에 더 적힌 내용이 없으면 설명은 발화 모사와 자료 맥락(예: 지도에 표시된 지역)으로 채운다.',
+    '    값·항목 여러 개의 묶음을 가리켰으면 하나하나 늘어놓지 말고 묶음 이름과 개수로 말한다(예: "기준보다 작은 값 네 개").'
+      + ' 늘어놓으면 칸 어절 수를 넘어 목록이 중간에서 잘린다.',
     `(7) 위 두 경우에 해당하면 "${GROUNDING_NONE_TOKEN}"이다. 그 밖에는 반드시 캡션을 만든다.`,
     `(참고: 총 ${minWordCount}~${maxWordCount}어절, 최대 ${maxChars}자 분량이다.)`,
     '',
@@ -100,7 +105,9 @@ function buildGroundingPrompt({ utterance, recentTranscript, maxChars,
     ...buildOutputLanguageRuleList({
       language,
       detailLineList: ['영어 캡션은 "~임/~함" 명사형 대신 자연스러운 영어 구로 쓴다.'
-        + ' 단순형(simple)은 시스템이 situation 을 target 앞에 붙여 읽는다(예: "Looking at the two-year sales trend table").'],
+        + ' 단순형(simple)은 시스템이 situation 을 target 앞에 붙여 읽는다(예: "Looking at the two-year sales trend table").',
+      '영어에서도 지시어(This·That·Here)로 시작하지 말고 대상 이름으로 말한다. situation 에 "Pointing at"을 쓰지 마라 — 발표자 동사를 모사한다("Looking at").'
+        + ' 가리킨 표시(circle·dot·marker)는 말하지 않는다.'],
     }),
   ].filter(Boolean).join('\n');
 }

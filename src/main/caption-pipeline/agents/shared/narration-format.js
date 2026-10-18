@@ -86,6 +86,13 @@ const TAIL_PARTICLE_LIST = [
   '으로', '에서', '에게', '이랑', '과', '와', '을', '를', '이', '가', '은', '는', '의', '에', '도', '로', '랑',
 ];
 
+// 자료 명사로 끝나 보이지만 명사가 아닌 낱말. "가장"은 '장'(사진 세 장)으로 끝나 "…29건으로 가장"처럼 잘린 묘사가 완결로 통과했다.
+const NOT_TAIL_NOUN_WORD_SET = new Set(['가장']);
+
+function endsWithTailNoun({ word, tailNounList = DESCRIPTION_TAIL_NOUN_LIST }) {
+  return !NOT_TAIL_NOUN_WORD_SET.has(word) && tailNounList.some((noun) => word.endsWith(noun));
+}
+
 function stripTailParticle(word) {
   const particle = TAIL_PARTICLE_LIST.find((candidate) => word.length > candidate.length && word.endsWith(candidate));
   return particle ? word.slice(0, -particle.length) : word;
@@ -95,11 +102,10 @@ function stripTailParticle(word) {
 // 그 지점의 조사는 뗀다("…설명한 본문과" → "…설명한 본문"). 하한보다 짧아지면 null 이다.
 function cutAtTailNoun({ text, maxWordCount, minWordCount, tailNounList = DESCRIPTION_TAIL_NOUN_LIST }) {
   const wordList = String(text || '').trim().split(/\s+/).filter(Boolean).slice(0, maxWordCount);
-  const endsWithTailNoun = (word) => tailNounList.some((noun) => word.endsWith(noun));
   for (let lastIndex = wordList.length - 1; lastIndex >= minWordCount - 1; lastIndex -= 1) {
     const word = wordList[lastIndex].replace(TRAILING_MARK_PATTERN, '');
-    const candidate = endsWithTailNoun(word) ? word : stripTailParticle(word);
-    if (endsWithTailNoun(candidate)) return [...wordList.slice(0, lastIndex), candidate].join(' ');
+    const candidate = endsWithTailNoun({ word, tailNounList }) ? word : stripTailParticle(word);
+    if (endsWithTailNoun({ word: candidate, tailNounList })) return [...wordList.slice(0, lastIndex), candidate].join(' ');
   }
   return null;
 }
@@ -153,6 +159,8 @@ const NARRATION_SLOT_MAP = {
           + ' (순서는 자연스럽게 바꿔도 된다)',
         minWordCount: 6,
         maxWordCount: 10,
+        // 문장은 어절 상한에서 자르면 "…도심 열의 약"처럼 값 앞에서 끊긴다. 허용치 안이면 통째로 받는다.
+        isWholeSentence: true,
       },
     ],
   },
@@ -203,6 +211,9 @@ const SILENCE_DESCRIPTION_SLOT_LIST = [
     minWordCount: 3,
     maxWordCount: 12,
     isPhrase: true,
+    // 값·연결을 담은 묘사는 13~14어절로 나오는 일이 잦다. 12어절에서 자르면 자료 명사 꼬리가 빠져 통째로 버려지므로,
+    // 전환 묘사처럼 허용치(2어절) 안에서 자료 명사로 끝나면 그대로 받고, 넘으면 12어절 안의 마지막 자료 명사에서 자른다.
+    tailNounList: DESCRIPTION_TAIL_NOUN_LIST,
   },
 ];
 
@@ -422,6 +433,12 @@ function normalizeSlotMap({ slotList, rawSlotMap, language = CAPTION_LANGUAGE_MA
       slotMap[slot.key] = nounCut;
       continue;
     }
+    const isWholeSentenceKept = slot.isWholeSentence
+      && countWord({ text }) <= slot.maxWordCount + SLOT_OVERAGE_TOLERANCE_WORD_COUNT;
+    if (isWholeSentenceKept) {
+      slotMap[slot.key] = truncateSlot({ text, maxWordCount: slot.maxWordCount + SLOT_OVERAGE_TOLERANCE_WORD_COUNT });
+      continue;
+    }
     const truncated = truncateSlot({ text, maxWordCount: slot.maxWordCount });
     const isTruncated = countWord({ text }) > slot.maxWordCount;
     if (isTruncated) {
@@ -446,7 +463,7 @@ function dropValuelessTailItem({ text }) {
 // 끝 문장부호("…막대 그래프.")는 떼고 본다. 붙은 채 보면 받을 수 있는 길이의 묘사도 미완결로 버려진다.
 function hasCompleteTailNoun({ text, tailNounList = DESCRIPTION_TAIL_NOUN_LIST }) {
   const last = String(text || '').trim().replace(TRAILING_PUNCTUATION_PATTERN, '').split(/\s+/).pop() || '';
-  return tailNounList.some((noun) => last.endsWith(noun));
+  return endsWithTailNoun({ word: last, tailNounList });
 }
 
 function hasInvalidTailSlot({ slotList, slotMap }) {
@@ -470,11 +487,15 @@ const SITUATION_FALLBACK_TAIL = '설명함';
 // 가리켰다는 사실은 청자에게 정보가 아니다(지시 프롬프트 규칙 5). 모사할 동사가 없을 때 쓰는 "확인 중"으로 둔다.
 const POINTING_SITUATION_PATTERN = /가리키|가리킴|가리켜/;
 const POINTING_SITUATION_REPLACEMENT = '확인 중';
+// "보시면"을 높임말 그대로("보시는 중")나 피동("보이는 중")으로 옮기거나 "보며 설명함"으로 쓰면 어색하다. 청자 쪽 동작 "보는 중"으로 맞춘다.
+const LOOKING_SITUATION_PATTERN = /^(?:보시는 중|보이는 중|보며 설명함|보시며 설명함)$/;
+const LOOKING_SITUATION_REPLACEMENT = '보는 중';
 
 function completeSituationSlot({ situation }) {
   const text = String(situation || '').trim();
   if (!text) return text;
   if (POINTING_SITUATION_PATTERN.test(text)) return POINTING_SITUATION_REPLACEMENT;
+  if (LOOKING_SITUATION_PATTERN.test(text)) return LOOKING_SITUATION_REPLACEMENT;
   const last = text.split(/\s+/).pop();
   const isConnective = CONNECTIVE_ENDING_LIST.some((ending) => last.endsWith(ending));
   return isConnective ? `${text} ${SITUATION_FALLBACK_TAIL}` : text;
