@@ -148,7 +148,7 @@ test('시작: 평가 설정 → viewer 새로고침 → 균형 모드 → 영상
   const harness = createHarness();
   const result = await harness.controller.start({ videoPath: '/videos/발표 1.mp4', isEvalPreset: true });
   assert.equal(result.isOk, true);
-  assert.deepEqual(harness.presetList, [{ isEvalPreset: true, asrLanguage: 'ko' }]);
+  assert.deepEqual(harness.presetList, [{ isEvalPreset: true, asrLanguage: 'ko', captionLanguage: 'ko' }]);
   assert.deepEqual(harness.callList, [
     'viewer.reload', 'viewer.selectMode:delayed', 'player.setRoiEditing:false',
     'player.load:file:///videos/%EB%B0%9C%ED%91%9C%201.mp4', 'player.startOutputRecording', 'viewer.clickToggle', 'player.play',
@@ -157,24 +157,28 @@ test('시작: 평가 설정 → viewer 새로고침 → 균형 모드 → 영상
   assert.match(path.basename(result.runDir), /^20261005-100000-발표_1$/);
 });
 
-test('고른 회의 언어로 viewer 를 새로 불러오고, 실행 기록에 고른 언어와 viewer 가 세션 시작 때 넘긴 언어가 남는다', async () => {
-  const harness = createHarness({ sessionStartRequest: { mode: 'delayed', asrLanguage: 'en' } });
-  const result = await harness.controller.start({ videoPath: '/v.mp4', isEvalPreset: true, asrLanguage: 'en' });
+test('고른 두 언어로 viewer 를 새로 불러오고, 실행 기록에 고른 언어와 viewer 가 세션 시작 때 넘긴 언어가 남는다', async () => {
+  const harness = createHarness({ sessionStartRequest: { mode: 'delayed', asrLanguage: 'en', captionLanguage: 'en' } });
+  const result = await harness.controller.start({ videoPath: '/v.mp4', isEvalPreset: true, asrLanguage: 'en', captionLanguage: 'en' });
   assert.equal(result.isOk, true);
-  assert.deepEqual(harness.presetList, [{ isEvalPreset: true, asrLanguage: 'en' }]);
+  assert.deepEqual(harness.presetList, [{ isEvalPreset: true, asrLanguage: 'en', captionLanguage: 'en' }]);
   assert.equal(harness.callList[0], 'viewer.reload', '언어를 정한 뒤 viewer 를 새로 불러야 저장값을 다시 읽는다');
-  assert.match(harness.controller.getStatus().message, /균형 모드 · 회의 언어 English/);
-  // 조작 바는 상태 알림으로 실행 모드·회의 언어를 받아 select 에 보인다(자동 실행처럼 조작 바를 거치지 않은 시작 포함).
+  assert.match(harness.controller.getStatus().message, /균형 모드 · 받아쓰기 English · 캡션 English 로 실행 중/);
+  // 조작 바는 상태 알림으로 실행 모드·두 언어를 받아 select 에 보인다(자동 실행처럼 조작 바를 거치지 않은 시작 포함).
   assert.equal(harness.controller.getStatus().asrLanguage, 'en');
+  assert.equal(harness.controller.getStatus().captionLanguage, 'en');
   assert.equal(harness.controller.getStatus().mode, 'delayed');
-  assert.ok(harness.statusList.filter((status) => status.phase === RUN_PHASE_MAP.preparing).every((status) => status.asrLanguage === 'en'));
+  const preparingList = harness.statusList.filter((status) => status.phase === RUN_PHASE_MAP.preparing);
+  assert.ok(preparingList.every((status) => status.asrLanguage === 'en' && status.captionLanguage === 'en'));
   await harness.controller.stop();
   const { run } = harness.finalizedList[0];
   assert.equal(run.asrLanguage, 'en');
   assert.equal(run.sessionAsrLanguage, 'en');
+  assert.equal(run.captionLanguage, 'en');
+  assert.equal(run.sessionCaptionLanguage, 'en');
 });
 
-test('회의 언어를 주지 않으면 한국어이고, 고를 수 없는 언어면 viewer 를 건드리지 않고 시작하지 않는다', async () => {
+test('받아쓰기 언어를 주지 않으면 한국어이고, 고를 수 없는 언어면 viewer 를 건드리지 않고 시작하지 않는다', async () => {
   const defaultHarness = createHarness();
   await defaultHarness.controller.start({ videoPath: '/v.mp4', isEvalPreset: true });
   await defaultHarness.controller.stop();
@@ -186,6 +190,25 @@ test('회의 언어를 주지 않으면 한국어이고, 고를 수 없는 언�
   assert.match(result.message, /ko·en·auto/);
   assert.deepEqual(invalidHarness.callList, []);
   assert.deepEqual(invalidHarness.presetList, []);
+});
+
+test('캡션 언어를 주지 않으면 한국어이고, 고를 수 없는 언어면 viewer 를 건드리지 않고 시작하지 않는다', async () => {
+  const defaultHarness = createHarness();
+  await defaultHarness.controller.start({ videoPath: '/v.mp4', isEvalPreset: true, asrLanguage: 'auto' });
+  assert.equal(defaultHarness.controller.getStatus().captionLanguage, 'ko');
+  assert.match(defaultHarness.controller.getStatus().message, /받아쓰기 자동\(한·영\) · 캡션 한국어 로 실행 중/);
+  await defaultHarness.controller.stop();
+  assert.equal(defaultHarness.finalizedList[0].run.captionLanguage, 'ko');
+  assert.equal(defaultHarness.finalizedList[0].run.sessionCaptionLanguage, null);
+  for (const captionLanguage of ['auto', 'ja', '']) {
+    const invalidHarness = createHarness();
+    const result = await invalidHarness.controller.start({ videoPath: '/v.mp4', isEvalPreset: true, captionLanguage });
+    assert.equal(result.isOk, false, captionLanguage);
+    assert.match(result.message, /캡션 언어는 ko·en 중에서/);
+    assert.deepEqual(invalidHarness.callList, []);
+    assert.deepEqual(invalidHarness.presetList, []);
+    assert.equal(invalidHarness.controller.getStatus().phase, RUN_PHASE_MAP.idle);
+  }
 });
 
 test('평가 설정을 끄면 제품 기본(동시) 모드이고 고른 모드가 있으면 그 모드다', async () => {

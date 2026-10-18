@@ -7,7 +7,7 @@ const { createViewerDriver } = require('./viewer-driver');
 const { createPlayerDriver } = require('./player-driver');
 const { createOutputWriter } = require('./output-writer');
 const { buildFeatureTogglePreset } = require('./feature-toggle-preset');
-const { DEFAULT_LAB_ASR_LANGUAGE } = require('./meeting-language-preset');
+const { DEFAULT_LAB_ASR_LANGUAGE, DEFAULT_LAB_CAPTION_LANGUAGE } = require('./meeting-language-preset');
 const { readGitInfo } = require('./git-info');
 const { finalizeRun } = require('./export/finalize-run');
 const { pickModelConfig } = require('./export/run-info');
@@ -22,8 +22,8 @@ const LAB_OUT_DIR = path.join(OUT_DIR, 'lab');
 const VIDEO_EXTENSION_LIST = ['mp4', 'mov', 'webm', 'mkv', 'm4v'];
 
 function registerLabIpc({ ipcMain, labWindow, pipelineConfig, onRunFinished = () => {} }) {
-  // 처음 뜰 때부터 평가 설정·한국어로 둔다. 실행마다 조작 바 값으로 바꾸고 viewer 를 새로 불러 적용한다.
-  const presetState = { isEvalPreset: true, asrLanguage: DEFAULT_LAB_ASR_LANGUAGE };
+  // 처음 뜰 때부터 평가 설정·받아쓰기 한국어·캡션 한국어로 둔다. 실행마다 조작 바 값으로 바꾸고 viewer 를 새로 불러 적용한다.
+  const presetState = { isEvalPreset: true, asrLanguage: DEFAULT_LAB_ASR_LANGUAGE, captionLanguage: DEFAULT_LAB_CAPTION_LANGUAGE };
   const demoWindowManager = createDemoWindowManager({ BrowserWindow });
   const subtitleWindowManager = createSubtitleWindowManager({ BrowserWindow });
   const subtitleFeed = createSubtitleFeed({ onLine: (line) => subtitleWindowManager.sendLine(line) });
@@ -44,9 +44,10 @@ function registerLabIpc({ ipcMain, labWindow, pipelineConfig, onRunFinished = ()
     finalize: finalizeRun,
     readGit: readGitInfo,
     createOutputWriter,
-    setViewerPreset: ({ isEvalPreset, asrLanguage }) => {
+    setViewerPreset: ({ isEvalPreset, asrLanguage, captionLanguage }) => {
       presetState.isEvalPreset = isEvalPreset;
       presetState.asrLanguage = asrLanguage;
+      presetState.captionLanguage = captionLanguage;
     },
     labRootDir: LAB_OUT_DIR,
     modelConfig: pickModelConfig(pipelineConfig),
@@ -62,7 +63,9 @@ function registerLabIpc({ ipcMain, labWindow, pipelineConfig, onRunFinished = ()
   labWindow.setCaptureRequestListener(controller.handleCaptureRequested);
 
   ipcMain.on('lab-viewer-preset', (event) => { event.returnValue = buildFeatureTogglePreset(presetState); });
+  // 받아쓰기 언어는 viewer preload 가 세션 시작 때, 캡션 언어는 페이지를 불러올 때 받아 간다.
   ipcMain.on('lab-viewer-meeting-language', (event) => { event.returnValue = presetState.asrLanguage; });
+  ipcMain.on('lab-viewer-caption-language', (event) => { event.returnValue = presetState.captionLanguage; });
   ipcMain.on('lab-viewer-event', (_event, payload) => {
     controller.handleViewerEvent(payload);
     flowWindowManager.schedulePush();

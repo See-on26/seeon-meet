@@ -4,16 +4,18 @@ function createRunRecorder({ now = Date.now } = {}) {
   let run = null;
   const isRecording = () => Boolean(run) && run.endedAtMs === null;
 
-  // asrLanguage 는 조작 바에서 고른 회의 언어, sessionAsrLanguage 는 viewer 가 세션 시작 때 main 에 넘긴 회의 언어다.
+  // asrLanguage·captionLanguage 는 조작 바에서 고른 받아쓰기·캡션 언어,
+  // sessionAsrLanguage·sessionCaptionLanguage 는 viewer 가 세션 시작 때 main 에 넘긴 두 언어다.
   function start({
-    runId, runDir, videoPath, videoInfo = null, mode, isEvalPreset, featureToggleMap, asrLanguage = null, layout = null, git = null,
+    runId, runDir, videoPath, videoInfo = null, mode, isEvalPreset, featureToggleMap, asrLanguage = null, captionLanguage = null,
+    layout = null, git = null,
   }) {
     run = {
-      runId, runDir, videoPath, videoInfo, mode, isEvalPreset, featureToggleMap, asrLanguage, layout, git,
+      runId, runDir, videoPath, videoInfo, mode, isEvalPreset, featureToggleMap, asrLanguage, captionLanguage, layout, git,
       startedAtMs: now(), endedAtMs: null,
       captureRequestedWallMs: null, outputStartWallMs: null, outputStopWallMs: null, outputMimeType: null,
       playStartWallMs: null, videoEndedWallMs: null,
-      sessionId: null, recordPath: null, sessionAsrLanguage: null, isSessionEnded: false, roiNormRect: null,
+      sessionId: null, recordPath: null, sessionAsrLanguage: null, sessionCaptionLanguage: null, isSessionEnded: false, roiNormRect: null,
       asrEventList: [], captionEventList: [], playbackList: [], playerTimeList: [], rendererDropList: [], errorList: [],
       debugEventList: [],
     };
@@ -34,11 +36,12 @@ function createRunRecorder({ now = Date.now } = {}) {
     markCaptureRequested({ wallMs }) {
       if (isRecording() && run.captureRequestedWallMs === null) run.captureRequestedWallMs = wallMs;
     },
-    markSessionStart({ sessionId, recordPath, asrLanguage = null }) {
+    markSessionStart({ sessionId, recordPath, asrLanguage = null, captionLanguage = null }) {
       if (!isRecording()) return;
       run.sessionId = sessionId || null;
       run.recordPath = recordPath || null;
       run.sessionAsrLanguage = asrLanguage || null;
+      run.sessionCaptionLanguage = captionLanguage || null;
     },
     markSessionEnd() {
       if (run) run.isSessionEnded = true;

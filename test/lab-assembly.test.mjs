@@ -10,12 +10,12 @@ const { readAutorunOption } = require('../src/main/lab/autorun-option.js');
 test('확인 실행 옵션: 영상이 없으면 끄고, 있으면 평가 설정 켬·끝나면 종료가 기본이다', () => {
   assert.equal(readAutorunOption({}), null);
   assert.deepEqual(readAutorunOption({ SEEON_LAB_AUTORUN: 'out/a.mp4' }), {
-    videoPath: path.resolve('out/a.mp4'), mode: null, isEvalPreset: true, isExitOnDone: true, asrLanguage: 'ko',
+    videoPath: path.resolve('out/a.mp4'), mode: null, isEvalPreset: true, isExitOnDone: true, asrLanguage: 'ko', captionLanguage: 'ko',
   });
   assert.deepEqual(readAutorunOption({
     SEEON_LAB_AUTORUN: '/v.mp4', SEEON_LAB_MODE: 'listening', SEEON_LAB_EVAL_PRESET: 'false', SEEON_LAB_EXIT_ON_DONE: 'false',
-    SEEON_LAB_ASR_LANGUAGE: 'en',
-  }), { videoPath: '/v.mp4', mode: 'listening', isEvalPreset: false, isExitOnDone: false, asrLanguage: 'en' });
+    SEEON_LAB_ASR_LANGUAGE: 'en', SEEON_LAB_CAPTION_LANGUAGE: 'en',
+  }), { videoPath: '/v.mp4', mode: 'listening', isEvalPreset: false, isExitOnDone: false, asrLanguage: 'en', captionLanguage: 'en' });
 });
 
 test('실험 진입점은 파이프라인 등록 전에 세션 결과 엿보기를 설치하고 Meet 전용 등록은 하지 않는다', () => {

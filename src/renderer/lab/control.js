@@ -15,9 +15,11 @@ function render(status) {
   const selection = pickRunSelection({ status });
   if (selection.mode) $('modeSelect').value = selection.mode;
   if (selection.asrLanguage) $('languageSelect').value = selection.asrLanguage;
+  if (selection.captionLanguage) $('captionLanguageSelect').value = selection.captionLanguage;
   $('pickBtn').disabled = !isIdle;
   $('modeSelect').disabled = !isIdle;
   $('languageSelect').disabled = !isIdle;
+  $('captionLanguageSelect').disabled = !isIdle;
   $('evalPresetChk').disabled = !isIdle;
   $('roiBtn').disabled = !isIdle;
   $('roiBtn').classList.toggle('on', isRoiEditing);
@@ -58,7 +60,8 @@ $('roiBtn').addEventListener('click', async () => {
 $('startBtn').addEventListener('click', async () => {
   isRoiEditing = false;
   const result = await window.labControl.start({
-    videoPath, mode: $('modeSelect').value, isEvalPreset: $('evalPresetChk').checked, asrLanguage: $('languageSelect').value,
+    videoPath, mode: $('modeSelect').value, isEvalPreset: $('evalPresetChk').checked,
+    asrLanguage: $('languageSelect').value, captionLanguage: $('captionLanguageSelect').value,
   });
   if (!result?.isOk) $('statusText').textContent = `[시작 실패] ${result?.message || ''}`;
 });

@@ -6,6 +6,7 @@ const { computeDrainTargetMs, DRAIN_POLL_MS } = require('./drain-policy');
 const { buildFeatureTogglePreset } = require('./feature-toggle-preset');
 const {
   DEFAULT_LAB_ASR_LANGUAGE, LAB_ASR_LANGUAGE_LIST, LAB_ASR_LANGUAGE_LABEL_MAP, isLabAsrLanguage,
+  DEFAULT_LAB_CAPTION_LANGUAGE, LAB_CAPTION_LANGUAGE_LIST, LAB_CAPTION_LANGUAGE_LABEL_MAP, isLabCaptionLanguage,
 } = require('./meeting-language-preset');
 const { buildRunDirName } = require('./export/run-dir-name');
 const { RESULT_FILE_MAP } = require('./export/finalize-run');
@@ -64,7 +65,7 @@ function createLabError({ code, message }) {
   return error;
 }
 
-// 실험 1회의 순서를 맡는다: 준비(평가 설정·회의 언어·모드·영상) → 녹음·캡처 시작 → 재생 → 영상 끝 → 대기 → 정지 → 결과 폴더.
+// 실험 1회의 순서를 맡는다: 준비(평가 설정·받아쓰기 언어·캡션 언어·모드·영상) → 녹음·캡처 시작 → 재생 → 영상 끝 → 대기 → 정지 → 결과 폴더.
 function createRunController({
   viewerDriver, playerDriver, recorder, finalize, readGit, createOutputWriter, setViewerPreset,
   labRootDir, modelConfig, getLayout = () => null, notify = () => {}, onPlayback = () => {}, onRunFinished = () => {},
@@ -75,6 +76,7 @@ function createRunController({
   let phaseMessage = '';
   let runMode = null;
   let runAsrLanguage = null;
+  let runCaptionLanguage = null;
   let runDir = null;
   let lastRunDir = null;
   let outputWriter = null;
@@ -89,7 +91,7 @@ function createRunController({
   function getStatus() {
     const errorList = activeRun ? activeRun.errorList : startErrorList;
     return {
-      phase, message: phaseMessage, mode: runMode, asrLanguage: runAsrLanguage, runDir, lastRunDir,
+      phase, message: phaseMessage, mode: runMode, asrLanguage: runAsrLanguage, captionLanguage: runCaptionLanguage, runDir, lastRunDir,
       errorList: errorList.map((error) => ({ ...error })),
     };
   }
@@ -152,9 +154,10 @@ function createRunController({
     }
   }
 
-  // viewer 는 기능 토글·회의 언어를 페이지를 불러올 때 읽으므로 값을 정한 뒤 새로 불러온다.
-  async function prepareViewer({ isEvalPreset, asrLanguage, mode }) {
-    setViewerPreset({ isEvalPreset, asrLanguage });
+  // viewer 는 기능 토글·캡션 언어를 페이지를 불러올 때 읽으므로 값을 정한 뒤 새로 불러온다.
+  // 받아쓰기 언어는 viewer preload 가 세션 시작 요청에 실을 때 읽는다.
+  async function prepareViewer({ isEvalPreset, asrLanguage, captionLanguage, mode }) {
+    setViewerPreset({ isEvalPreset, asrLanguage, captionLanguage });
     const reload = await settleWithin({ task: () => viewerDriver.reload(), timeoutMs: VIEWER_RELOAD_TIMEOUT_MS });
     if (reload.isTimedOut || reload.error) {
       const reason = reload.isTimedOut ? `${VIEWER_RELOAD_TIMEOUT_MS / 1000}초 안에 끝나지 않았다` : reload.error.message;
@@ -190,23 +193,31 @@ function createRunController({
     }
   }
 
-  const describeRunning = () => `${LAB_MODE_LABEL_MAP[runMode]} 모드 · 회의 언어 ${LAB_ASR_LANGUAGE_LABEL_MAP[runAsrLanguage]} 로 실행 중`;
+  const describeRunning = () => `${LAB_MODE_LABEL_MAP[runMode]} 모드 · 받아쓰기 ${LAB_ASR_LANGUAGE_LABEL_MAP[runAsrLanguage]}`
+    + ` · 캡션 ${LAB_CAPTION_LANGUAGE_LABEL_MAP[runCaptionLanguage]} 로 실행 중`;
 
-  async function start({ videoPath, mode: requestedMode = null, isEvalPreset = true, asrLanguage = DEFAULT_LAB_ASR_LANGUAGE }) {
+  async function start({
+    videoPath, mode: requestedMode = null, isEvalPreset = true,
+    asrLanguage = DEFAULT_LAB_ASR_LANGUAGE, captionLanguage = DEFAULT_LAB_CAPTION_LANGUAGE,
+  }) {
     if (!IDLE_PHASE_LIST.includes(phase)) return { isOk: false, message: '이미 실행 중이다' };
     if (!videoPath) return { isOk: false, message: '영상 파일을 먼저 고른다' };
     if (!isLabAsrLanguage(asrLanguage)) {
-      return { isOk: false, message: `회의 언어는 ${LAB_ASR_LANGUAGE_LIST.join('·')} 중에서 고른다 (지금 ${asrLanguage})` };
+      return { isOk: false, message: `받아쓰기 언어는 ${LAB_ASR_LANGUAGE_LIST.join('·')} 중에서 고른다 (지금 ${asrLanguage})` };
+    }
+    if (!isLabCaptionLanguage(captionLanguage)) {
+      return { isOk: false, message: `캡션 언어는 ${LAB_CAPTION_LANGUAGE_LIST.join('·')} 중에서 고른다 (지금 ${captionLanguage})` };
     }
     const mode = resolveRunMode({ requestedMode, isEvalPreset });
     runMode = mode;
     runAsrLanguage = asrLanguage;
+    runCaptionLanguage = captionLanguage;
     runDir = null;
     activeRun = null;
     startErrorList = [];
     setPhase(RUN_PHASE_MAP.preparing, '준비 중 — production 화면 설정·영상 불러오기');
     try {
-      await prepareViewer({ isEvalPreset, asrLanguage, mode });
+      await prepareViewer({ isEvalPreset, asrLanguage, captionLanguage, mode });
       // 편집 테두리가 캡처 이미지에 들어가지 않게 시작 전에 끈다.
       const roi = await callForStart({ label: '재생 화면 ROI 편집 끄기', task: () => playerDriver.setRoiEditing({ isEditing: false }) });
       if (roi.error) throw roi.error;
@@ -227,7 +238,7 @@ function createRunController({
       const git = await Promise.resolve().then(() => readGit()).catch(() => null);
       activeRun = recorder.start({
         runId, runDir, videoPath, videoInfo: load.value ?? null, mode, isEvalPreset,
-        featureToggleMap: buildFeatureTogglePreset({ isEvalPreset }), asrLanguage, layout: getLayout(), git,
+        featureToggleMap: buildFeatureTogglePreset({ isEvalPreset }), asrLanguage, captionLanguage, layout: getLayout(), git,
       });
       recorder.setRoiNormRect(roi.value?.roiNormRect ?? null);
       outputWriter = createOutputWriter({ filePath: path.join(runDir, RESULT_FILE_MAP.outputAudio) });
@@ -449,11 +460,13 @@ function createRunController({
       if (state?.phase === 'error') recorder.addError({ code: RUN_ERROR_MAP.outputRecordFailed, message: state.message });
     },
     sessionListener: {
-      // request 는 viewer 가 보낸 세션 시작 요청({ mode, asrLanguage })이다. 회의 언어는 viewer 가 실제로 실은 값이다.
+      // request 는 viewer 가 보낸 세션 시작 요청({ mode, asrLanguage, captionLanguage, … })이다.
+      // 두 언어는 viewer 가 실제로 실은 값이다.
       onStart(result, request = null) {
         if (!result?.isOk) return;
         recorder.markSessionStart({
-          sessionId: result.sessionId, recordPath: result.recordPath, asrLanguage: request?.asrLanguage ?? null,
+          sessionId: result.sessionId, recordPath: result.recordPath,
+          asrLanguage: request?.asrLanguage ?? null, captionLanguage: request?.captionLanguage ?? null,
         });
       },
       // 이번 실행의 세션이 열린 뒤 그 세션이 닫힌 알림만 센다. 지난 세션의 늦은 종료와

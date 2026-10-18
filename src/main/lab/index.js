@@ -20,7 +20,7 @@ const { readAutorunOption } = require('./autorun-option');
 const { registerGpuTunnel } = require('../gpu-tunnel');
 
 // 파이프라인이 세션 시작·종료 결과(세션 ID·기록 파일)를 돌려줄 때 실험 기록에도 넘긴다. 등록보다 먼저 감싼다.
-// 세션 시작은 viewer 가 보낸 요청({ mode, asrLanguage })도 함께 넘겨 이번 실행에 실린 회의 언어를 남긴다.
+// 세션 시작은 viewer 가 보낸 요청({ mode, asrLanguage, captionLanguage, … })도 함께 넘겨 이번 실행에 실린 두 언어를 남긴다.
 let sessionListener = { onStart: () => {}, onEnd: () => {} };
 observeIpcHandleList({
   ipcMain,
@@ -38,7 +38,7 @@ function waitForLoad(webContents) {
 async function startAutorun({ controller, autorun }) {
   await Promise.all([waitForLoad(labWindow.getViewerView().webContents), waitForLoad(labWindow.getPlayerView().webContents)]);
   console.log(`[lab] 자동 실행 — ${autorun.videoPath} (모드 ${autorun.mode || '평가 설정 기본'}, 평가 설정 ${autorun.isEvalPreset ? '켜짐' : '꺼짐'}`
-    + `, 회의 언어 ${autorun.asrLanguage})`);
+    + `, 받아쓰기 언어 ${autorun.asrLanguage}, 캡션 언어 ${autorun.captionLanguage})`);
   const result = await controller.start(autorun);
   if (!result.isOk && controller.getStatus().phase === 'failed' && autorun.isExitOnDone && !result.runDir) {
     console.error(`[lab] 자동 실행 시작 실패: ${result.message}`);
@@ -59,7 +59,7 @@ app.whenReady().then(() => {
   registerSummary({ getViewerView: labWindow.getViewerView, pipelineHandle, meetingArchive: null });
 
   const autorun = readAutorunOption(process.env);
-  // viewer preload 가 첫 줄에서 sendSync 로 기능 토글·회의 언어를 받으므로 창(viewer)을 불러오기 전에 등록한다.
+  // viewer preload 가 첫 줄에서 sendSync 로 기능 토글·캡션 언어를 받으므로 창(viewer)을 불러오기 전에 등록한다.
   const controller = registerLabIpc({
     ipcMain,
     labWindow,
