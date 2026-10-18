@@ -42,9 +42,10 @@ function hasQuantityExpression(text) {
     || RATIO_WORD_PATTERN.test(value) || ENGLISH_QUANTITY_PATTERN.test(value);
 }
 
+// 판단기는 영어 근거의 대소문자를 바꿔 옮기기도 해서("The vials" → "the vials") 비교는 소문자로 한다.
 function stripPhrase({ text, phrase }) {
-  const normalizedPhrase = normalizeText(phrase);
-  return normalizedPhrase ? text.split(normalizedPhrase).join(' ') : text;
+  const normalizedPhrase = normalizeText(phrase).toLowerCase();
+  return normalizedPhrase ? text.toLowerCase().split(normalizedPhrase).join(' ') : text;
 }
 
 function needsEvidence({ type }) {
@@ -56,7 +57,7 @@ function verifyValueEvidence({ type, phrase, evidence, context }) {
   const normalizedEvidence = normalizeText(evidence);
   if (!normalizedEvidence) return { isVerified: false, failReason: EVIDENCE_FAIL_REASON_MAP.empty };
   const contextText = normalizeText([context?.before, context?.utterance, context?.after].filter(Boolean).join(' '));
-  const compact = (text) => text.replace(/\s+/g, '');
+  const compact = (text) => text.replace(/\s+/g, '').toLowerCase();
   // 판단기는 앞 문장과 뒤 문장의 값을 말줄임표로 이어 붙여 옮기곤 한다. 조각마다 문맥에 그대로 있어야 한다.
   const fragmentList = normalizedEvidence.split(ELLIPSIS_PATTERN).map(normalizeText).filter(Boolean);
   const compactContext = compact(contextText);

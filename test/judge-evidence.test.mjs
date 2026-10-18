@@ -55,6 +55,13 @@ test('근거 비교는 띄어쓰기·따옴표 차이를 무시한다', () => {
   assert.equal(result.isVerified, true);
 });
 
+// QA 2-19: 판단기가 영어 근거를 문장 첫 글자 대소문자만 바꿔 옮기면("the vials …" ↔ "The vials …") 맞는 X 가 O 로 뒤집혔다.
+test('근거 비교는 영어 대소문자 차이를 무시하고, 대소문자만 다른 후보 구만 옮긴 근거는 여전히 통과하지 못한다', () => {
+  const context = { before: 'The vials from lot A held 12 milliliters, and lot B held 9 milliliters.', utterance: 'Ship the bigger ones first.', after: '' };
+  assert.equal(verifyValueEvidence({ type: 'adjective_noun', phrase: 'the bigger ones', evidence: 'the vials from lot A held 12 milliliters', context }).isVerified, true);
+  assert.equal(verifyValueEvidence({ type: 'adjective_noun', phrase: 'the bigger ones', evidence: 'The Bigger Ones', context }).failReason, 'phrase_only');
+});
+
 test('수치 후보의 근거는 그 수치가 무엇인지 밝힌 말이어야 한다(숫자만 옮기면 안 된다)', () => {
   const context = { before: '', utterance: '올해 신규 가입자는 3,400명입니다.', after: '목표는 넘겼습니다.' };
   assert.equal(verifyValueEvidence({ type: 'number', phrase: '3,400명', evidence: '올해 신규 가입자는', context }).isVerified, true);
