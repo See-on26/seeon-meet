@@ -1,15 +1,8 @@
 const { resolvePlayedWallMs } = require('../time-map');
 const { isCrossMode } = require('../lab-mode');
 
-// 회의록 AD 분류 표기(viewer 로그 카드와 같다).
-const AID_MAP = {
-  page_transition: 'A1',
-  deixis: 'A2',
-  interpretation: 'A3',
-  visual_description: 'A4',
-  user_command: 'Q',
-  speaker_identity: 'S',
-};
+// AD 분류 표기(aid)는 viewer 카드와 같은 아키텍처 기준(재생 분류) 코드다.
+const { resolveAdCode } = require('../ad-code');
 
 // 페이지 전환 고지는 캡션 source 가 'page-transition' 으로 온다.
 const LEGACY_TRANSITION_SOURCE = 'page-transition';
@@ -90,7 +83,7 @@ function buildAdTimeline({
     adList.push({
       narrationClass: caption.narrationClass,
       type,
-      aid: AID_MAP[type] || null,
+      aid: resolveAdCode({ narrationClass: caption.narrationClass, type }),
       text: caption.text,
       eventMediaMs,
       playedMediaMs,
@@ -144,5 +137,5 @@ function summarizeAdTiming({ adList }) {
 
 module.exports = {
   buildAdTimeline, summarizeAdTiming, computeOverlapSpeechMs, resolveHeardMediaRange, parseAnchorText, resolveRendererDropReason,
-  AID_MAP, DROP_REASON_MAP,
+  DROP_REASON_MAP,
 };

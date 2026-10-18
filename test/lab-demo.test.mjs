@@ -13,12 +13,22 @@ test('시연 카드는 분류 배지·해설 문장·근거(발화와 근거 표
     playback: { ts: 1, text: '빨간 막대는 재구매율 30%', source: 'interpretation', wallMs: 99 },
     caption: { source: 'interpretation', rationale: { utterance: '30%예요', summary: '근거 표현=30%' } },
   }), {
-    id: '1|빨간 막대는 재구매율 30%', type: 'interpretation', badge: '수치 의미', text: '빨간 막대는 재구매율 30%',
+    id: '1|빨간 막대는 재구매율 30%', type: 'interpretation', badge: '발화 기반', text: '빨간 막대는 재구매율 30%',
     rationaleText: '발화 "30%예요" · 근거 표현=30%', wallMs: 99,
   });
   assert.equal(buildDemoCard({ playback: { ts: 2, text: '슬라이드 3', source: 'page-transition' } }).badge, '페이지 전환');
   assert.equal(buildDemoCard({ playback: { ts: 3, text: '답', source: 'user_command' } }).badge, '질문 답');
   assert.equal(buildDemoCard({ playback: { ts: 4, text: 'x', source: null } }).rationaleText, '');
+});
+
+// QA 2-3: 시연 배지도 viewer 카드와 같은 아키텍처 기준(재생 분류) 이름이다.
+test('시연 배지는 재생 분류 기준이라 같은 시각 묘사도 발화 기반·무발화 기반·페이지 전환으로 나뉜다', () => {
+  const badgeOf = (narrationClass, source) => buildDemoCard({ playback: { ts: 1, text: 'x', source, narrationClass }, caption: { source, narrationClass } }).badge;
+  assert.equal(badgeOf('speech_based', 'visual_description'), '발화 기반');
+  assert.equal(badgeOf('silence_based', 'visual_description'), '무발화 기반');
+  assert.equal(badgeOf('page_transition', 'visual_description'), '페이지 전환');
+  assert.equal(badgeOf('speaker_identity', 'speaker_identity'), '화자 식별');
+  assert.equal(badgeOf(undefined, 'visual_description'), '화면 해설', '분류 없는 시각 묘사는 경로를 몰라 기본 배지');
 });
 
 test('키는 자판 위치로 읽는다: G 근거, +/− 글자 크기, C 지우기', () => {

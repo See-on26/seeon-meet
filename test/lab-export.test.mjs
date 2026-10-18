@@ -256,3 +256,23 @@ test('결과 폴더 이름은 시작 시각과 영상 이름이고 공백·금�
   assert.equal(sanitizeVideoName('/v/???.mp4'), 'video');
   assert.equal(sanitizeVideoName(`/v/${'가'.repeat(80)}.mov`).length, 60);
 });
+
+// QA 2-3: 내보내기 aid 는 viewer 카드와 같은 아키텍처 기준(재생 분류) 코드다. 필드 이름은 그대로 둔다.
+test('내보내기 aid 는 재생 분류 기준이라 같은 시각 묘사도 경로에 따라 A1·A3·A4 로 나뉘고, 분류 없는 옛 기록은 해설 유형으로 찾는다', () => {
+  const caseList = [
+    ['speech_based', 'visual_description', 'A3'], ['silence_based', 'visual_description', 'A4'], ['page_transition', 'visual_description', 'A1'],
+    ['speaker_identity', 'speaker_identity', 'A5'], ['user_command', 'user_command', 'Q'], ['speech_based', 'interpretation', 'A3'],
+    [undefined, 'deixis', 'A2'], [undefined, 'visual_description', null],
+  ];
+  const { adList } = buildAdTimeline({
+    captionEventList: caseList.map(([narrationClass, source], index) => caption({ ts: 50000 + index * 1000, text: `해설${index}`, source, narrationClass })),
+    playbackList: caseList.map(([narrationClass], index) => ({
+      ts: 50000 + index * 1000, text: `해설${index}`, narrationClass, mode: 'delayed', wallMs: 11000 + index * 1000, durationMs: 500,
+      playbackVideoTimeMs: 10000 + index * 1000, liveVideoTimeMs: 20000,
+    })),
+    toMediaMs: (wallMs) => wallMs - captureStartWallMs,
+    captureStartWallMs,
+    outputStartWallMs: 1500,
+  });
+  assert.deepEqual(adList.map((ad) => ad.aid), caseList.map(([, , aid]) => aid));
+});
