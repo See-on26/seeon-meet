@@ -39,7 +39,8 @@ test('조각의 언어는 한글과 영어 낱말 수로 정한다', () => {
 });
 
 test('한국어 지시대명사: 관형사+명사·대명사·이렇게만 잡고 주격조사 "이"·1인칭 "저"는 잡지 않는다', { skip: !hasKiwiModel }, () => {
-  assert.deepEqual(detectKorean('이 부분에서 오류가 제일 많이 납니다.'), [[demonstrative, '이 부분']]);
+  // 얼마나 많은지 말하지 않은 "제일 많이 납니다"는 척도 부사 후보로 따로 잡는다(QA 2-14).
+  assert.deepEqual(detectKorean('이 부분에서 오류가 제일 많이 납니다.'), [[demonstrative, '이 부분'], [scale, '제일 많이 납니다']]);
   assert.deepEqual(detectKorean('여기가 복원 실습 장소예요.'), [[demonstrative, '여기']]);
   assert.deepEqual(detectKorean('그렇게 하면 상대가 물러서요.'), [[demonstrative, '그렇게']]);
   assert.deepEqual(detectKorean('같이 표를 보면 저는 괜찮아요.'), []);
@@ -68,7 +69,8 @@ test('한국어 변화·비교·결론: 변화 술어·비교 술어를 부사�
 
 test('한국어 추상적 척도: 크다·넓다·많다 술어만, 비교·변화·관형형은 빼다', { skip: !hasKiwiModel }, () => {
   assert.deepEqual(detectKorean('피해 지역이 꽤 넓죠.'), [[scale, '꽤 넓죠']]);
-  assert.deepEqual(detectKorean('큰 차이는 없어요.'), []);
+  // 관형형 "큰"은 척도가 아니다. "차이는 없어요"는 비교 표지 없는 비교로 잡는다(QA 2-14).
+  assert.deepEqual(detectKorean('큰 차이는 없어요.'), [[change, '차이는 없어요']]);
   assert.deepEqual(detectKorean('부지가 점점 넓어졌어요.'), [[change, '점점 넓어졌어요']]);
 });
 
