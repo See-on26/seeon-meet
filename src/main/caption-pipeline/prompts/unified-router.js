@@ -54,6 +54,9 @@ const CRITERIA_LINE_MAP = {
   [TRIGGER_TYPE_MAP.adjectiveNoun]: [
     `· ${TRIGGER_TYPE_LABEL_MAP[TRIGGER_TYPE_MAP.adjectiveNoun]}(빨간 쪽, 싼 거, 어두운 부분, the red one):`,
     '  어느 것을 말하는지 앞뒤 발화로 알 수 없다.',
+    '  후보마다 그 성질의 값(폭·무게·건수·온도·금액 등)을 짝지어 모두 말했으면 값을 비교해 고를 수 있으므로 X 다.',
+    '  값이 일부 후보에만 있거나 어느 후보의 값인지 짝이 없으면("B와 C 중 하나는 90") O 다.',
+    '  뒤 발화에서 그것의 이름·표시를 대면("2번 시안이요", "I mean model K") 그 성질을 다시 말하지 않았어도 X 다.',
   ],
   [TRIGGER_TYPE_MAP.number]: [
     `· ${TRIGGER_TYPE_LABEL_MAP[TRIGGER_TYPE_MAP.number]}(30%, 12.5톤, 64 people): 무엇의 수치인지 밝히지 않았다.`,
@@ -76,7 +79,9 @@ const CRITERIA_LINE_MAP = {
 // X 판단에 근거 구절을 옮겨 적게 하는 유형. 코드가 그 구절이 발화에 있는지 확인한다(judge-evidence.js).
 const EVIDENCE_LINE_MAP = {
   [TRIGGER_TYPE_MAP.adjectiveNoun]: [
-    `· ${TRIGGER_TYPE_LABEL_MAP[TRIGGER_TYPE_MAP.adjectiveNoun]}: 그 성질(색·크기·값 등)을 가진 것이 무엇인지 밝힌 구절(예: 두 견적의 금액). 후보를 나열하기만 하고 어느 것이 그런지 말하지 않으면 근거가 아니다.`,
+    `· ${TRIGGER_TYPE_LABEL_MAP[TRIGGER_TYPE_MAP.adjectiveNoun]}: 그 성질(색·크기·값 등)을 가진 것이 무엇인지 밝힌 구절(예: 두 견적의 금액), 또는 뒤 발화에서 그것의 이름을 댄 구절(예: "2번 시안이요"). 후보를 나열하기만 하고 어느 것이 그런지 말하지 않으면 근거가 아니다.`,
+    '  뒤 발화의 이름으로 X 를 줄 때도 그 구절을 evidence 에 꼭 옮긴다. evidence 가 비면 X 가 아니다.',
+    '  영어 발화는 영어 원문 그대로 옮긴다(번역하거나 고쳐 쓰지 않는다).',
   ],
   [TRIGGER_TYPE_MAP.number]: [
     `· ${TRIGGER_TYPE_LABEL_MAP[TRIGGER_TYPE_MAP.number]}: 그 수치가 무엇을 세거나 잰 값인지 밝힌 구절. 여럿 가운데 어느 것인지 모르면("세 지점 중 하나") 근거가 아니다.`,
@@ -108,8 +113,13 @@ const REFERENCE_LINE_MAP = {
     '── 지시 대상 원칙 (가장 자주 틀린다) ──',
     '지시 표현이 앞뒤 발화에 언급된 것 **하나**와 이어지면, 그것의 이름·내용을 밝히지 않았어도 X 다.',
     '  예) "워크숍 장소는 어제 정했다고 들었어요. … 거기가 주차가 안 돼서" → X (워크숍 장소)',
-    'O 는 이을 만한 언급이 전혀 없거나, 후보가 여럿인데 어느 것인지 말하지 않을 때만이다.',
+    '앞에서 여럿을 말했어도 그중 **하나에만** 붙은 말이 있고("B만 ~다", "B로 정했다", "B는 이미 승인됐다", "only B has …") 지시 문장이 그 말과 맞으면 지시는 그 하나다 → X. 짚은 것이 둘 이상이면 O 다.',
+    '뒤 발화가 대상을 밝히면 앞에 후보가 여럿이었어도 X 다. 머뭇거림·다른 말 뒤에 나오거나 문장 끝에 덧붙여도 된다("…, 어, 평택 공장이요", "…, um, the north lot").',
+    'O 는 이을 만한 언급이 전혀 없거나, 후보가 여럿인데 앞에서도 뒤에서도 어느 것인지 말하지 않을 때만이다.',
     '  예) 세 지역을 나란히 말한 뒤 "그 지역만큼은" → O',
+    '앞뒤 발화가 하나를 정해 줬는데 "그것을 가리킨다고 명시하지 않았다", "정확한 위치·좌표가 없다"며 O 로 하지 마라. 지시 표현이 그것이라고 다시 말할 필요는 없다.',
+    '  여기·거기·here·there 도 앞뒤 발화가 장소·구역·칸·대목 하나를 정해 주면 X 다.',
+    '  반대로 "둘 중 하나", "자료(화면·핸드아웃)에 있는 곳"처럼 하나로 정하지 못했으면 O 다. 네가 짐작해 고르거나 지시 문장과 맞지 않는 말(장소를 가리키는데 자료·시간대)에 억지로 잇지 마라.',
     '"이렇게"가 앞에서 자기가 한 말을 되짚으면 X 다. 뒤 발화가 곧바로 풀어 주는 지시("방법은 이렇게 하면 돼요. 먼저 …")도 X 다.',
     '"보시는 것처럼", "화면에" 같은 말이 있다는 것만으로 O 로 판단하지 마라. 발화로 대상·값을 알 수 있는지만 본다.',
   ],
@@ -171,6 +181,61 @@ const ALL_FEW_SHOT_LIST = [
   },
   {
     input: {
+      before: '이번 달 고객센터 지표를 정리했습니다.',
+      utterance: '이 부분에서 대기 시간이 제일 길어요.',
+      after: '어, 주말 오후 시간대요. 그래서 상담원을 늘리려고 합니다.',
+      candidateList: [
+        { id: 1, type: TRIGGER_TYPE_MAP.demonstrative, phrase: '이 부분' },
+      ],
+    },
+    output: { judgeList: [{ id: 1, gap: 'X', evidence: '', reason: '뒤 발화에서 주말 오후 시간대라고 밝혔다' }] },
+  },
+  {
+    input: {
+      before: '회의실 후보는 3층 소회의실, 5층 대회의실, 7층 라운지예요. 빔프로젝터가 있는 곳은 5층 대회의실뿐이고요.',
+      utterance: '발표 연습은 거기서 하죠.',
+      after: '예약은 제가 오늘 걸어 둘게요.',
+      candidateList: [
+        { id: 1, type: TRIGGER_TYPE_MAP.demonstrative, phrase: '거기' },
+      ],
+    },
+    output: { judgeList: [{ id: 1, gap: 'X', evidence: '', reason: '세 곳 중 빔프로젝터가 있다고 따로 짚은 5층 대회의실을 가리킨다' }] },
+  },
+  {
+    input: {
+      before: '회의실 후보는 3층 소회의실, 5층 대회의실, 7층 라운지예요. 빔프로젝터는 5층 대회의실과 7층 라운지에 있고요.',
+      utterance: '발표 연습은 거기서 하죠.',
+      after: '예약은 제가 오늘 걸어 둘게요.',
+      candidateList: [
+        { id: 1, type: TRIGGER_TYPE_MAP.demonstrative, phrase: '거기' },
+      ],
+    },
+    output: { judgeList: [{ id: 1, gap: 'O', evidence: '', reason: '빔프로젝터가 있는 곳이 두 곳이라 그중 어느 곳인지 앞뒤 발화에 없다' }] },
+  },
+  {
+    input: {
+      before: 'We looked at three rooms for the book fair: the lobby, the atrium, and the side hall. Only the atrium has outlets along the wall.',
+      utterance: "Let's set up the charging table there.",
+      after: "I'll let the vendor know tomorrow.",
+      candidateList: [
+        { id: 1, type: TRIGGER_TYPE_MAP.demonstrative, phrase: 'there' },
+      ],
+    },
+    output: { judgeList: [{ id: 1, gap: 'X', evidence: '', reason: '세 곳 중 콘센트가 있다고 따로 짚은 atrium 을 가리킨다' }] },
+  },
+  {
+    input: {
+      before: 'The floor plan is in your handout. It shows the lobby, the atrium, and the side hall.',
+      utterance: "Let's set up the charging table there.",
+      after: "I'll let the vendor know tomorrow.",
+      candidateList: [
+        { id: 1, type: TRIGGER_TYPE_MAP.demonstrative, phrase: 'there' },
+      ],
+    },
+    output: { judgeList: [{ id: 1, gap: 'O', evidence: '', reason: '세 곳 중 어디인지 말하지 않았고 핸드아웃은 놓을 자리가 아니다' }] },
+  },
+  {
+    input: {
       before: '두 업체 견적을 받았는데요, 동양물산은 840만 원, 한빛은 1,020만 원입니다.',
       utterance: '저는 싼 쪽으로 가고 싶어요.',
       after: '납기는 둘 다 같거든요.',
@@ -179,6 +244,39 @@ const ALL_FEW_SHOT_LIST = [
       ],
     },
     output: { judgeList: [{ id: 1, gap: 'X', evidence: '동양물산은 840만 원, 한빛은 1,020만 원입니다', reason: '앞 발화의 견적으로 동양물산임을 알 수 있다' }] },
+  },
+  {
+    input: {
+      before: '창고 두 곳을 실측했는데요, 북창고가 1,200제곱미터, 남창고가 900제곱미터예요.',
+      utterance: '넓은 쪽에 신규 물량을 넣죠.',
+      after: '이사는 다음 달 초로 잡겠습니다.',
+      candidateList: [
+        { id: 1, type: TRIGGER_TYPE_MAP.adjectiveNoun, phrase: '넓은 쪽' },
+      ],
+    },
+    output: { judgeList: [{ id: 1, gap: 'X', evidence: '북창고가 1,200제곱미터, 남창고가 900제곱미터예요', reason: '두 창고의 면적을 비교하면 넓은 쪽은 북창고다' }] },
+  },
+  {
+    input: {
+      before: '창고 두 곳을 실측하기로 했는데요, 북창고는 1,200제곱미터가 나왔고 남창고는 아직 못 쟀어요.',
+      utterance: '넓은 쪽에 신규 물량을 넣죠.',
+      after: '이사는 다음 달 초로 잡겠습니다.',
+      candidateList: [
+        { id: 1, type: TRIGGER_TYPE_MAP.adjectiveNoun, phrase: '넓은 쪽' },
+      ],
+    },
+    output: { judgeList: [{ id: 1, gap: 'O', evidence: '', reason: '남창고 면적이 없어 어느 쪽이 넓은지 비교할 수 없다' }] },
+  },
+  {
+    input: {
+      before: '북창고와 남창고를 실측했는데요, 한 곳은 1,200제곱미터, 다른 곳은 900제곱미터가 나왔어요. 어느 쪽이 어느 쪽인지는 표에 있어요.',
+      utterance: '넓은 쪽에 신규 물량을 넣죠.',
+      after: '이사는 다음 달 초로 잡겠습니다.',
+      candidateList: [
+        { id: 1, type: TRIGGER_TYPE_MAP.adjectiveNoun, phrase: '넓은 쪽' },
+      ],
+    },
+    output: { judgeList: [{ id: 1, gap: 'O', evidence: '', reason: '두 면적이 어느 창고의 값인지 짝지어 말하지 않았다' }] },
   },
   {
     input: {
@@ -287,6 +385,28 @@ const ALL_FEW_SHOT_LIST = [
   },
   {
     input: {
+      before: '로고 시안을 두 개 만들었어요.',
+      utterance: '저는 파란 쪽이 마음에 들어요.',
+      after: '어, 2번 시안이요. 다들 어떠세요?',
+      candidateList: [
+        { id: 1, type: TRIGGER_TYPE_MAP.adjectiveNoun, phrase: '파란 쪽' },
+      ],
+    },
+    output: { judgeList: [{ id: 1, gap: 'X', evidence: '2번 시안이요', reason: '뒤 발화에서 파란 쪽이 2번 시안이라고 밝혔다' }] },
+  },
+  {
+    input: {
+      before: '시제품 손잡이를 두 가지로 뽑아 봤어요.',
+      utterance: '양산은 둥근 쪽으로 가죠.',
+      after: '금형 일정도 맞춰야 하니까요. 아, 은색 시제품이요.',
+      candidateList: [
+        { id: 1, type: TRIGGER_TYPE_MAP.adjectiveNoun, phrase: '둥근 쪽' },
+      ],
+    },
+    output: { judgeList: [{ id: 1, gap: 'X', evidence: '은색 시제품이요', reason: '뒤 발화에서 다른 말 뒤에 은색 시제품이라고 밝혔다' }] },
+  },
+  {
+    input: {
       before: '현장 사진 한 장 띄워 두었습니다.',
       utterance: '음, 침수된 구역이 꽤 넓죠.',
       after: '복구에만 몇 달이 걸릴 것 같습니다.',
@@ -328,6 +448,17 @@ const ALL_FEW_SHOT_LIST = [
       ],
     },
     output: { judgeList: [{ id: 1, gap: 'O', evidence: '', reason: '세 포장 중 어느 것인지 말하지 않았다' }] },
+  },
+  {
+    input: {
+      before: 'We tested three packaging options with the night crew.',
+      utterance: 'Honestly, that one held up the best.',
+      after: "So that's what I'd order, um, the kraft paper sleeve.",
+      candidateList: [
+        { id: 1, type: TRIGGER_TYPE_MAP.demonstrative, phrase: 'that one' },
+      ],
+    },
+    output: { judgeList: [{ id: 1, gap: 'X', evidence: '', reason: '뒤 발화에서 kraft paper sleeve 라고 밝혔다' }] },
   },
 ];
 
