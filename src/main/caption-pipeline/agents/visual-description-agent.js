@@ -8,8 +8,20 @@ const {
   buildVisualDescriptionPrompt, DEFAULT_VISUAL_WORD_RANGE_MAP,
 } = require('../prompts/visual-description');
 const { DEFAULT_CAPTION_LANGUAGE } = require('../contracts/caption-language');
+const { NARRATION_ORIGIN_MAP } = require('../contracts/narration-class');
 
 const AGENT_LABEL = '시각묘사';
+
+// 무발화 묘사는 칸이 하나라 모델이 JSON 없이 묘사만 쓰는 일이 있다. 그대로 두면 일반 글 경로가 어절 상한에서 잘라
+// 자료 명사 꼬리가 빠지므로("…가장 적고 양식"), 칸 하나짜리 JSON 으로 감싸 칸 규칙(허용치·자료 명사 지점 자르기)을 똑같이 쓴다.
+const SILENCE_PREFIX_PATTERN = /^\s*(?:이미지 제시|image\s*(?:presented|shown)?)\s*[:,]?\s*/i;
+
+function wrapPlainSilenceContent({ content, origin }) {
+  if (origin !== NARRATION_ORIGIN_MAP.silence || typeof content !== 'string') return content;
+  const trimmed = content.trim();
+  if (!trimmed || trimmed.includes('{') || trimmed.toUpperCase().includes(GROUNDING_NONE_TOKEN)) return content;
+  return JSON.stringify({ description: trimmed.replace(SILENCE_PREFIX_PATTERN, '') });
+}
 
 const VISUAL_DESCRIPTION_TEMPERATURE = 0.3;
 
@@ -35,7 +47,7 @@ function createVisualDescriptionAgent({ config, getCaptionLanguage = () => DEFAU
       }),
     });
     return parseSlotCaption({
-      content,
+      content: wrapPlainSilenceContent({ content, origin }),
       narrationType: NARRATION_TYPE_MAP.visualDescription, subKind, origin,
       maxChars: effectiveMaxChars, maxWordCount: effectiveMaxWordCount, language,
     });
@@ -45,5 +57,5 @@ function createVisualDescriptionAgent({ config, getCaptionLanguage = () => DEFAU
 }
 
 module.exports = {
-  createVisualDescriptionAgent, buildVisualDescriptionPrompt, DEFAULT_VISUAL_WORD_RANGE_MAP,
+  createVisualDescriptionAgent, buildVisualDescriptionPrompt, DEFAULT_VISUAL_WORD_RANGE_MAP, wrapPlainSilenceContent,
 };
