@@ -19,7 +19,7 @@ function createVisualDescriptionAgent({ config, getCaptionLanguage = () => DEFAU
     describedElementList = [], mergedAnchorList = [], origin = null, language = getCaptionLanguage() }) {
     const defaultRange = DEFAULT_VISUAL_WORD_RANGE_MAP[subKind]
       || DEFAULT_VISUAL_WORD_RANGE_MAP[VISUAL_DESCRIPTION_KIND_MAP.reaction];
-    // 렌더러의 어절 예산을 캡션 언어의 단어 수로 바꾼다(영어는 1.5배, 한국어는 그대로). 받지 못한 값은 기본 범위를 바꾼다.
+    // 렌더러의 어절 예산을 캡션 언어의 단어 수로 바꾼다(영어는 상한을 ENGLISH_WORD_SCALE 배로, 한국어는 그대로). 받지 못한 값은 기본 범위를 바꾼다.
     if (language !== DEFAULT_CAPTION_LANGUAGE) {
       ({ minWordCount, maxWordCount } = scaleWordBudget({
         minWordCount: minWordCount ?? defaultRange.minWordCount, maxWordCount: maxWordCount ?? defaultRange.maxWordCount, language,

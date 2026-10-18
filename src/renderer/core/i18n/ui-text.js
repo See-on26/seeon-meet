@@ -232,7 +232,7 @@ export const UI_TEXT_MAP = {
     'capture.pause': 'Pause',
     'capture.resume': 'Resume',
 
-    'hint.meetJoined': 'In a meeting ({count} tiles)',
+    'hint.meetJoined': 'In a meeting (tiles: {count})',
     'hint.joinToStart': 'Join a meeting in the Meet window on the left to start',
 
     'meetReload.button': 'Reload Meet',

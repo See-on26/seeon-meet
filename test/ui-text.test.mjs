@@ -86,7 +86,7 @@ test('번역기는 {이름} 자리표를 값으로 바꾸고, 넘기지 않은 �
   assert.equal(tEn('preset.removed', { slot: 3 }), 'Deleted the Control 3 question');
   assert.equal(tEn('preset.chipAriaLabel', { text: 'Who is talking?', slot: 4 }), 'Who is talking?, shortcut Control 4');
   assert.equal(tEn('preset.chipAriaLabel', { slot: 4 }), '{text}, shortcut Control 4');
-  assert.equal(tEn('hint.meetJoined', { count: 0 }), 'In a meeting (0 tiles)');
+  assert.equal(tEn('hint.meetJoined', { count: 0 }), 'In a meeting (tiles: 0)');
 });
 
 test('모르는 언어·영어에 없는 키는 한국어로, 어디에도 없는 키는 키 그대로 돌려준다', () => {
@@ -368,4 +368,11 @@ test('회의 마이크 확인 실패 안내를 영어로도 읽는다', async ()
   });
   assert.equal(await guard.muteForRecording(), false);
   assert.deepEqual(noticeList, ["Couldn't check the meeting microphone status"]);
+});
+
+// 실험실 확인(10/18): 타일이 하나일 때 "In a meeting (1 tiles)" 로 보였다. 개수와 상관없이 맞는 꼴로 쓴다.
+test('회의 참여 안내의 타일 수는 영어에서도 개수와 상관없이 문법이 맞다', () => {
+  assert.equal(tEn('hint.meetJoined', { count: 1 }), 'In a meeting (tiles: 1)');
+  assert.equal(tEn('hint.meetJoined', { count: 4 }), 'In a meeting (tiles: 4)');
+  assert.equal(tKo('hint.meetJoined', { count: 1 }), '회의 참여 확인 (타일 1개)');
 });

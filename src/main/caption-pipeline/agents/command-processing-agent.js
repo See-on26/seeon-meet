@@ -17,7 +17,7 @@ function createCommandProcessingAgent({ config, getCaptionLanguage = () => DEFAU
   async function generate({ jpegBuffer, command = null, questionText = null, recentTranscript = '', contextText = '',
     qaHistoryText = '', minWordCount = DEFAULT_COMMAND_MIN_WORD_COUNT, maxWordCount = DEFAULT_COMMAND_MAX_WORD_COUNT,
     language = getCaptionLanguage() }) {
-    // 렌더러의 어절 예산을 캡션 언어의 단어 수로 바꾼다(영어는 1.5배, 한국어는 그대로).
+    // 렌더러의 어절 예산을 캡션 언어의 단어 수로 바꾼다(영어는 상한을 ENGLISH_WORD_SCALE 배로, 한국어는 그대로).
     ({ minWordCount, maxWordCount } = scaleWordBudget({ minWordCount, maxWordCount, language }));
     const effectiveMaxChars = computeMaxChars({ maxWordCount, language });
     const prompt = questionText
@@ -31,7 +31,7 @@ function createCommandProcessingAgent({ config, getCaptionLanguage = () => DEFAU
     const content = await requestVlmContent({
       config, jpegBuffer, label: AGENT_LABEL, maxTokens: COMMAND_MAX_TOKENS, prompt,
     });
-    return parseGroundingText(content, effectiveMaxChars, maxWordCount);
+    return parseGroundingText(content, effectiveMaxChars, maxWordCount, language);
   }
 
   return { generate };

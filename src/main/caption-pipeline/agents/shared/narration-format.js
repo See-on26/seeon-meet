@@ -635,5 +635,5 @@ module.exports = {
   cutAtTailNoun,
   normalizeSlotMap, hasEmptyRequiredSlot, hasValuelessSlot, hasValueToken, assembleNarration, countWord, truncateSlot,
   trimToCompletePhrase, hasFinalConsonant, attachJosa, isWithinEnglishSlotLimit, SLOT_OVERAGE_TOLERANCE_WORD_COUNT,
-  scaleWordBudget, ENGLISH_WORD_SCALE,
+  scaleWordBudget, ENGLISH_WORD_SCALE, trimEnglishDanglingTail,
 };

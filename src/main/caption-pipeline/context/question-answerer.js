@@ -65,7 +65,7 @@ const HEARD_SPEAKER_WINDOW_MS = 8000;
 
 function toAnswer({ content, wordBudget, language = DEFAULT_CAPTION_LANGUAGE }) {
   const { text, isGrounded } = parseGroundingText(
-    content, computeMaxChars({ maxWordCount: wordBudget.maxWordCount, language }), wordBudget.maxWordCount,
+    content, computeMaxChars({ maxWordCount: wordBudget.maxWordCount, language }), wordBudget.maxWordCount, language,
   );
   return isGrounded ? { text, isGrounded: true, isImageUsed: false } : notFound({ language });
 }
@@ -196,7 +196,7 @@ function createQuestionAnswerer({ requestText, requestImage, readImage, contextS
   async function answer({ route, slideMajorList = [], questionText, wordBudget, speakerHintNow = null,
     heardWallTs = null, heardVideoTimeMs = null }) {
     const language = getCaptionLanguage();
-    // 렌더러의 어절 예산을 캡션 언어의 단어 수로 바꾼다(영어는 상한 1.5배, 한국어는 그대로).
+    // 렌더러의 어절 예산을 캡션 언어의 단어 수로 바꾼다(영어는 상한을 ENGLISH_WORD_SCALE 배로, 한국어는 그대로).
     if (wordBudget) wordBudget = scaleWordBudget({ ...wordBudget, language });
     if (route === QUESTION_ROUTE_MAP.speakerNow) {
       const speaker = resolveSpeakerNow({ speakerHintNow, heardWallTs });

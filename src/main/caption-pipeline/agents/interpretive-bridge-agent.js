@@ -16,7 +16,7 @@ function createInterpretiveBridgeAgent({ config, getCaptionLanguage = () => DEFA
     subKind = null, minWordCount = DEFAULT_INTERPRETATION_MIN_WORD_COUNT,
     maxWordCount = DEFAULT_INTERPRETATION_MAX_WORD_COUNT,
     describedElementList = [], mergedAnchorList = [], mergedClaimList = [], language = getCaptionLanguage() }) {
-    // 렌더러의 어절 예산을 캡션 언어의 단어 수로 바꾼다(영어는 1.5배, 한국어는 그대로).
+    // 렌더러의 어절 예산을 캡션 언어의 단어 수로 바꾼다(영어는 상한을 ENGLISH_WORD_SCALE 배로, 한국어는 그대로).
     ({ minWordCount, maxWordCount } = scaleWordBudget({ minWordCount, maxWordCount, language }));
     const effectiveMaxChars = computeMaxChars({ maxWordCount, language });
     const content = await requestVlmContent({

@@ -1,4 +1,4 @@
-const { getSlotList, buildSlotInstruction, assembleNarration } = require('./narration-format');
+const { getSlotList, buildSlotInstruction, assembleNarration, trimEnglishDanglingTail } = require('./narration-format');
 const { CAPTION_LANGUAGE_MAP } = require('../../contracts/caption-language');
 
 const GROUNDING_NONE_TOKEN = 'NONE';
@@ -110,6 +110,25 @@ function truncateToWordCount({ text, maxWordCount }) {
   return `${wordList.slice(0, maxWordCount).join(' ')}…`;
 }
 
+// a.m.·p.m.·U.S. 처럼 글자마다 마침표가 붙은 줄임말은 문장 끝으로 보지 않는다.
+const ABBREVIATION_WORD_PATTERN = /^(?:[A-Za-z]\.){2,}$/;
+const SENTENCE_END_WORD_PATTERN = /[.!?]["'”’)]?$/;
+
+// 영어 답이 단어 상한을 넘으면 상한 안 뒤쪽 절반의 마지막 문장 끝에서 끊는다. 없으면 끊긴 구 끝(접속사·관사·전치사)을 떼고 "…"를 붙인다.
+function truncateEnglishAnswer({ text, maxWordCount }) {
+  if (!Number.isFinite(maxWordCount) || maxWordCount <= 0) return text;
+  const wordList = text.split(/\s+/).filter(Boolean);
+  if (wordList.length <= maxWordCount) return text;
+  const keptList = wordList.slice(0, maxWordCount);
+  for (let index = keptList.length - 1; index >= Math.floor(keptList.length / 2); index -= 1) {
+    const word = keptList[index];
+    if (SENTENCE_END_WORD_PATTERN.test(word) && !ABBREVIATION_WORD_PATTERN.test(word)) {
+      return keptList.slice(0, index + 1).join(' ');
+    }
+  }
+  return `${trimEnglishDanglingTail({ text: keptList.join(' ') })}…`;
+}
+
 function salvageSlotMap({ text }) {
   const slotMap = {};
   for (const [, key, value] of text.matchAll(SLOT_PAIR_PATTERN)) {
@@ -126,7 +145,8 @@ function isSlotJsonAttempt({ text }) {
 // 대문자 토큰이 끝에 홀로 있을 때만 본다(문장 가운데 NONE·영어 소문자 none 은 답으로 둔다).
 const TRAILING_NONE_PATTERN = new RegExp(`(?:^|[\\s.,!?。])["'“”‘’]?${GROUNDING_NONE_TOKEN}["'“”‘’]?[.。!]?\\s*$`);
 
-function parseGroundingText(content, maxChars = DEFAULT_GROUNDING_MAX_CHARS, maxWordCount = null) {
+function parseGroundingText(content, maxChars = DEFAULT_GROUNDING_MAX_CHARS, maxWordCount = null,
+  language = CAPTION_LANGUAGE_MAP.ko) {
   if (typeof content !== 'string') return { text: '', isGrounded: false };
 
   const cleaned = content
@@ -138,7 +158,8 @@ function parseGroundingText(content, maxChars = DEFAULT_GROUNDING_MAX_CHARS, max
     return { text: '', isGrounded: false };
   }
 
-  const wordTruncated = truncateToWordCount({ text: cleaned, maxWordCount });
+  const wordTruncated = language === CAPTION_LANGUAGE_MAP.en
+    ? truncateEnglishAnswer({ text: cleaned, maxWordCount }) : truncateToWordCount({ text: cleaned, maxWordCount });
   const text = wordTruncated.length > maxChars
     ? `${wordTruncated.slice(0, maxChars).trim()}…` : wordTruncated;
   return { text, isGrounded: true };
@@ -179,7 +200,7 @@ function parseSlotCaptionContent({ content, narrationType, subKind, origin = nul
     if (assembled) return { ...assembled, isGrounded: true };
     return buildRejection({ rejectKind: REJECT_KIND_MAP.format, content });
   }
-  return { ...parseGroundingText(cleaned, maxChars, maxWordCount), slotMap: null };
+  return { ...parseGroundingText(cleaned, maxChars, maxWordCount, language), slotMap: null };
 }
 
 module.exports = {

@@ -120,7 +120,7 @@ function createPageTransitionAgent({ config, getCaptionLanguage = () => DEFAULT_
   }
 
   async function generate({ jpegBuffer, ts, minWordCount, maxWordCount, language = getCaptionLanguage() }) {
-    // 렌더러의 어절 예산을 캡션 언어의 단어 수로 바꾼다(영어는 1.5배, 한국어는 그대로). 받지 못한 값은 기본 범위를 바꾼다.
+    // 렌더러의 어절 예산을 캡션 언어의 단어 수로 바꾼다(영어는 상한을 ENGLISH_WORD_SCALE 배로, 한국어는 그대로). 받지 못한 값은 기본 범위를 바꾼다.
     if (language !== DEFAULT_CAPTION_LANGUAGE) {
       ({ minWordCount, maxWordCount } = scaleWordBudget({
         minWordCount: minWordCount ?? DEFAULT_TRANSITION_MIN_WORD_COUNT, maxWordCount: maxWordCount ?? DEFAULT_TRANSITION_MAX_WORD_COUNT, language,

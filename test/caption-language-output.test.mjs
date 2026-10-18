@@ -1,5 +1,6 @@
 import { test, afterEach } from 'node:test';
 import assert from 'node:assert/strict';
+import fs from 'node:fs';
 import { createRequire } from 'node:module';
 
 const require = createRequire(import.meta.url);
@@ -23,7 +24,7 @@ const {
   getSlotList, buildSlotInstruction, normalizeSlotMap, assembleNarration, scaleWordBudget, ENGLISH_WORD_SCALE,
 } = require('../src/main/caption-pipeline/agents/shared/narration-format.js');
 const {
-  buildSlotOutputInstruction, computeMaxChars, parseSlotCaption,
+  buildSlotOutputInstruction, computeMaxChars, parseSlotCaption, parseGroundingText,
 } = require('../src/main/caption-pipeline/agents/shared/caption-parser.js');
 const { parsePageTransitionText, createPageTransitionAgent } = require('../src/main/caption-pipeline/agents/page-transition-agent.js');
 const {
@@ -488,7 +489,7 @@ test('질문 답: 그림이 없는 화면에 그림 질문이면 영어 안내�
   assert.equal(result.text, 'No picture of that screen was saved');
 });
 
-test('질문 답: 영어 캡션이면 어절 예산 상한을 1.5배로 바꿔 지시문·자르기에 쓴다', async () => {
+test('질문 답: 영어 캡션이면 어절 예산 상한을 1.9배로 바꿔 지시문·자르기에 쓴다', async () => {
   const store = createContextStore();
   store.start({ sessionId: 's', startedAt: 0 });
   store.applyRecord({ kind: 'slide_mark', ts: 1000, slideLabel: '3', frameKind: 'base', filePath: '' });
@@ -512,4 +513,49 @@ test('영어 조립: 상한에서 잘린 칸은 뒤쪽 절반의 마지막 쉼�
     + ' customer satisfaction, and reduced complaint counts across every regional support center this quarter';
   const slotMap = normalizeSlotMap({ slotList, rawSlotMap: { description }, ...en });
   assert.equal(slotMap.description, "A table comparing last year and this year's response quality metrics, showing improved first response time, customer satisfaction");
+});
+
+// 실험실 확인(10/18): 영어 화면 요약 답이 단어 상한에서 잘려 "…, 82 at 5 PM, and…" 처럼 접속사로 끝나 읽혔다.
+test('영어 답 자르기: 상한 안 뒤쪽 절반에 문장 끝이 있으면 그 문장까지만 둔다', () => {
+  const content = 'Six time slots are shown. Morning has the most inquiries at 96 cases. Evening drops to 29 cases, the lowest of the day.';
+  assert.deepEqual(parseGroundingText(content, 500, 16, 'en'), {
+    text: 'Six time slots are shown. Morning has the most inquiries at 96 cases.', isGrounded: true,
+  });
+});
+
+test('영어 답 자르기: 문장 끝이 앞쪽에만 있으면 마지막 쉼표에서 끊고 끊긴 끝을 뗀 뒤 "…"를 붙인다', () => {
+  const content = 'The chart shows six slots. The first bar shows 96 cases, while the gray bars show 71 at 11 AM, 38 at 1 PM,'
+    + ' 64 at 3 PM, 82 at 5 PM, and 29 at 7 PM.';
+  assert.equal(parseGroundingText(content, 500, 30, 'en').text,
+    'The chart shows six slots. The first bar shows 96 cases, while the gray bars show 71 at 11 AM, 38 at 1 PM, 64 at 3 PM…');
+});
+
+test('영어 답 자르기: a.m.·p.m. 같은 줄임말의 마침표는 문장 끝으로 보지 않는다', () => {
+  const content = 'Inquiries peak at 9 a.m. and fall to 29 by 7 p.m. in the evening, then rise again slightly.';
+  assert.equal(parseGroundingText(content, 500, 12, 'en').text, 'Inquiries peak at 9 a.m. and fall to 29 by 7 p.m.…');
+});
+
+test('답 자르기: 한국어(기본)는 지금처럼 어절 상한에서 자르고 "…"를 붙인다', () => {
+  assert.equal(parseGroundingText('가 나 다. 라 마', 500, 4).text, '가 나 다. 라…');
+  assert.equal(parseGroundingText('가 나 다. 라 마', 500, 4, 'ko').text, '가 나 다. 라…');
+});
+
+test('영어 답 자르기는 질문 답·커맨드 답·칸 해설의 일반 문장 경로가 모두 캡션 언어를 넘겨 쓴다', async () => {
+  const store = createContextStore();
+  store.start({ sessionId: 's', startedAt: 0 });
+  store.applyRecord({ kind: 'slide_mark', ts: 1000, slideLabel: '3', frameKind: 'base', filePath: '' });
+  store.applyRecord({ kind: 'page_transition', ts: 1100, slideLabel: '3', pageTopic: 'Salary', description: 'salary table', displayNumber: 1 });
+  const answerer = createQuestionAnswerer({
+    contextStore: store, getCaptionLanguage: () => 'en',
+    requestText: async () => 'The B grade salary is 12.5 million won. The C grade salary is 11 million won, and the D grade is lower.',
+    requestImage: async () => 'NONE', readImage: async () => null,
+  });
+  const result = await answerer.answer({
+    route: QUESTION_ROUTE_MAP.pastSlide, slideMajorList: [3], questionText: 'grades?', wordBudget: { minWordCount: 3, maxWordCount: 9 },
+  });
+  assert.equal(result.text, 'The B grade salary is 12.5 million won. The C grade salary is 11 million won…', '상한 9어절 → 영어 18단어');
+  const commandSource = fs.readFileSync(new URL('../src/main/caption-pipeline/agents/command-processing-agent.js', import.meta.url), 'utf8');
+  assert.match(commandSource, /parseGroundingText\(content, effectiveMaxChars, maxWordCount, language\)/);
+  const parserSource = fs.readFileSync(new URL('../src/main/caption-pipeline/agents/shared/caption-parser.js', import.meta.url), 'utf8');
+  assert.match(parserSource, /parseGroundingText\(cleaned, maxChars, maxWordCount, language\)/);
 });
