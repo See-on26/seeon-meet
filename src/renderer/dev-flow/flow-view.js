@@ -5,14 +5,15 @@ export const MAX_RENDERED_ITEM_COUNT = 400;
 export const SUMMARY_MAX_LENGTH = 90;
 const BOTTOM_STICK_PX = 24;
 
+// main dev-flow/flow-builder.js 의 FLOW_TYPE_LABEL_MAP 과 같은 이름이다(test/dev-flow.test.mjs).
 export const FLOW_TYPE_OPTION_LIST = [
   { key: 'page_transition', label: '페이지 전환' },
   { key: 'deixis', label: '지시 대상' },
   { key: 'interpretation', label: '발화 기반(수치·변화)' },
-  { key: 'visual_description', label: '발화 기반(척도·시각)' },
-  { key: 'silence', label: '무발화' },
+  { key: 'visual_description', label: '발화 기반(척도)' },
+  { key: 'silence', label: '무발화 기반' },
   { key: 'user_command', label: '질문 답' },
-  { key: 'speaker_identity', label: '화자' },
+  { key: 'speaker_identity', label: '화자 식별' },
   { key: 'unknown', label: '기타' },
 ];
 

@@ -21,10 +21,10 @@ const FLOW_TYPE_LABEL_MAP = {
   [FLOW_TYPE_MAP.pageTransition]: '페이지 전환',
   [FLOW_TYPE_MAP.deixis]: '지시 대상',
   [FLOW_TYPE_MAP.interpretation]: '발화 기반(수치·변화)',
-  [FLOW_TYPE_MAP.visualDescription]: '발화 기반(척도·시각)',
-  [FLOW_TYPE_MAP.silence]: '무발화',
+  [FLOW_TYPE_MAP.visualDescription]: '발화 기반(척도)',
+  [FLOW_TYPE_MAP.silence]: '무발화 기반',
   [FLOW_TYPE_MAP.userCommand]: '질문 답',
-  [FLOW_TYPE_MAP.speakerIdentity]: '화자',
+  [FLOW_TYPE_MAP.speakerIdentity]: '화자 식별',
   [FLOW_TYPE_MAP.unknown]: '기타',
 };
 
@@ -39,6 +39,8 @@ const AGENT_LABEL_MAP = {
   [FLOW_TYPE_MAP.speakerIdentity]: '화자 식별 에이전트',
   [FLOW_TYPE_MAP.unknown]: 'VLM',
 };
+// 사진 단독 화면의 묘사는 시각 묘사 에이전트가 만들지만 재생 분류가 페이지 전환이라 페이지 전환 설명 에이전트에 딸린 것으로 보인다.
+const PHOTO_DESCRIPTION_AGENT_LABEL = '페이지 전환 설명 에이전트(사진 묘사)';
 
 const ROUTER_JUDGE_LABEL = '경량 LLM 판단(통합 라우터)';
 const CANDIDATE_JUDGE_LABEL = '경량 LLM 판단(후보마다 O/X)';
@@ -380,7 +382,14 @@ const createStep = ({ entry, stepKind, label, summary = null, ...extra }) => ({
 });
 
 // 한 흐름 안에서도 기록마다 유형이 다를 수 있다(전환 고지에 딸린 사진 묘사). 기록의 유형이 있으면 그 에이전트 이름을 쓴다.
-function buildAgentStep({ entry, typeKey, label = AGENT_LABEL_MAP[entry.narrationType] || AGENT_LABEL_MAP[typeKey] }) {
+function resolveAgentLabel({ entry, typeKey }) {
+  if (typeKey === FLOW_TYPE_MAP.pageTransition && entry.narrationType === FLOW_TYPE_MAP.visualDescription) {
+    return PHOTO_DESCRIPTION_AGENT_LABEL;
+  }
+  return AGENT_LABEL_MAP[entry.narrationType] || AGENT_LABEL_MAP[typeKey];
+}
+
+function buildAgentStep({ entry, typeKey, label = resolveAgentLabel({ entry, typeKey }) }) {
   const text = readEntryText(entry);
   const elapsedMs = readElapsedMs(entry.detail);
   const summary = text ? `"${text}"${Number.isFinite(elapsedMs) ? ` · ${elapsedMs}ms` : ''}` : entry.detail;
