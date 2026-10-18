@@ -23,7 +23,12 @@ SPEAKER_BY_LANGUAGE_MAP = {"KR": "KR", "EN": "EN-US"}
 DEFAULT_LANGUAGE = "KR"
 tts_by_language_map = {DEFAULT_LANGUAGE: TTS(language=DEFAULT_LANGUAGE, device="cuda")}
 try:
-    tts_by_language_map["EN"] = TTS(language="EN", device="cuda")
+    english_model = TTS(language="EN", device="cuda")
+    # 영어 모델은 첫 합성 때 언어 모델(BERT)을 불러와 6초 넘게 걸린다(10/18 실측). 기동할 때 한 번 데워 둔다.
+    warmup_path = tempfile.mktemp(suffix=".wav")
+    english_model.tts_to_file("Ready.", english_model.hps.data.spk2id[SPEAKER_BY_LANGUAGE_MAP["EN"]], warmup_path, speed=2.0)
+    os.unlink(warmup_path)
+    tts_by_language_map["EN"] = english_model
 except Exception as exc:  # noqa: BLE001 — 영어 모델 실패가 한국어 TTS 기동을 막지 않게 한다
     print(f"[tts] 영어 모델을 띄우지 못해 영어 요청도 한국어 모델로 읽는다: {exc}", flush=True)
 
