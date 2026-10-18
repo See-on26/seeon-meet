@@ -76,3 +76,84 @@ test('영어 단순 수치: 목록 밖 단위(rpm·kWh), 하이픈 단위(newton
 test('영어 형용사 + 지시 명사: 하이픈 형용사(the longer-lasting one)', () => {
   assert.deepEqual(detectEnglish({ text: "I'd assign the entrance crew the longer-lasting one.", type: adjectiveNoun }), ['the longer-lasting one']);
 });
+
+const { scale } = TRIGGER_TYPE_MAP;
+
+test('한국어 추상적 척도: 목록 밖 척도 형용사(빠르다·얕다·무겁다 등)와 "~은 편이다"', { skip: !hasKiwiModel }, () => {
+  assert.deepEqual(detectKorean({ text: '동쪽 배수로가 다소 얕네요.', type: scale }), ['다소 얕네요']);
+  assert.deepEqual(detectKorean({ text: '새 충전기는 충전 속도가 아주 빠릅니다.', type: scale }), ['아주 빠릅니다']);
+  assert.deepEqual(detectKorean({ text: '견적이 상당히 비쌉니다.', type: scale }), ['상당히 비쌉니다']);
+  assert.deepEqual(detectKorean({ text: '다리 아래는 수심이 깊은 편입니다.', type: scale }), ['깊은 편입니다']);
+});
+
+test('한국어 추상적 척도: 척도 부사(많이·대거·두껍게·넉넉하게) + 동사', { skip: !hasKiwiModel }, () => {
+  assert.deepEqual(detectKorean({ text: '올해는 신호 장비를 꽤 많이 설치했습니다.', type: scale }), ['꽤 많이 설치했습니다']);
+  assert.deepEqual(detectKorean({ text: '주민분들이 대거 모였습니다.', type: scale }), ['대거 모였습니다']);
+  assert.deepEqual(detectKorean({ text: '모래층이 두껍게 쌓였습니다.', type: scale }), ['두껍게 쌓였습니다']);
+  assert.deepEqual(detectKorean({ text: '검정색 롱패딩이 넉넉하게 남아 있어요.', type: scale }), ['넉넉하게 남아']);
+});
+
+test('한국어 추상적 척도: 수 없는 비율 말(상당수가·대부분이·절반 이상이·거의 다·몇몇 조만)', { skip: !hasKiwiModel }, () => {
+  assert.deepEqual(detectKorean({ text: '응답자 상당수가 재택 병행을 원하고 있어요.', type: scale }), ['상당수가']);
+  assert.deepEqual(detectKorean({ text: '신규 가맹점 대부분이 수도권에 있습니다.', type: scale }), ['대부분이']);
+  assert.deepEqual(detectKorean({ text: '주문 절반 이상이 앱에서 들어왔어요.', type: scale }), ['절반 이상이']);
+  assert.deepEqual(detectKorean({ text: '챙겨 간 샘플이 거의 다 나갔어요.', type: scale }), ['거의 다']);
+  assert.deepEqual(detectKorean({ text: '몇몇 조만 기한 안에 냈어요.', type: scale }), ['몇몇 조만']);
+});
+
+test('한국어 추상적 척도: 계획·의지, 명사를 꾸미는 말, 남의 말 옮기기, 시간처럼 볼 수 없는 정도는 후보가 아니다', { skip: !hasKiwiModel }, () => {
+  for (const text of [
+    '마지막 인사는 길게 하지 않겠습니다.',
+    '크게 걱정하실 필요는 없습니다.',
+    '수학 문턱이 꽤 높다고들 하죠.',
+    '교재 예제 일부는 건너뛰겠습니다.',
+    '대부분 아시겠지만 수거함은 카드로 엽니다.',
+    '자료 이관에 시간이 꽤 오래 걸렸습니다.',
+    '말씀하신 내용에 상당 부분 공감합니다.',
+  ]) {
+    assert.deepEqual(detectKorean({ text, type: scale }), [], text);
+  }
+});
+
+test('한국어 변화·비교·결론: 최상·극값(사상 최저·최하위·최상위권·바닥을 찍다·기록을 갈아치우다·가장 + 술어)', { skip: !hasKiwiModel }, () => {
+  assert.deepEqual(detectKorean({ text: '광고 전환율이 사상 최저를 기록했습니다.', type: change }), ['사상 최저를 기록했습니다']);
+  assert.deepEqual(detectKorean({ text: '올해 평가에서 우리 구가 최하위를 기록했습니다.', type: change }), ['최하위를 기록했습니다']);
+  assert.deepEqual(detectKorean({ text: '나물 반찬 세트가 재구매율 최상위권이에요.', type: change }), ['최상위권이에요']);
+  assert.deepEqual(detectKorean({ text: '연휴 주간에 활성 사용자가 바닥을 찍었습니다.', type: change }), ['바닥을 찍었습니다']);
+  assert.deepEqual(detectKorean({ text: '올여름 낮 기온이 기록을 갈아치웠습니다.', type: change }), ['기록을 갈아치웠습니다']);
+  assert.deepEqual(detectKorean({ text: '설치 이후 진동 폭이 역대 최대였습니다.', type: change }), ['역대 최대였습니다']);
+  assert.deepEqual(detectKorean({ text: '토요일 오후에 열람실이 가장 붐볐습니다.', type: change }), ['가장 붐볐습니다']);
+});
+
+test('한국어 변화·비교·결론: 비교 표지 없는 비교(밑돌다·비슷하다·우세하다·박빙이다·동률을 이루다·차이가 없다)', { skip: !hasKiwiModel }, () => {
+  assert.deepEqual(detectKorean({ text: '올해는 합격률이 전국 평균을 밑돌았어요.', type: change }), ['밑돌았어요']);
+  assert.deepEqual(detectKorean({ text: '후보지끼리 공사비는 거의 비슷합니다.', type: change }), ['거의 비슷합니다']);
+  assert.deepEqual(detectKorean({ text: '채널 가운데 자사몰이 우세합니다.', type: change }), ['우세합니다']);
+  assert.deepEqual(detectKorean({ text: '두 지점 매출이 박빙이에요.', type: change }), ['박빙이에요']);
+  assert.deepEqual(detectKorean({ text: '교통 분야에서 북구와 남구가 동률을 이뤘습니다.', type: change }), ['동률을 이뤘습니다']);
+  assert.deepEqual(detectKorean({ text: '비료를 줘도 키는 차이가 없었어요.', type: change }), ['차이가 없었어요']);
+});
+
+test('한국어 변화·비교·결론: 추세 말(오름세·내림세·증가 추세)과 멈춤(주춤·정체·제자리걸음), 흑자로 돌아서다', { skip: !hasKiwiModel }, () => {
+  assert.deepEqual(detectKorean({ text: '이번 달 연못 수온이 오름세를 보였어요.', type: change }), ['오름세를 보였어요']);
+  assert.deepEqual(detectKorean({ text: '금형 교체 후 불량률이 내림세로 접어들었어요.', type: change }), ['내림세로 접어들었어요']);
+  assert.deepEqual(detectKorean({ text: '매출이 증가 추세를 보이고 있습니다.', type: change }), ['증가 추세를 보이고']);
+  assert.deepEqual(detectKorean({ text: '이번 달 들어 신규 가입이 주춤했어요.', type: change }), ['주춤했어요']);
+  assert.deepEqual(detectKorean({ text: '두 분기 연속 판매가 정체됐습니다.', type: change }), ['정체됐습니다']);
+  assert.deepEqual(detectKorean({ text: '반응 시간을 바꿔도 수율은 제자리걸음이에요.', type: change }), ['제자리걸음이에요']);
+  assert.deepEqual(detectKorean({ text: '올해 운영 수지가 흑자로 돌아섰습니다.', type: change }), ['흑자로 돌아섰습니다']);
+});
+
+test('한국어 변화·비교·결론: 명사를 꾸미는 비교·극값, 목적의 "-도록", 계획, 기록 확인, 흐름 끊김은 후보가 아니다', { skip: !hasKiwiModel }, () => {
+  for (const text of [
+    '구민 여러분의 압도적인 성원에 감사드립니다.',
+    '비슷한 맥락에서 창업 공간도 마련했습니다.',
+    '온라인 참석자도 현장과 차이가 없도록 준비했습니다.',
+    '진행 방식은 최소한의 원칙만 말씀드릴게요.',
+    '올해도 최고의 결과를 내겠습니다.',
+    '지난 기록을 확인했습니다.',
+    '제 전화 때문에 흐름이 끊겼네요.',
+  ]) {
+    assert.deepEqual(detectKorean({ text, type: change }), [], text);
+  }
+});

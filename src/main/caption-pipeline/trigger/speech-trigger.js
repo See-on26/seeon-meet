@@ -114,6 +114,54 @@ const ADDITIVE_COUNT_FORM_SET = new Set(['번', '개', '명', '대', '곳', '하
 const CONCLUSION_MARKER_SET = new Set(['결국', '따라서', '결과적으로', '결론적으로', '최종적으로']);
 const SCALE_ADJ_SET = new Set(['크', '작', '길', '짧', '넓', '좁', '많', '적']);
 
+// ── 탐지 평가 DB 어휘 목록 밖 표현 ──
+// 화면 속 대상의 정도를 말하는 척도 형용사(DB 목록 밖).
+const MEASURABLE_ADJ_SET = new Set([
+  '높', '낮', '빠르', '느리', '무겁', '가볍', '두껍', '얇', '깊', '얕', '굵', '가늘', '밝', '어둡', '멀', '가깝',
+  '비싸', '드물', '흔하', '심하', '촘촘하', '빽빽하', '넉넉하',
+]);
+// 어근 + 하다로 나뉘어 분석되는 척도 형용사("넉넉/XR 하/XSA").
+const SCALE_ROOT_SET = new Set(['넉넉', '촘촘', '빽빽', '흔', '심']);
+// 양·정도를 말하는 부사. "오래"처럼 시간만 말하는 부사는 화면으로 볼 수 없어 넣지 않는다.
+const QUANTITY_ADVERB_SET = new Set([
+  '많이', '대거', '잔뜩', '쑥쑥', '멀리', '가득', '수북이', '듬뿍', '온통', '왕창', '빼곡히', '촘촘히', '넉넉히',
+]);
+// 수 없는 비율·양 말. 조사가 붙거나("대부분이") 비율 꼬리말("절반 이상")이 이어질 때만 본다.
+const PROPORTION_NOUN_SET = new Set(['대부분', '대다수', '상당수', '상당량', '절반', '과반', '과반수', '태반', '소수', '극소수', '다수', '일부']);
+const PROPORTION_ADVERB_SET = new Set(['대개', '대체로', '대부분']);
+const PROPORTION_TAIL_SET = new Set(['이상', '이하', '가까이', '정도', '넘게', '남짓']);
+const NEARLY_ALL_FORM_SET = new Set(['다', '모두', '전부']);
+// 남의 말을 옮기는 연결 어미("꽤 높다고들 하죠").
+const QUOTATIVE_ENDING_SET = new Set(['다고', '라고', '냐고', '자고']);
+// 최상·극값 명사. 접두사가 갈라져 나오면(최/XPN 하위/NNG) 붙여서 본다.
+const SUPERLATIVE_NOUN_SET = new Set([
+  '최고', '최저', '최대', '최소', '최다', '최악', '최상', '최고치', '최저치', '최대치', '최소치', '최댓값', '최솟값',
+  '최상위', '최하위', '최상위권', '최하위권', '최고점', '최저점', '정점', '저점', '고점', '꼴찌', '으뜸', '신기록',
+]);
+const SUPERLATIVE_PREFIX_WORD_SET = new Set(['역대', '사상', '역사상', '연중', '업계', '국내', '세계', '전국']);
+const SUPERLATIVE_ADVERB_SET = new Set(['가장', '제일']);
+// 비교 표지 없이 비교하는 동사·형용사, 그리고 하다·이다가 붙는 비교 명사.
+const COMPARISON_VERB_SET = new Set(['밑돌', '웃돌', '맞먹', '뒤처지', '따라잡', '버금가', '못지않', '비슷하', '엇비슷하']);
+const COMPARISON_NOUN_SET = new Set([
+  '능가', '육박', '상회', '하회', '필적', '압도', '동률', '동점', '비등', '대등', '우세', '열세', '박빙', '백중세', '비슷', '엇비슷',
+]);
+// 추세·멈춤 명사. "흐름"은 말의 흐름("흐름이 끊겼네요")으로도 써서 넣지 않는다.
+const TREND_NOUN_SET = new Set(['오름세', '내림세', '상승세', '하락세', '증가세', '감소세', '회복세', '둔화세', '강세', '약세', '반등세', '보합세']);
+const STAGNATION_NOUN_SET = new Set(['주춤', '정체', '횡보', '답보', '제자리걸음']);
+const DIFFERENCE_PREDICATE_SET = new Set(['없', '나', '크', '작', '줄', '좁', '벌어지', '좁혀지', '줄어들']);
+// 정해진 술어와 함께 쓸 때만 변화로 보는 명사: 바닥을 찍다, 기록을 갈아치우다, 차이가 없다, 흑자로 돌아서다, 동률을 이루다.
+const ANCHOR_PREDICATE_MAP = new Map([
+  ['바닥', new Set(['찍'])],
+  ['기록', new Set(['갈', '경신', '갱신', '깨'])],
+  ['차이', DIFFERENCE_PREDICATE_SET],
+  ['격차', DIFFERENCE_PREDICATE_SET],
+  ['흑자', new Set(['돌아서'])],
+  ['적자', new Set(['돌아서'])],
+]);
+const COMPARISON_NOUN_PREDICATE_SET = new Set(['이루', '보이', '기록']);
+// 목적·의도를 나타내는 연결 어미("차이가 없도록 준비했습니다").
+const PURPOSE_ENDING_SET = new Set(['도록', '려고', '으려고', '고자']);
+
 function buildWordIndexList(text) {
   const wordIndexList = new Array(text.length).fill(-1);
   let wordIndex = -1;
@@ -339,6 +387,18 @@ function findChangeStemIndex({ context, index }) {
     && (ADJ_TO_CHANGE_VERB_PATTERN.test(token.form) || CONTRACTED_ADJ_CHANGE_VERB_SET.has(token.form))
     && tokenList[index + 1]?.tag !== 'ETM') return index;
   if (token.tag === 'VV' && token.form === '미치' && tokenList[index - 1]?.form === '못') return index;
+  // 비교 표지 없이 비교하는 술어("밑돌았어요", "거의 비슷합니다").
+  if ((PREDICATE_VERB_TAG_SET.has(token.tag) || PREDICATE_ADJ_TAG_SET.has(token.tag)) && COMPARISON_VERB_SET.has(token.form)) {
+    return tokenList[index + 1]?.tag === 'ETM' ? -1 : index;
+  }
+  // 비교·멈춤 명사 + 하다·되다·이다("우세합니다", "능가했어요", "주춤했어요", "박빙이에요", "제자리걸음이에요").
+  if (['XSV', 'XSA', 'VCP'].includes(token.tag) && index > 0 && tokenList[index + 1]?.tag !== 'ETM'
+    && ['NNG', 'XR', 'MAG'].includes(tokenList[index - 1].tag)
+    && (COMPARISON_NOUN_SET.has(tokenList[index - 1].form) || STAGNATION_NOUN_SET.has(tokenList[index - 1].form))) return index - 1;
+  // 가장·제일 + 술어("가장 붐볐습니다").
+  const superlativeStemIndex = readPredicateStemIndex({ tokenList, index });
+  if (superlativeStemIndex >= 0 && SUPERLATIVE_ADVERB_SET.has(tokenList[superlativeStemIndex - 1]?.form)
+    && tokenList[superlativeStemIndex - 1].tag === 'MAG') return superlativeStemIndex;
   if (token.tag === 'XSV' && index > 0 && CHANGE_NOUN_SET.has(tokenList[index - 1].form)) return index - 1;
   // 형용사 + 어 + 지다: "좋아졌다", "높아졌다".
   if (token.tag === 'VX' && token.form === '지' && tokenList[index - 1]?.tag === 'EC'
@@ -421,18 +481,198 @@ function attachConclusionMarker({ context, candidate }) {
 }
 
 // 추상적 척도: 크다·작다·길다·짧다·넓다·좁다·많다·적다가 술어로 쓰인 것. 비교("보다 많다")는 변화·비교로 넘긴다.
+// 척도 형용사의 줄기 위치. DB 목록(크다·많다 등)은 isListed 로 알린다. 아니면 -1.
+function readScaleStem({ tokenList, index }) {
+  const token = tokenList[index];
+  if (PREDICATE_ADJ_TAG_SET.has(token.tag) && SCALE_ADJ_SET.has(token.form)) return { stemIndex: index, isListed: true };
+  if (PREDICATE_ADJ_TAG_SET.has(token.tag) && MEASURABLE_ADJ_SET.has(token.form)) return { stemIndex: index, isListed: false };
+  const previous = tokenList[index - 1];
+  if (token.tag === 'XSA' && previous && ['XR', 'MAG', 'NNG'].includes(previous.tag) && SCALE_ROOT_SET.has(previous.form)) {
+    return { stemIndex: index - 1, isListed: false };
+  }
+  return null;
+}
+
+// 추상적 척도: 척도 형용사가 술어로 쓰인 것("꽤 넓죠", "아주 빠릅니다", "깊은 편입니다"). 비교("보다 많다")는 변화·비교로 넘긴다.
 function detectKoreanScale(context) {
   const { tokenList, text } = context;
   const candidateList = [];
   tokenList.forEach((token, index) => {
-    if (!PREDICATE_ADJ_TAG_SET.has(token.tag) || !SCALE_ADJ_SET.has(token.form)) return;
+    const scaleStem = readScaleStem({ tokenList, index });
+    if (!scaleStem) return;
     const next = tokenList[index + 1];
-    if (!next || next.tag === 'ETM' || (next.tag === 'EC' && next.form === '게')) return;
-    if (next.tag === 'EC' && tokenList[index + 2]?.tag === 'VX' && tokenList[index + 2].form === '지') return;
-    if (!['EF', 'EC', 'EP'].includes(next.tag)) return;
-    if (hasComparisonMarkerBefore({ context, index })) return;
-    const start = extendStartOverAdverbial({ context, startWordIndex: context.wordOf(token) });
-    candidateList.push(buildCandidate({ text, type: TRIGGER_TYPE_MAP.scale, start, end: wordEndOf({ context, token }) }));
+    let endToken = token;
+    if (next?.tag === 'ETM' && tokenList[index + 2]?.form === '편' && tokenList[index + 2].tag === 'NNB') {
+      endToken = tokenList[index + 3]?.tag === 'VCP' ? tokenList[index + 3] : tokenList[index + 2];
+    } else {
+      if (!next || next.tag === 'ETM' || (next.tag === 'EC' && next.form === '게')) return;
+      if (next.tag === 'EC' && tokenList[index + 2]?.tag === 'VX' && tokenList[index + 2].form === '지') return;
+      if (!['EF', 'EC', 'EP'].includes(next.tag)) return;
+      if (!scaleStem.isListed && next.tag === 'EC' && QUOTATIVE_ENDING_SET.has(next.form)) return;
+    }
+    if (hasComparisonMarkerBefore({ context, index: scaleStem.stemIndex })) return;
+    const start = extendStartOverAdverbial({ context, startWordIndex: context.wordOf(tokenList[scaleStem.stemIndex]) });
+    candidateList.push(buildCandidate({ text, type: TRIGGER_TYPE_MAP.scale, start, end: wordEndOf({ context, token: endToken }) }));
+  });
+  return candidateList.filter(Boolean);
+}
+
+// 술어 어미가 관형형(ETM)으로 끝나 명사를 꾸미는지("크게 걱정하실 필요").
+function endsInModifier({ tokenList, index }) {
+  for (let cursor = index + 1; cursor < tokenList.length && cursor <= index + 4; cursor += 1) {
+    const token = tokenList[cursor];
+    if (token.tag === 'ETM') return true;
+    if (token.tag !== 'EP') return false;
+  }
+  return false;
+}
+
+// 부사어 뒤 같은 문장 안의 첫 술어(줄기 위치와 그 술어 토큰).
+function findPredicateAfterAdverb({ tokenList, fromIndex, maxDistance = 4 }) {
+  for (let cursor = fromIndex + 1; cursor < tokenList.length && cursor <= fromIndex + maxDistance; cursor += 1) {
+    if (isSentenceBoundary(tokenList[cursor])) return null;
+    const stemIndex = readPredicateStemIndex({ tokenList, index: cursor });
+    if (stemIndex >= 0 && tokenList[stemIndex].tag !== 'MAG') return { stemIndex, predicateIndex: cursor };
+  }
+  return null;
+}
+
+// 척도 부사 + 동사: "꽤 많이 설치했습니다", "두껍게 쌓였습니다", "대거 모였습니다". 값의 변화 술어("많이 올랐습니다")는 변화로 넘긴다.
+function detectKoreanScaleAdverb(context) {
+  const { tokenList, text } = context;
+  const candidateList = [];
+  tokenList.forEach((token, index) => {
+    let adverbStartIndex = -1;
+    let adverbEndIndex = -1;
+    const scaleStem = readScaleStem({ tokenList, index });
+    if (scaleStem && tokenList[index + 1]?.tag === 'EC' && tokenList[index + 1].form === '게') {
+      adverbStartIndex = scaleStem.stemIndex;
+      adverbEndIndex = index + 1;
+    } else if (token.tag === 'MAG' && QUANTITY_ADVERB_SET.has(token.form)) {
+      adverbStartIndex = index;
+      adverbEndIndex = index;
+    } else {
+      return;
+    }
+    const predicate = findPredicateAfterAdverb({ tokenList, fromIndex: adverbEndIndex });
+    if (!predicate) return;
+    if (endsInModifier({ tokenList, index: predicate.predicateIndex })) return;
+    if (isPlannedChange({ tokenList, stemIndex: predicate.stemIndex })) return;
+    if (findChangeStemIndex({ context, index: predicate.predicateIndex }) >= 0) return;
+    if (hasComparisonMarkerBefore({ context, index: adverbStartIndex })) return;
+    const start = extendStartOverAdverbial({ context, startWordIndex: context.wordOf(tokenList[adverbStartIndex]) });
+    candidateList.push(buildCandidate({
+      text, type: TRIGGER_TYPE_MAP.scale, start, end: wordEndOf({ context, token: tokenList[predicate.predicateIndex] }),
+    }));
+  });
+  return candidateList.filter(Boolean);
+}
+
+function isFirstTokenOfWord({ context, index }) {
+  return index === 0 || context.wordOf(context.tokenList[index - 1]) !== context.wordOf(context.tokenList[index]);
+}
+
+function readWordText({ context, token }) {
+  const span = context.wordSpanList[context.wordOf(token)];
+  return span ? context.text.slice(span.start, span.end) : '';
+}
+
+// 같은 문장 안에서 이 위치 뒤 첫 술어 줄기. 없으면 -1.
+function findSentencePredicateStemIndex({ tokenList, fromIndex }) {
+  for (let cursor = fromIndex + 1; cursor < tokenList.length; cursor += 1) {
+    if (isSentenceBoundary(tokenList[cursor])) return -1;
+    if (tokenList[cursor].tag === 'VCP') return cursor;
+    const stemIndex = readPredicateStemIndex({ tokenList, index: cursor });
+    if (stemIndex >= 0 && tokenList[stemIndex].tag !== 'MAG') return stemIndex;
+  }
+  return -1;
+}
+
+// 수 없는 비율·양 말: "대부분이", "절반 이상이", "상당 부분이", "거의 다", "몇몇 조만", "대개". 뒤 술어가 계획·의지면 뺀다.
+function detectKoreanProportion(context) {
+  const { tokenList, text } = context;
+  const candidateList = [];
+  tokenList.forEach((token, index) => {
+    const next = tokenList[index + 1];
+    let endIndex = -1;
+    if (token.tag === 'NNG' && PROPORTION_NOUN_SET.has(token.form)) {
+      if (next && PROPORTION_TAIL_SET.has(next.form)) endIndex = index + 1;
+      else if (next && /^J/.test(next.tag)) endIndex = index;
+    } else if (token.tag === 'NNG' && token.form === '상당' && next?.form === '부분' && /^J/.test(tokenList[index + 2]?.tag || '')) {
+      endIndex = index + 1;
+    } else if (token.tag === 'MAG' && PROPORTION_ADVERB_SET.has(token.form)) {
+      endIndex = index;
+    } else if (token.tag === 'MAG' && token.form === '거의' && next?.tag === 'MAG' && NEARLY_ALL_FORM_SET.has(next.form)) {
+      endIndex = index + 1;
+    } else if (isFirstTokenOfWord({ context, index }) && readWordText({ context, token }) === '몇몇') {
+      // Kiwi 는 문장 첫머리의 "몇몇"을 몇/NR 몇/NR 로 자르기도 해서 어절 글자로 본다. 뒤 어절(세는 말)까지 한 구로.
+      endIndex = tokenList.findIndex((later, laterIndex) => laterIndex > index && context.wordOf(later) === context.wordOf(token) + 1);
+    }
+    if (endIndex < 0) return;
+    const stemIndex = findSentencePredicateStemIndex({ tokenList, fromIndex: endIndex });
+    if (stemIndex < 0 || isPlannedChange({ tokenList, stemIndex })) return;
+    candidateList.push(buildCandidate({
+      text, type: TRIGGER_TYPE_MAP.scale, start: wordStartOf({ context, token }), end: wordEndOf({ context, token: tokenList[endIndex] }),
+    }));
+  });
+  return candidateList.filter(Boolean);
+}
+
+// 접두사가 갈라져 나온 명사는 붙여서 읽는다("최/XPN 하위/NNG" → 최하위).
+function readJoinedNoun({ tokenList, index }) {
+  const token = tokenList[index];
+  const previous = tokenList[index - 1];
+  if (previous?.tag === 'XPN' && previous.end === token.start) return { form: previous.form + token.form, startIndex: index - 1 };
+  return { form: token.form, startIndex: index };
+}
+
+// 명사 뒤 조사·접미사(권)를 건너 첫 술어. 줄기 위치와 술어 끝 토큰 위치를 돌려준다.
+function findPredicateAfterNoun({ tokenList, index, maxDistance = 4 }) {
+  for (let cursor = index + 1; cursor < tokenList.length && cursor <= index + maxDistance; cursor += 1) {
+    const token = tokenList[cursor];
+    if (/^J/.test(token.tag) || token.tag === 'XSN') continue;
+    if (token.tag === 'NNG' && ['XSV', 'XSA'].includes(tokenList[cursor + 1]?.tag)) return { stemIndex: cursor, endIndex: cursor + 1 };
+    if (PREDICATE_VERB_TAG_SET.has(token.tag) || PREDICATE_ADJ_TAG_SET.has(token.tag) || token.tag === 'VCP') {
+      return { stemIndex: cursor, endIndex: cursor };
+    }
+    return null;
+  }
+  return null;
+}
+
+// 술어와 함께 한 구가 되는 변화·비교 명사: 최상·극값("사상 최저를 기록했습니다"), 추세("오름세를 보였어요", "증가 추세를 보이고"),
+// 정해진 술어와 쓰는 명사("바닥을 찍었습니다", "차이가 없었어요", "흑자로 돌아섰습니다", "동률을 이뤘습니다").
+function detectKoreanAnchoredChange(context) {
+  const { tokenList, text } = context;
+  const candidateList = [];
+  tokenList.forEach((token, index) => {
+    if (token.tag !== 'NNG') return;
+    const { form, startIndex } = readJoinedNoun({ tokenList, index });
+    let anchorEndIndex = index;
+    let allowedStemSet = null;
+    if (CHANGE_NOUN_SET.has(form) && tokenList[index + 1]?.form === '추세') {
+      anchorEndIndex = index + 1;
+    } else if (ANCHOR_PREDICATE_MAP.has(form)) {
+      allowedStemSet = ANCHOR_PREDICATE_MAP.get(form);
+    } else if (COMPARISON_NOUN_SET.has(form)) {
+      allowedStemSet = COMPARISON_NOUN_PREDICATE_SET;
+    } else if (!SUPERLATIVE_NOUN_SET.has(form) && !TREND_NOUN_SET.has(form)) {
+      return;
+    }
+    const predicate = findPredicateAfterNoun({ tokenList, index: anchorEndIndex });
+    if (!predicate) return;
+    if (allowedStemSet && !allowedStemSet.has(tokenList[predicate.stemIndex].form)) return;
+    const following = tokenList[predicate.endIndex + 1];
+    if (following?.tag === 'ETM' || endsInModifier({ tokenList, index: predicate.endIndex })) return;
+    if (following?.tag === 'EC' && PURPOSE_ENDING_SET.has(following.form)) return;
+    if (isPlannedChange({ tokenList, stemIndex: predicate.stemIndex })) return;
+    let startWordIndex = context.wordOf(tokenList[startIndex]);
+    const previousWord = startWordIndex > 0 ? context.wordSpanList[startWordIndex - 1] : null;
+    if (previousWord && SUPERLATIVE_PREFIX_WORD_SET.has(text.slice(previousWord.start, previousWord.end))) startWordIndex -= 1;
+    const start = extendStartOverAdverbial({ context, startWordIndex });
+    candidateList.push(buildCandidate({
+      text, type: TRIGGER_TYPE_MAP.change, start, end: wordEndOf({ context, token: tokenList[predicate.endIndex] }),
+    }));
   });
   return candidateList.filter(Boolean);
 }
@@ -444,7 +684,10 @@ function detectKoreanCandidateList({ text, tokenList }) {
     ...detectKoreanAdjectiveNoun(context),
     ...detectKoreanNumber(context),
     ...detectKoreanChange(context),
+    ...detectKoreanAnchoredChange(context),
     ...detectKoreanScale(context),
+    ...detectKoreanScaleAdverb(context),
+    ...detectKoreanProportion(context),
   ]);
 }
 
