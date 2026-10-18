@@ -100,6 +100,9 @@ export const UI_TEXT_MAP = {
     'shortcut.voiceQuestion': '음성 질문',
     'shortcut.featureToggle': '페이지 전환·화자·요약 켜기·끄기',
     'shortcut.panelToggle': '패널 접기·펼치기',
+    'shortcut.onWindows': '윈도',
+    'shortcut.onMac': '맥',
+    'shortcut.fullScreen': '전체 화면',
     'shortcut.macControl': '맥도 Control 키',
 
     'settings.title': '사용자 설정',
@@ -312,6 +315,9 @@ export const UI_TEXT_MAP = {
     'shortcut.voiceQuestion': 'Voice question',
     'shortcut.featureToggle': 'Page change · speaker · summary on/off',
     'shortcut.panelToggle': 'Collapse/expand panel',
+    'shortcut.onWindows': 'Windows',
+    'shortcut.onMac': 'Mac',
+    'shortcut.fullScreen': 'Full screen',
     'shortcut.macControl': 'Control key on Mac too',
 
     'settings.title': 'Settings',
