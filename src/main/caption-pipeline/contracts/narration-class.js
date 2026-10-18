@@ -33,4 +33,16 @@ function toNarrationClass({ narrationType, origin = NARRATION_ORIGIN_MAP.router 
   return CLASS_BY_TYPE_MAP[narrationType] || null;
 }
 
-module.exports = { toNarrationClass, NARRATION_ORIGIN_MAP };
+// AD 카드·내보내기의 코드. 아키텍처 에이전트(=재생 분류)마다 하나다. A 는 자동 AD, Q 는 질문 답(수동 AD)이다.
+// A1~A5 는 결과보고서 생성 Layer 순서(페이지 전환 · 지시 대상 · 발화 기반 · 무발화 기반 · 화자 식별)를 따른다.
+// 렌더러 core/constants.js 에 같은 사본이 있다(test/contracts-parity.test.mjs).
+const AD_CODE_BY_CLASS_MAP = {
+  [NARRATION_CLASS_MAP.pageTransition]: 'A1',
+  [NARRATION_CLASS_MAP.deixis]: 'A2',
+  [NARRATION_CLASS_MAP.speechBased]: 'A3',
+  [NARRATION_CLASS_MAP.silenceBased]: 'A4',
+  [NARRATION_CLASS_MAP.speakerIdentity]: 'A5',
+  [NARRATION_CLASS_MAP.userCommand]: 'Q',
+};
+
+module.exports = { toNarrationClass, NARRATION_ORIGIN_MAP, AD_CODE_BY_CLASS_MAP };

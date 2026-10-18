@@ -35,6 +35,16 @@ export const NARRATION_CLASS_MAP = {
   speakerIdentity: 'speaker_identity',
 };
 
+// AD 카드 코드. main contracts/narration-class.js 의 AD_CODE_BY_CLASS_MAP 과 같은 사본이다.
+export const AD_CODE_BY_CLASS_MAP = {
+  [NARRATION_CLASS_MAP.pageTransition]: 'A1',
+  [NARRATION_CLASS_MAP.deixis]: 'A2',
+  [NARRATION_CLASS_MAP.speechBased]: 'A3',
+  [NARRATION_CLASS_MAP.silenceBased]: 'A4',
+  [NARRATION_CLASS_MAP.speakerIdentity]: 'A5',
+  [NARRATION_CLASS_MAP.userCommand]: 'Q',
+};
+
 export const PAGE_TRANSITION_KIND_MAP = {
   slide: 'slide',
   document: 'document',
