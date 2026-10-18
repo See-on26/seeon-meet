@@ -199,3 +199,28 @@ test('기록: 프롬프트에 들어간 줄 수·글자 수를 붙이고, 줄이
   assert.equal(formatScreenTextSummary(late), '화면 글자=없음(ocr_late, 대기 1001ms)');
   assert.equal(formatScreenTextSummary({ source: 'none', waitedMs: 0, skipReason: 'disabled' }), '화면 글자=없음(disabled)');
 });
+
+// 흐름 창은 생성 기록 detail 의 → "문장" (Nms …) 에서 해설 문장과 걸린 시간을 읽는다. 화면 글자 요약은 그 뒤에 붙인다.
+test('흐름 창: 생성·값 검사 기록 뒤에 화면 글자 요약이 붙어도 해설 문장과 시간을 그대로 읽는다', () => {
+  const { buildFlowList } = require('../src/main/dev-flow/flow-builder.js');
+  const summary = formatScreenTextSummary({
+    source: 'fresh', totalLineCount: 9, lineCount: 9, charCount: 268, meanScore: 0.875, ocrMs: 478, waitedMs: 0, skipReason: null,
+  });
+  const text = '체험 계정 제외, 2,318건';
+  // 한 요청의 기록은 모두 그 요청의 ts 로 남는다.
+  const debug = (stage, verdict, reason, detail) => ({ kind: 'debug', stage, verdict, reason, detail, narrationType: 'interpretation', ts: 1_000_000 });
+  const flowList = buildFlowList({
+    debugList: [
+      debug('router', 'pass', '확정 interpretation/claim_to_value', '발화="체험 계정도 꽤 많이 뺐습니다." 후보=[interpretation/claim_to_value]'),
+      debug('value_check', 'pass', '값 존재 검사 present', `값="2,318건" 슬라이드=1 전사=missing 대조=같은 프레임 OCR · retranscribed → "${text}"`),
+      debug('vlm', 'pass', '생성 interpretation/claim_to_value', `발화="체험 계정도 꽤 많이 뺐습니다." → "${text}" (4317ms, 예산 6~12어절) · ${summary}`),
+    ],
+    toMediaMs: () => null,
+  });
+  assert.equal(flowList.length, 1);
+  const [flow] = flowList;
+  const agentStep = flow.stepList.find((step) => step.stage === 'vlm');
+  assert.equal(agentStep.text, text);
+  assert.equal(agentStep.elapsedMs, 4317);
+  assert.match(agentStep.detail, /화면 글자=같은 프레임 OCR 9\/9줄 268자/);
+});
