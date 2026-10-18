@@ -45,6 +45,62 @@ function buildInterpretationScreenTextBlock({ screenLineList = [], utterance = '
   });
 }
 
+// 주장→값(A 대상 고정, 발화 기반 16자리 10/18): 지금 발화의 대상·조건·부분을 먼저 고정하고 그 항목 값을 읽어 잇게 한다.
+// 같은 항목의 시간 변화만 "전 값에서 뒤 값", 다른 집단은 나란히, 셋 이상은 조건 이름을 target 에 순서대로 둔다.
+// 화면 글자(OCR) 덩어리·둘째 변화(target2) 줄은 운영 판 그대로 더한다. 예시는 평가 영상과 겹치지 않는 내용으로 둔다.
+function buildClaimToValuePrompt({ utterance, recentTranscript, minWordCount, maxWordCount, maxChars,
+  mergedAnchorList, mergedClaimList, screenTextBlock, language }) {
+  return [
+    '이 이미지는 회의에서 공유 중인 화면이다.',
+    `발표자가 방금 이렇게 말했다: "${(utterance || '').trim()}"`,
+    recentTranscript ? `앞 발화(지금 발화에서 빠진 대상·조건을 채울 때만 쓴다): ${recentTranscript}` : null,
+    mergedAnchorList.length
+      ? `발표자가 지시한 표현: ${mergedAnchorList.join(', ')}. 이 대상이 무엇인지도 함께 밝혀라.`
+      : null,
+    mergedClaimList.length
+      ? `발표자는 변화를 또 말했다: ${mergedClaimList.map((phrase) => `"${phrase}"`).join(', ')}.`
+        + ' 그 대상이 첫 변화의 대상과 다르면(예: 매출과 방문자 수) "target2"·"value2"에 그 대상과 화면의 값을 쓴다.'
+        + ' 같은 대상·같은 값을 다시 말한 것이면 "target2"·"value2"는 빈 문자열로 둔다.'
+      : null,
+    screenTextBlock.text || null,
+    '',
+    '청자는 화면을 볼 수 없다. 발표자는 변화·비교·결론만 말하고 근거 값은 말하지 않았다. 정보 공백 판단은 끝났으니 다시 따지지 않는다.',
+    '할 일: 발표자가 지금 말한 그 대상의 근거 값을 화면에서 읽어 준다.',
+    '',
+    '1단계 — 무엇에 대한 말인지 먼저 고정한다.',
+    ' · 대상: 지금 발화가 말한 양.',
+    ' · 조건: 지금 발화(빠졌으면 앞 발화)에 나온 집단·기간·방법 이름. 화면 항목이 여럿이면 그 조건의 항목만 고른다. 결론이 대조에서 나오면 대조 항목도 고른다.',
+    ' · 부분: 그래프면 발표자가 말한 부분(치솟은 곳, 평평한 구간, 마지막 값).',
+    '2단계 — 그 항목의 값을 읽는다.',
+    ' · 적힌 숫자는 그대로. 적힌 숫자가 없으면 축 눈금으로 어림해 "약"을 붙인다. 그림을 센 개수는 "N번·N개"로 쓴다.',
+    ' · 앞 발화에 나온 숫자를 화면 값처럼 옮기지 않는다. 다른 양·단위의 라벨(합계·누적 등)은 쓰지 않는다.',
+    '3단계 — 잇는다.',
+    ' · 같은 항목이 시간에 따라 바뀐 것만 "전 값에서 뒤 값".',
+    ' · 서로 다른 집단·구간은 "이름 값, 이름 값"으로 나란히.',
+    ' · 같은 모양이 되풀이되면 대표 높이와 횟수.',
+    ' · 항목이 셋 이상이면 조건 이름을 target에 순서대로 모두 쓰고(범위로 줄이지 않는다) value에는 값만 같은 순서로.',
+    '예) "3년 차부터 확 줄었습니다" + 표 "1년 차 40%, 2년 차 35%, 3년 차 22%" → {"target": "연차별 이직률", "value": "2년 차 35%, 3년 차 22%"}',
+    '예) "점점 짧아졌죠" + 막대 1월 12분, 2월 9분, 3월 7분, 4월 5분 → {"target": "1·2·3·4월 대기 시간", "value": "12, 9, 7, 5분"}',
+    '',
+    buildSlotOutputInstruction({
+      narrationType: NARRATION_TYPE_MAP.interpretation,
+      subKind: INTERPRETATION_KIND_MAP.claimToValue,
+      hasSecondClaim: mergedClaimList.length > 0,
+      language,
+    }),
+    '',
+    '규칙:',
+    '(1) 화면에 보이는 값만 쓴다. 지어내지 않는다.',
+    `(2) 그 대상·조건의 값이나 눈금을 화면에서 찾지 못할 때만 ${GROUNDING_NONE_TOKEN}이다.`,
+    '(3) 발화를 옮기지 않는다. 지시어("이·그·저·여기")를 넣지 않는다.',
+    `(참고: 조립 후 총 ${minWordCount}~${maxWordCount}어절, 최대 ${maxChars}자.)`,
+    ...buildOutputLanguageRuleList({
+      language,
+      detailLineList: ['수치는 화면 그대로 아라비아 숫자로 쓴다(예: 9.2 hours). 시스템이 "대상, 값" 꼴로 조립한다.'],
+    }),
+  ].filter((line) => line !== null).join('\n');
+}
+
 function buildInterpretationPrompt({ utterance, recentTranscript = '', subKind = null,
   minWordCount = DEFAULT_INTERPRETATION_MIN_WORD_COUNT,
   maxWordCount = DEFAULT_INTERPRETATION_MAX_WORD_COUNT,
@@ -54,6 +110,12 @@ function buildInterpretationPrompt({ utterance, recentTranscript = '', subKind =
   const screenTextBlock = buildInterpretationScreenTextBlock({
     screenLineList, utterance, subKind, mergedAnchorList, mergedClaimList,
   });
+  if (subKind === INTERPRETATION_KIND_MAP.claimToValue) {
+    return buildClaimToValuePrompt({
+      utterance, recentTranscript, minWordCount, maxWordCount, maxChars: effectiveMaxChars,
+      mergedAnchorList, mergedClaimList, screenTextBlock, language,
+    });
+  }
   const ruleList = INTERPRETATION_RULE_MAP[subKind]
     || [...INTERPRETATION_RULE_MAP[INTERPRETATION_KIND_MAP.valueToMeaning],
       ...INTERPRETATION_RULE_MAP[INTERPRETATION_KIND_MAP.claimToValue]];

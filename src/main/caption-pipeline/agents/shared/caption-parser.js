@@ -184,7 +184,7 @@ function parseSlotCaptionContent({ content, narrationType, subKind, origin = nul
   if (jsonMatch) {
     try {
       const assembled = assembleNarration({
-        narrationType, subKind, rawSlotMap: JSON.parse(jsonMatch[0]), index, origin, hasSecondClaim, maxWordCount, language,
+        narrationType, subKind, rawSlotMap: JSON.parse(jsonMatch[0]), index, origin, hasSecondClaim, maxWordCount, maxChars, language,
       });
       if (assembled) return { ...assembled, isGrounded: true };
 
@@ -195,7 +195,7 @@ function parseSlotCaptionContent({ content, narrationType, subKind, origin = nul
     const salvagedSlotMap = salvageSlotMap({ text: cleaned });
     const assembled = salvagedSlotMap
       && assembleNarration({
-        narrationType, subKind, rawSlotMap: salvagedSlotMap, index, origin, hasSecondClaim, maxWordCount, language,
+        narrationType, subKind, rawSlotMap: salvagedSlotMap, index, origin, hasSecondClaim, maxWordCount, maxChars, language,
       });
     if (assembled) return { ...assembled, isGrounded: true };
     return buildRejection({ rejectKind: REJECT_KIND_MAP.format, content });

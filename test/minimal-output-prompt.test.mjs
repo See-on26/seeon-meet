@@ -19,10 +19,12 @@ for (const [name, prompt] of [
   });
 }
 
-test('무발화 판정기는 애매하면 차단하고, 보세요·보시겠습니다 같은 명확한 지시만 통과시킨다', () => {
-  assert.match(SILENCE_JUDGE_SYSTEM_PROMPT, /확신이 없으면 cue=false 로 차단/);
-  assert.match(SILENCE_JUDGE_SYSTEM_PROMPT, /보세요/);
-  assert.match(SILENCE_JUDGE_SYSTEM_PROMPT, /보시겠습니다/);
+// 판정기 v2(10/18): 화면을 보라는 말(①), 화면 속 문제·퀴즈를 풀어 보라는 말(②), 화면에 띄운 것을 짧게 소개하고 멈춘 말(③)만 통과.
+test('무발화 판정기는 화면으로 눈을 이끈 세 경우만 통과시키고 그 밖은 차단한다', () => {
+  assert.match(SILENCE_JUDGE_SYSTEM_PROMPT, /위 ①②③에 들지 않으면 cue=false 로 차단한다/);
+  assert.match(SILENCE_JUDGE_SYSTEM_PROMPT, /화면을 보세요/);
+  assert.match(SILENCE_JUDGE_SYSTEM_PROMPT, /화면에 띄운 문제·퀴즈·퍼즐을 보고 풀거나 찾아보라고 함/);
+  assert.match(SILENCE_JUDGE_SYSTEM_PROMPT, /화면에 띄운 것을 가리켜 짧게 소개하고 멈춤/);
   assert.match(SILENCE_JUDGE_SYSTEM_PROMPT, /음·어/);
 });
 

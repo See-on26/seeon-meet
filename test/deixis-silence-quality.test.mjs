@@ -66,9 +66,10 @@ test('지시 지시문은 종류별로 무엇을 말할지 정하고(P1-4), 무�
   assert.match(deixisPrompt, /꾸민 로고만 있는 상품 사진은 상품명 대신 종류·모양을 말한다/);
   assert.match(deixisPrompt, /범주 이름만 쓰지 않는다/);
   const silencePrompt = buildVisualDescriptionPrompt({ origin: NARRATION_ORIGIN_MAP.silence, minWordCount: 5, maxWordCount: 13 });
-  assert.match(silencePrompt, /그래프·표: 가장 큰 값과 가장 작은 값/);
-  assert.match(silencePrompt, /단계·과정 그림: 과정 이름·부제·용어/);
-  assert.match(silencePrompt, /말만 바꿔 되풀이하면 실패다/);
+  // 무발화 v3: 카드·수식·퀴즈 그림도 대상이고, 제목·이미 말한 규칙은 빼며, 12어절 안에서 자료 종류로 맺는다.
+  assert.match(silencePrompt, /수식, 글자·숫자 카드, 퍼즐, 퀴즈 그림/);
+  assert.match(silencePrompt, /발표자가 이미 말한 규칙·설명/);
+  assert.match(silencePrompt, /12어절 이내/);
   // 예시가 시연 영상의 낱말을 쓰면 그 화면에만 맞춘 지시문이 된다.
   for (const word of ['배송 지연', '영남', '냉방기', '제주', '불고기', '피벗', '합병', 'C-ITS']) {
     assert.equal(deixisPrompt.includes(word), false, `지시 지시문에 시연 낱말 ${word}`);

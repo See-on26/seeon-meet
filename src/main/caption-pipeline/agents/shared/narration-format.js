@@ -165,9 +165,11 @@ const NARRATION_SLOT_MAP = {
       { key: 'frame', label: '값의 해석틀 — 화면에서 찾은 대상·기준 (예: 작년 대비 A사 기업가치 성장률)', minWordCount: 3, maxWordCount: 5, isPhrase: true },
     ],
     // 발화 표현을 칸에 넣으면 "…빨라졌습니다를 의미"처럼 발화가 그대로 붙는다. 대상과 근거 값만 화면에서 읽는다.
+    // 대상 칸 4어절에서는 "…혈당 상승도"의 측정량 낱말이, 값 칸 6어절에서는 네 항목 목록의 뒤쪽이 잘렸다(발화 기반 23자리, 10/18).
+    // 전체 예산은 조립 뒤에 맞춘다(fitClaimPairToBudget).
     [INTERPRETATION_KIND_MAP.claimToValue]: [
-      { key: 'target', label: '변화·비교의 대상 — 화면에 적힌 항목 이름. 발표자가 여러 항목을 묶어 부른 말이면 그 묶음 이름 (예: 첫 응답 시간, 4분기 매출, 인력)', minWordCount: 1, maxWordCount: 4, isPhrase: true },
-      { key: 'value', label: '화면에서 찾은 근거 값 — 반드시 수치. 변화면 바뀌기 전 값에서 바뀐 뒤 값(바뀐 뒤 값만 있으면 그 값), 비교면 두 대상과 각 값, 묶음 이름이면 항목 2개까지 각 이름과 값 (예: 9.2시간에서 3.1시간, 도심 33.8도 교외 29.1도, 개발자 120명과 디자이너 30명)', minWordCount: 1, maxWordCount: 6, mustContainValue: true },
+      { key: 'target', label: '변화·비교의 대상 — 화면에 적힌 항목 이름. 발표자가 여러 항목을 묶어 부른 말이면 그 묶음 이름 (예: 첫 응답 시간, 4분기 매출, 인력)', minWordCount: 1, maxWordCount: 5, isPhrase: true },
+      { key: 'value', label: '화면에서 찾은 근거 값 — 반드시 수치. 변화면 바뀌기 전 값에서 바뀐 뒤 값(바뀐 뒤 값만 있으면 그 값), 비교면 두 대상과 각 값, 묶음 이름이면 항목 2개까지 각 이름과 값 (예: 9.2시간에서 3.1시간, 도심 33.8도 교외 29.1도, 개발자 120명과 디자이너 30명)', minWordCount: 1, maxWordCount: 8, mustContainValue: true },
     ],
   },
   [NARRATION_TYPE_MAP.visualDescription]: {
@@ -175,16 +177,10 @@ const NARRATION_SLOT_MAP = {
       // 무발화 묘사는 값·변화를 담아 "…그래프"로 끝맺는다. 5어절에서 자르면 자료 종류 꼬리가 빠져 묘사가 버려진다.
       { key: 'description', label: '이미지에 대한 묘사 (반응을 일으키는 요소 포함)', minWordCount: 3, maxWordCount: 8, isPhrase: true },
     ],
+    // "○○보다 N배 큰 ○○" 네 칸으로는 "○○만 한", "○○를 다 덮는", "○○의 절반쯤", 측정값을 말할 수 없고
+    // 칸을 잇다 "보다보다·배배"가 생겼다(발화 기반 척도 6자리, 10/18). 크기 묘사를 자유 구 하나로 받는다.
     [VISUAL_DESCRIPTION_KIND_MAP.scale]: [
-      { key: 'comparison', label: '비교 대상 (화면 속 다른 객체, 예: 소나무)', minWordCount: 1, maxWordCount: 2 },
-      {
-        key: 'scale',
-        label: '비교 척도 — 숫자만 (예: 4). **숫자로 가늠할 수 없으면 빈 문자열**',
-        minWordCount: 0,
-        maxWordCount: 1,
-      },
-      { key: 'direction', label: '방향 — "큰" 또는 "작은" 중 하나', minWordCount: 1, maxWordCount: 1 },
-      { key: 'target', label: '그 대상 (예: 불상)', minWordCount: 1, maxWordCount: 1, isPhrase: true },
+      { key: 'caption', label: '청자에게 읽어 줄 크기 묘사 — 발표자가 말한 대상을 화면 속 기준과 견준 크기, 그래프·표의 양이면 그 값 (예: 5층 건물의 두 배쯤 되는 크레인, 약 3만 명으로 가장 많은 3월 방문객)', minWordCount: 3, maxWordCount: 10, isPhrase: true },
     ],
   },
   [NARRATION_TYPE_MAP.speakerIdentity]: {
@@ -260,10 +256,8 @@ const ENGLISH_SLOT_LABEL_MAP = {
       description: 'description of the image (including what triggers the reaction)',
     },
     [VISUAL_DESCRIPTION_KIND_MAP.scale]: {
-      comparison: 'comparison object (another object on screen, e.g. the pine tree)',
-      scale: 'scale — number only (e.g. 4). **Empty string if it cannot be estimated as a number**',
-      direction: 'direction — exactly "larger" or "smaller"',
-      target: 'the item itself (e.g. the Buddha statue)',
+      caption: 'size description read to the listener — the item the speaker called big/small compared with a reference on screen,'
+        + ' or its value if it is a chart/table amount (e.g. "a crane about twice as tall as the five-story building")',
     },
   },
   [NARRATION_TYPE_MAP.speakerIdentity]: {
@@ -431,7 +425,7 @@ function normalizeSlotMap({ slotList, rawSlotMap, language = CAPTION_LANGUAGE_MA
     const isTruncated = countWord({ text }) > slot.maxWordCount;
     if (isTruncated) {
       slotMap[slot.key] = trimToCompletePhrase({
-        text: slot.mustContainValue ? dropValuelessTailItem({ text: truncated }) : truncated,
+        text: slot.mustContainValue ? fitWholeItemList({ text, maxWordCount: slot.maxWordCount }) : truncated,
       });
     }
     else if (slot.isPhrase) slotMap[slot.key] = trimToCompletePhrase({ text: truncated, isConservative: true });
@@ -442,10 +436,89 @@ function normalizeSlotMap({ slotList, rawSlotMap, language = CAPTION_LANGUAGE_MA
 
 // 값 목록("A 9.2시간에서 3.1시간, 고객 만족도 72점…")이 어절 수에서 잘리면 마지막 항목이 "고객"처럼
 // 이름만 남는다. 쉼표 뒤 조각에 수치가 없으면 그 조각을 버린다.
+// 숫자 안의 쉼표("3,000개", "1,325원")에서 나누면 "3, 000개"처럼 값이 깨진다. 쉼표 뒤 띄어쓰기나 숫자 아닌 이웃이 있을 때만 항목 경계로 본다.
+const ITEM_SEPARATOR_PATTERN = /\s*,\s+|(?<!\d)\s*,\s*|\s*,\s*(?!\d)/;
+
 function dropValuelessTailItem({ text }) {
-  const itemList = String(text || '').split(/\s*,\s*/);
+  const itemList = String(text || '').split(ITEM_SEPARATOR_PATTERN);
   while (itemList.length > 1 && !hasValueToken({ text: itemList[itemList.length - 1] })) itemList.pop();
   return itemList.join(', ');
+}
+
+// 값 목록을 어절 상한에 맞출 때는 쉼표로 나뉜 항목을 통째로 넣거나 뺀다. 항목 가운데에서 자르면
+// "…, 15분"처럼 조건 이름만 남고, 그 이름에 숫자가 들어 있어 완결된 항목처럼 보이기 때문이다.
+// 첫 항목부터 상한을 넘으면 어절에서 자르는 예전 방식으로 둔다.
+function fitWholeItemList({ text, maxWordCount }) {
+  const rawItemList = String(text || '').split(ITEM_SEPARATOR_PATTERN).map((item) => item.trim()).filter(Boolean);
+  const itemList = countWord({ text: rawItemList.join(', ') }) > maxWordCount ? dropRepeatedItemWord({ itemList: rawItemList }) : rawItemList;
+  const keptList = [];
+  for (const item of itemList) {
+    if (countWord({ text: [...keptList, item].join(', ') }) > maxWordCount) break;
+    keptList.push(item);
+  }
+  if (!keptList.length) return dropValuelessTailItem({ text: truncateSlot({ text, maxWordCount }) });
+  return dropValuelessTailItem({ text: keptList.join(', ') });
+}
+
+// 값 항목마다 되풀이된 낱말("10분 스텝퍼 71, 15분 스텝퍼 53")을 뺀다. 낱말을 빼서 항목에 숫자만 남으면 그 항목은 그대로 둔다
+// (조건 이름이 사라지면 대응이 깨진다).
+function dropRepeatedItemWord({ itemList }) {
+  if (itemList.length < 2) return itemList;
+  const wordListList = itemList.map((item) => item.split(/\s+/));
+  const needCount = itemList.length >= 3 ? itemList.length - 1 : itemList.length;
+  const countMap = new Map();
+  for (const wordList of wordListList) {
+    for (const word of new Set(wordList.filter((item) => !/\d/.test(item)))) countMap.set(word, (countMap.get(word) || 0) + 1);
+  }
+  const repeatedSet = new Set([...countMap].filter(([, count]) => count >= needCount).map(([word]) => word));
+  if (!repeatedSet.size) return itemList;
+  return wordListList.map((wordList) => {
+    const kept = wordList.filter((word) => !repeatedSet.has(word));
+    return kept.some((word) => !/^[+\-−]?\d[\d.,]*$/.test(word)) ? kept.join(' ') : wordList.join(' ');
+  });
+}
+
+// 대상 칸에 조건 이름 목록("공복 운동 후 혈당 수치, 식사 후 혈당 수치")을, 값 칸에 이름 없는 값 목록("76, 202")을 따로 쓰면
+// 대상 칸이 상한에서 잘려 둘째 조건이 빠지고 202가 첫 조건의 값처럼 읽힌다. 항목 수가 같으면 순서대로 짝지어 값 칸으로 옮기고,
+// 항목 이름의 같은 끝말("혈당 수치")은 대상 칸에 한 번만 둔다. 칸 상한을 적용하기 전(원 답 칸)에 한다.
+const BARE_VALUE_ITEM_PATTERN = /^(?:약\s*|about\s+)?[+\-−]?\d[\d.,]*\s*(?:%|퍼센트|[A-Za-z/]+|원|명|건|개|번|회|배|분|초|시간|일|년|도|점|위|세|℃)?$/;
+const PAIR_FUNCTION_WORD_SET = new Set(['후', '전', '때', '중', '뒤', '동안', '이후', '이전', '당시', '시', 'after', 'before', 'during']);
+
+function pairTargetItemListWithValueList({ target, value }) {
+  const targetItemList = String(target || '').split(ITEM_SEPARATOR_PATTERN).map((item) => item.trim()).filter(Boolean);
+  const valueItemList = String(value || '').split(ITEM_SEPARATOR_PATTERN).map((item) => item.trim()).filter(Boolean);
+  if (targetItemList.length < 2 || targetItemList.length !== valueItemList.length) return null;
+  if (!valueItemList.every((item) => BARE_VALUE_ITEM_PATTERN.test(item))) return null;
+  const wordListList = targetItemList.map((item) => item.split(/\s+/));
+  let commonCount = 0;
+  while (wordListList.every((wordList) => wordList.length > commonCount + 1
+    && wordList[wordList.length - 1 - commonCount] === wordListList[0][wordListList[0].length - 1 - commonCount])
+    && !PAIR_FUNCTION_WORD_SET.has(wordListList[0][wordListList[0].length - 1 - commonCount])) commonCount += 1;
+  // 같은 끝말(측정량 낱말)이 없으면 대상 칸이 비므로 짝짓지 않는다.
+  if (!commonCount) return null;
+  const commonTail = wordListList[0].slice(-commonCount).join(' ');
+  const pairList = wordListList.map((wordList, index) => `${wordList.slice(0, wordList.length - commonCount).join(' ')} ${valueItemList[index]}`);
+  return { target: commonTail, value: pairList.join(', ') };
+}
+
+// 조립한 해설이 전체 어절·글자 예산을 넘으면 정보가 적은 쪽부터 줄인다: ① 값 항목마다 되풀이된 낱말을 빼고
+// ② 대상 칸 앞쪽 꾸밈말을 빼되 끝의 측정량 낱말은 남기고(최소 2어절) ③ 그래도 넘치면 값 목록 뒤 항목부터 통째로 뺀다.
+// 정상 JSON 경로에는 그동안 칸별 상한만 있고 전체 예산은 적용되지 않았다.
+const MIN_TARGET_WORD_COUNT = 2;
+
+function fitClaimPairToBudget({ target, value, maxWordCount, maxChars, language = CAPTION_LANGUAGE_MAP.ko }) {
+  const isOver = (text) => (Number.isFinite(maxWordCount) && countWord({ text }) > maxWordCount)
+    || (Number.isFinite(maxChars) && text.length > maxChars);
+  let itemList = String(value || '').split(ITEM_SEPARATOR_PATTERN).filter(Boolean);
+  let targetWordList = String(target || '').split(/\s+/).filter(Boolean);
+  const build = () => assembleClaimPair({
+    target: targetWordList.join(' '), value: dropValuelessTailItem({ text: itemList.join(', ') }), language,
+  });
+  let fitted = build();
+  if (isOver(fitted)) { itemList = dropRepeatedItemWord({ itemList }); fitted = build(); }
+  while (isOver(fitted) && targetWordList.length > MIN_TARGET_WORD_COUNT) { targetWordList = targetWordList.slice(1); fitted = build(); }
+  while (isOver(fitted) && itemList.length > 1) { itemList.pop(); fitted = build(); }
+  return fitted;
 }
 
 // 끝 문장부호("…막대 그래프.")는 떼고 본다. 붙은 채 보면 받을 수 있는 길이의 묘사도 미완결로 버려진다.
@@ -515,8 +588,8 @@ function assembleClaimPair({ target, value, language = CAPTION_LANGUAGE_MAP.ko }
 }
 
 // 둘째 쌍은 대상과 수치가 다 있을 때만 붙이고, 두 쌍이 어절 예산을 넘으면 첫 쌍만 읽는다.
-function assembleClaimToValue({ slotMap, maxWordCount, language = CAPTION_LANGUAGE_MAP.ko }) {
-  const first = assembleClaimPair({ target: slotMap.target, value: slotMap.value, language });
+function assembleClaimToValue({ slotMap, maxWordCount, maxChars, language = CAPTION_LANGUAGE_MAP.ko }) {
+  const first = fitClaimPairToBudget({ target: slotMap.target, value: slotMap.value, maxWordCount, maxChars, language });
   if (!slotMap.target2 || !hasValueToken({ text: slotMap.value2 })) return first;
   const both = `${first}. ${assembleClaimPair({ target: slotMap.target2, value: slotMap.value2, language })}`;
   return Number.isFinite(maxWordCount) && countWord({ text: both }) > maxWordCount ? first : both;
@@ -552,9 +625,7 @@ const NARRATION_ASSEMBLE_MAP = {
     [VISUAL_DESCRIPTION_KIND_MAP.reaction]: ({ slotMap }) => (
       `이미지 제시, ${String(slotMap.description || '').replace(/^\s*이미지 제시\s*,?\s*/, '')}`
     ),
-    [VISUAL_DESCRIPTION_KIND_MAP.scale]: ({ slotMap }) => (slotMap.scale
-      ? `${slotMap.comparison}보다 ${slotMap.scale}배 ${slotMap.direction} ${slotMap.target}`
-      : `${slotMap.comparison}보다 ${slotMap.direction} ${slotMap.target}`),
+    [VISUAL_DESCRIPTION_KIND_MAP.scale]: ({ slotMap }) => slotMap.caption,
   },
   [NARRATION_TYPE_MAP.speakerIdentity]: {
     [SPEAKER_IDENTITY_KIND_MAP.named]: ({ slotMap }) => `${slotMap.speakerName}님이 말합니다`,
@@ -565,7 +636,6 @@ const NARRATION_ASSEMBLE_MAP = {
 // 영어 캡션의 조립 틀. 고정 문구(머리말·연결어)는 시스템이 붙이고, 칸에는 화면에서 읽은 구만 들어간다.
 // 모델이 형식 예시를 흉내 내 머리말("Image:")을 직접 쓰면 떼고 붙인다.
 const ENGLISH_IMAGE_PREFIX_PATTERN = /^\s*image\s*(?:presented|shown)?\s*[:,]\s*/i;
-const ENGLISH_SCALE_SUFFIX_PATTERN = /\s*(?:x|times)$/i;
 const ENGLISH_LEADING_ARTICLE_PATTERN = /^the\s+/i;
 
 const ENGLISH_NARRATION_ASSEMBLE_MAP = {
@@ -579,20 +649,15 @@ const ENGLISH_NARRATION_ASSEMBLE_MAP = {
   },
   [NARRATION_TYPE_MAP.interpretation]: {
     [INTERPRETATION_KIND_MAP.valueToMeaning]: ({ slotMap }) => `${slotMap.value} means ${slotMap.frame}`,
-    [INTERPRETATION_KIND_MAP.claimToValue]: ({ slotMap, maxWordCount }) => assembleClaimToValue({
-      slotMap, maxWordCount, language: CAPTION_LANGUAGE_MAP.en,
+    [INTERPRETATION_KIND_MAP.claimToValue]: ({ slotMap, maxWordCount, maxChars }) => assembleClaimToValue({
+      slotMap, maxWordCount, maxChars, language: CAPTION_LANGUAGE_MAP.en,
     }),
   },
   [NARRATION_TYPE_MAP.visualDescription]: {
     [VISUAL_DESCRIPTION_KIND_MAP.reaction]: ({ slotMap }) => (
       `Image: ${String(slotMap.description || '').replace(ENGLISH_IMAGE_PREFIX_PATTERN, '')}`
     ),
-    [VISUAL_DESCRIPTION_KIND_MAP.scale]: ({ slotMap }) => {
-      const scale = String(slotMap.scale || '').replace(ENGLISH_SCALE_SUFFIX_PATTERN, '');
-      return scale
-        ? `${slotMap.target}, ${scale} times ${slotMap.direction} than ${slotMap.comparison}`
-        : `${slotMap.target}, ${slotMap.direction} than ${slotMap.comparison}`;
-    },
+    [VISUAL_DESCRIPTION_KIND_MAP.scale]: ({ slotMap }) => slotMap.caption,
   },
   [NARRATION_TYPE_MAP.speakerIdentity]: {
     [SPEAKER_IDENTITY_KIND_MAP.named]: ({ slotMap }) => `${slotMap.speakerName} is speaking`,
@@ -607,40 +672,47 @@ function capitalizeFirst(text) {
 }
 
 // 한국어 끝맺음 검사(자료 명사·조사·관형형)와 상황 칸 보정은 영어에 맞지 않아 쓰지 않는다. 빈 칸·수치 검사는 같다.
-function assembleEnglishNarration({ narrationType, subKind, rawSlotMap, index, origin, hasSecondClaim, maxWordCount }) {
+function assembleEnglishNarration({ narrationType, subKind, rawSlotMap, index, origin, hasSecondClaim, maxWordCount, maxChars }) {
   const slotList = getSlotList({ narrationType, subKind, origin, hasSecondClaim, language: CAPTION_LANGUAGE_MAP.en });
   const assemble = ENGLISH_NARRATION_ASSEMBLE_MAP[narrationType]?.[subKind];
   if (!slotList || !assemble) return null;
-  const slotMap = normalizeEnglishSlotMap({ slotList, rawSlotMap });
+  const slotMap = normalizeEnglishSlotMap({ slotList, rawSlotMap: pairClaimSlot({ narrationType, subKind, rawSlotMap }) });
   if (hasEmptyRequiredSlot({ slotList, slotMap })) return null;
   if (hasValuelessSlot({ slotList, slotMap })) return null;
-  const joined = assemble({ slotMap, index, maxWordCount }).replace(/\s+/g, ' ').trim();
+  const joined = assemble({ slotMap, index, maxWordCount, maxChars }).replace(/\s+/g, ' ').trim();
   return { text: capitalizeFirst(dropRepeatedWordAtSeam({ text: joined })), slotMap };
 }
 
+// 주장→값은 대상 칸의 조건 목록과 값 칸의 이름 없는 값 목록을 짝지어 둔다(pairTargetItemListWithValueList).
+function pairClaimSlot({ narrationType, subKind, rawSlotMap }) {
+  const isClaim = narrationType === NARRATION_TYPE_MAP.interpretation && subKind === INTERPRETATION_KIND_MAP.claimToValue;
+  const paired = isClaim ? pairTargetItemListWithValueList({ target: rawSlotMap?.target, value: rawSlotMap?.value }) : null;
+  return paired ? { ...rawSlotMap, ...paired } : rawSlotMap;
+}
+
 function assembleNarration({ narrationType, subKind, rawSlotMap, index = '', origin = null,
-  hasSecondClaim = false, maxWordCount = null, language = CAPTION_LANGUAGE_MAP.ko }) {
+  hasSecondClaim = false, maxWordCount = null, maxChars = null, language = CAPTION_LANGUAGE_MAP.ko }) {
   if (language === CAPTION_LANGUAGE_MAP.en) {
     return assembleEnglishNarration({
-      narrationType, subKind, rawSlotMap, index, origin, hasSecondClaim, maxWordCount,
+      narrationType, subKind, rawSlotMap, index, origin, hasSecondClaim, maxWordCount, maxChars,
     });
   }
   const slotList = getSlotList({ narrationType, subKind, origin, hasSecondClaim });
   const assemble = NARRATION_ASSEMBLE_MAP[narrationType]?.[subKind];
   if (!slotList || !assemble) return null;
-  const slotMap = normalizeSlotMap({ slotList, rawSlotMap });
+  const slotMap = normalizeSlotMap({ slotList, rawSlotMap: pairClaimSlot({ narrationType, subKind, rawSlotMap }) });
   if (slotMap.situation) slotMap.situation = completeSituationSlot({ situation: slotMap.situation });
   if (hasEmptyRequiredSlot({ slotList, slotMap })) return null;
   if (hasValuelessSlot({ slotList, slotMap })) return null;
   if (hasInvalidTailSlot({ slotList, slotMap })) return null;
-  const joined = assemble({ slotMap, index, maxWordCount }).replace(/\s+/g, ' ').trim();
+  const joined = assemble({ slotMap, index, maxWordCount, maxChars }).replace(/\s+/g, ' ').trim();
   return { text: dropRepeatedWordAtSeam({ text: joined }), slotMap };
 }
 
 module.exports = {
   NARRATION_SLOT_MAP, getSlotList, computeSlotTotal, buildSlotInstruction, DESCRIPTION_TAIL_NOUN_LIST, hasCompleteTailNoun,
   cutAtTailNoun,
-  normalizeSlotMap, hasEmptyRequiredSlot, hasValuelessSlot, hasValueToken, assembleNarration, countWord, truncateSlot,
+  normalizeSlotMap, pairTargetItemListWithValueList, hasEmptyRequiredSlot, hasValuelessSlot, hasValueToken, assembleNarration, countWord, truncateSlot,
   trimToCompletePhrase, hasFinalConsonant, attachJosa, isWithinEnglishSlotLimit, SLOT_OVERAGE_TOLERANCE_WORD_COUNT,
   scaleWordBudget, ENGLISH_WORD_SCALE, trimEnglishDanglingTail,
 };

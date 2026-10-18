@@ -53,10 +53,9 @@ test('무발화 프롬프트는 구조도·흐름도면 제목 대신 구성 요
   const prompt = buildVisualDescriptionPrompt({
     subKind: reaction, origin: silence, recentTranscript: '다이어그램을 잠시 살펴보시죠.', minWordCount: 5, maxWordCount: 14,
   });
-  assert.match(prompt, /구조도·흐름도/);
-  assert.match(prompt, /구성 요소/);
-  assert.match(prompt, /연결/);
-  assert.match(prompt, /제목만/);
+  // 무발화 v3: 구조도는 주요 구성 요소와 연결을 담고, 화면 제목은 뺀다.
+  assert.match(prompt, /구조도는 주요 구성 요소와 연결/);
+  assert.match(prompt, /빼는 것: 화면 제목/);
   assert.match(prompt, /3~12어절/);
   assert.match(buildVisualDescriptionPrompt({ subKind: reaction }), /3~8어절/);
 });

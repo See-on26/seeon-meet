@@ -21,8 +21,9 @@ test('무발화 묘사 프롬프트는 화면을 보라고 한 뒤의 침묵 상
   assert.doesNotMatch(prompt, /방금 단독으로 제시된 사진/);
   assert.match(prompt, /말없이/);
   assert.match(prompt, /이 사진을 한번 보시죠/);
-  assert.match(prompt, /그대로 옮기지/);
-  assert.match(prompt, /자료 종류로 끝맺/);
+  // 무발화 v3: 제목·지시문은 빼고, 자료 종류로 맺는다.
+  assert.match(prompt, /빼는 것: 화면 제목·지시문/);
+  assert.match(prompt, /맨 끝은 자료 종류/);
   assert.match(prompt, /JSON/);
 });
 

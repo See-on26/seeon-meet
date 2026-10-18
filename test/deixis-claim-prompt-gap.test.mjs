@@ -29,11 +29,12 @@ test('지시 대상 프롬프트는 이미 안내된 해설 목록을 모델에 
 });
 
 test('수치 프롬프트는 발표자가 이미 말했다는 이유로 거절하지 않는다', () => {
-  for (const subKind of ['claim_to_value', 'value_to_meaning']) {
-    const prompt = buildInterpretationPrompt({ utterance: '크게 늘었습니다.', subKind });
-    assert.match(prompt, /발화가 무엇을 말했는지 다시 따지지 말고/, subKind);
-    assert.doesNotMatch(prompt, /이미 말로 밝힌/, subKind);
-  }
+  const valuePrompt = buildInterpretationPrompt({ utterance: '크게 늘었습니다.', subKind: 'value_to_meaning' });
+  assert.match(valuePrompt, /발화가 무엇을 말했는지 다시 따지지 말고/);
+  // 주장→값(A 대상 고정)은 같은 뜻을 "정보 공백 판단은 끝났으니 다시 따지지 않는다"로 쓴다.
+  const claimPrompt = buildInterpretationPrompt({ utterance: '크게 늘었습니다.', subKind: 'claim_to_value' });
+  assert.match(claimPrompt, /정보 공백 판단은 끝났으니 다시 따지지 않는다/);
+  for (const prompt of [valuePrompt, claimPrompt]) assert.doesNotMatch(prompt, /이미 말로 밝힌/);
 });
 
 test('지시 대상 프롬프트 예시에 시연 슬라이드 내용을 넣지 않는다', () => {
@@ -42,17 +43,20 @@ test('지시 대상 프롬프트 예시에 시연 슬라이드 내용을 넣지 
 });
 
 // 같은 시연: "특히 장비가 크게 늘었습니다" → 화면에는 RSU 79개·WAVE 단말기 3,000개가 있는데 "RSU 설치, 79개" 하나만 나왔다.
-test('변화·비교 수치 프롬프트는 묶음 이름이면 값이 있는 항목을 2개까지 각자의 값과 함께 쓰게 한다', () => {
+// 주장→값 A(대상 고정, 10/18 발화 기반 16자리): 대상·조건·부분을 먼저 고정하고, 셋 이상이면 조건 이름을 target 에 모두 쓴다.
+test('변화·비교 수치 프롬프트는 대상·조건을 먼저 고정하고, 셋 이상 항목은 조건 이름과 값을 같은 순서로 모두 쓰게 한다', () => {
   const prompt = buildInterpretationPrompt({ utterance: '인력이 크게 늘었습니다.', subKind: 'claim_to_value' });
-  assert.match(prompt, /여러 항목을 묶어 부르는 말/);
-  assert.match(prompt, /2개까지/);
+  assert.match(prompt, /1단계 — 무엇에 대한 말인지 먼저 고정한다/);
+  assert.match(prompt, /항목이 셋 이상이면 조건 이름을 target에 순서대로 모두 쓰고/);
+  assert.match(prompt, /서로 다른 집단·구간은 "이름 값, 이름 값"으로 나란히/);
   assert.doesNotMatch(prompt, /RSU|WAVE|단말기|장비/);
-  assert.doesNotMatch(buildInterpretationPrompt({ utterance: '73%입니다.', subKind: 'value_to_meaning' }), /묶어 부르는 말/);
+  assert.doesNotMatch(buildInterpretationPrompt({ utterance: '73%입니다.', subKind: 'value_to_meaning' }), /1단계/);
 });
 
-test('변화·비교 해설의 값 칸은 항목 둘과 값이 들어가게 6어절까지 받는다', () => {
+// 값 칸 6어절에서는 네 항목 목록의 뒤쪽이 잘렸다(03#10). 전체 예산은 조립 뒤에 맞춘다.
+test('변화·비교 해설의 값 칸은 네 항목 목록이 들어가게 8어절까지 받는다', () => {
   const valueSlot = getSlotList({ narrationType: 'interpretation', subKind: 'claim_to_value' }).find((slot) => slot.key === 'value');
-  assert.equal(valueSlot.maxWordCount, 6);
+  assert.equal(valueSlot.maxWordCount, 8);
   assert.match(valueSlot.label, /묶음/);
   const assemble = (rawSlotMap) => assembleNarration({ narrationType: 'interpretation', subKind: 'claim_to_value', rawSlotMap })?.text ?? null;
   assert.equal(assemble({ target: '설치 장비', value: 'RSU 79개와 WAVE 단말기 3,000개' }), '설치 장비, RSU 79개와 WAVE 단말기 3,000개');
@@ -60,11 +64,11 @@ test('변화·비교 해설의 값 칸은 항목 둘과 값이 들어가게 6어
 });
 
 // 실제 VLM 거절 이유(10/15): "특히 장비가 크게 늘었습니다"는 "이전 값이 없어 변화의 근거 값을 못 댐" 10/10.
-test('변화 수치는 바뀐 뒤 값만 있어도 그 값을 근거로 쓰고, 이전 값이 없다는 이유로 거절하지 않게 한다', () => {
+test('변화 수치는 같은 항목의 시간 변화만 "전 값에서 뒤 값"으로 잇고, 값·눈금을 못 찾을 때만 거절한다', () => {
   const prompt = buildInterpretationPrompt({ utterance: '가입자가 크게 늘었습니다.', subKind: 'claim_to_value' });
-  assert.match(prompt, /바뀐 뒤 값만 있으면 그 값을 근거로 쓴다/);
-  assert.match(prompt, /이전 값이 없다는 이유로 "NONE"을 내지 않는다/);
-  assert.match(prompt, /관련된 숫자가 하나라도 있으면 "NONE"을 내지 않는다/);
+  assert.match(prompt, /같은 항목이 시간에 따라 바뀐 것만 "전 값에서 뒤 값"/);
+  assert.match(prompt, /값이나 눈금을 화면에서 찾지 못할 때만 NONE이다/);
+  assert.match(prompt, /축 눈금으로 어림해 "약"을 붙인다/);
   assert.doesNotMatch(prompt, /양쪽 수치/);
   const valueSlot = getSlotList({ narrationType: 'interpretation', subKind: 'claim_to_value' }).find((slot) => slot.key === 'value');
   assert.match(valueSlot.label, /바뀐 뒤 값만 있으면 그 값/);
@@ -107,7 +111,11 @@ test('수치 프롬프트: 같은 화면 OCR 줄이 있으면 "청자는 화면�
       lineList: screenLineList, keywordSourceList: [utterance], isClaimToValue: subKind === 'claim_to_value',
     }).text;
     assert.ok(block, subKind);
-    assert.equal(withScreenText, base.replace(LISTENER_LINE, `${block}\n\n${LISTENER_LINE}`), subKind);
+    // 값→의미는 덩어리 뒤에 빈 줄을 두고, 주장→값(A)은 본문 빈 줄 앞에 덩어리를 둔다.
+    const expected = subKind === 'claim_to_value'
+      ? base.replace(`\n\n${LISTENER_LINE}`, `\n${block}\n\n${LISTENER_LINE}`)
+      : base.replace(LISTENER_LINE, `${block}\n\n${LISTENER_LINE}`);
+    assert.equal(withScreenText, expected, subKind);
     assert.ok(withScreenText.indexOf('글자 인식기(OCR)') < withScreenText.indexOf(LISTENER_LINE), subKind);
   }
 });

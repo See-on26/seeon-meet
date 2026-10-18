@@ -117,7 +117,8 @@ export const NARRATION_WORD_RANGE_MAP = {
   },
   [NARRATION_TYPE_MAP.visualDescription]: {
     [VISUAL_DESCRIPTION_KIND_MAP.reaction]: { minWordCount: 5, maxWordCount: 12 },
-    [VISUAL_DESCRIPTION_KIND_MAP.scale]: { minWordCount: 4, maxWordCount: 8 },
+    // 척도는 크기 묘사 한 구(caption)다. "어른 손바닥만 한 사과"(3어절)부터 측정값 묘사까지 받는다.
+    [VISUAL_DESCRIPTION_KIND_MAP.scale]: { minWordCount: 3, maxWordCount: 10 },
   },
   [NARRATION_TYPE_MAP.speakerIdentity]: {
     [SPEAKER_IDENTITY_KIND_MAP.named]: { minWordCount: 2, maxWordCount: 3 },

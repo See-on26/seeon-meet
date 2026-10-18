@@ -186,8 +186,8 @@ test('영어 조립: 상한을 크게 넘긴 칸은 잘라 끝에 남은 관사�
   const slotMap = normalizeSlotMap({
     slotList, rawSlotMap: { target: 'the big chart of quarterly sales figures broken down by region and by the year', value: '9.2 hours' }, ...en,
   });
-  // 상한 8단어 + 여유 2단어에서 잘라 "… broken down by" 가 되고, 끝에 남은 전치사 by 를 뗀다.
-  assert.equal(slotMap.target, 'the big chart of quarterly sales figures broken down');
+  // 상한 10단어 + 여유 2단어에서 잘라 "… region and" 이 되고, 끝에 남은 접속사 and 를 뗀다.
+  assert.equal(slotMap.target, 'the big chart of quarterly sales figures broken down by region');
   assert.equal(slotMap.value, '9.2 hours');
 });
 
@@ -215,7 +215,7 @@ test('영어 조립: 해석 값→의미는 "… means …", 주장→값은 "�
   }), null);
 });
 
-test('영어 조립: 시각 반응은 "Image:" 머리말(모델이 붙인 머리말은 떼고), 척도는 "…, N times larger than …"', () => {
+test('영어 조립: 시각 반응은 "Image:" 머리말(모델이 붙인 머리말은 떼고), 척도는 caption 한 구 그대로', () => {
   assert.equal(assembleNarration({
     narrationType: NARRATION_TYPE_MAP.visualDescription, subKind: VISUAL_DESCRIPTION_KIND_MAP.reaction,
     rawSlotMap: { description: 'Image: a starving child collapsed from exhaustion' }, ...en,
@@ -226,12 +226,8 @@ test('영어 조립: 시각 반응은 "Image:" 머리말(모델이 붙인 머리
   }).text, 'Image: a cat wearing a tiny crown');
   assert.equal(assembleNarration({
     narrationType: NARRATION_TYPE_MAP.visualDescription, subKind: VISUAL_DESCRIPTION_KIND_MAP.scale,
-    rawSlotMap: { comparison: 'the pine tree', scale: '4', direction: 'larger', target: 'the Buddha statue' }, ...en,
-  }).text, 'The Buddha statue, 4 times larger than the pine tree');
-  assert.equal(assembleNarration({
-    narrationType: NARRATION_TYPE_MAP.visualDescription, subKind: VISUAL_DESCRIPTION_KIND_MAP.scale,
-    rawSlotMap: { comparison: 'the pine tree', scale: '', direction: 'smaller', target: 'the Buddha statue' }, ...en,
-  }).text, 'The Buddha statue, smaller than the pine tree');
+    rawSlotMap: { caption: 'a Buddha statue about four times taller than the pine tree' }, ...en,
+  }).text, 'A Buddha statue about four times taller than the pine tree');
 });
 
 test('영어 조립: 발화자 이름·위치', () => {
@@ -341,12 +337,12 @@ test('에이전트: 캡션 언어를 읽어 프롬프트·조립에 넘긴다(�
   assert.ok(promptList[0].includes(RULE_MARK));
   assert.equal(interpretation.text, '73% means year-over-year valuation growth rate');
 
-  promptList = mockVlm(['{"comparison":"the pine tree","scale":"4","direction":"larger","target":"the Buddha statue"}']);
+  promptList = mockVlm(['{"caption":"a Buddha statue about four times taller than the pine tree"}']);
   const scale = await agentFieldMap[NARRATION_TYPE_MAP.visualDescription].generate({
     jpegBuffer, subKind: VISUAL_DESCRIPTION_KIND_MAP.scale, utterance: '정말 크죠',
   });
   assert.ok(promptList[0].includes(RULE_MARK));
-  assert.equal(scale.text, 'The Buddha statue, 4 times larger than the pine tree');
+  assert.equal(scale.text, 'A Buddha statue about four times taller than the pine tree');
 
   promptList = mockVlm(['The horizontal axis is the year and the vertical axis is revenue in billions of won.']);
   const command = await agentFieldMap[NARRATION_TYPE_MAP.userCommand].generate({ jpegBuffer, command: USER_COMMAND_MAP.graphAxis });
