@@ -153,7 +153,15 @@ test('한국어 변화·비교·결론: 명사를 꾸미는 비교·극값, 목�
     '올해도 최고의 결과를 내겠습니다.',
     '지난 기록을 확인했습니다.',
     '제 전화 때문에 흐름이 끊겼네요.',
+    '제일 궁금해하시는 부분을 먼저 보겠습니다.',
   ]) {
     assert.deepEqual(detectKorean({ text, type: change }), [], text);
   }
+});
+
+// 탐지 평가 DB 2차 val: 비교 표지가 멀리 있으면 새 척도 형용사(낮다)가 척도 후보로도 잡혀 비교 후보를 밀어냈다.
+test('한국어: 같은 자리를 변화·비교로도 잡았으면 척도 후보는 내지 않는다', { skip: !hasKiwiModel }, () => {
+  const text = '상반기만 보면 대전 지사는 광주 지사에 비해 이직률이 눈에 띄게 낮았습니다.';
+  assert.deepEqual(detectKorean({ text, type: scale }), []);
+  assert.ok(detectKorean({ text, type: change }).length > 0);
 });

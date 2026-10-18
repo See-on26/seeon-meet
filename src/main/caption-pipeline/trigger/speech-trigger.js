@@ -398,7 +398,7 @@ function findChangeStemIndex({ context, index }) {
   // 가장·제일 + 술어("가장 붐볐습니다").
   const superlativeStemIndex = readPredicateStemIndex({ tokenList, index });
   if (superlativeStemIndex >= 0 && SUPERLATIVE_ADVERB_SET.has(tokenList[superlativeStemIndex - 1]?.form)
-    && tokenList[superlativeStemIndex - 1].tag === 'MAG') return superlativeStemIndex;
+    && tokenList[superlativeStemIndex - 1].tag === 'MAG' && !endsInModifier({ tokenList, index })) return superlativeStemIndex;
   if (token.tag === 'XSV' && index > 0 && CHANGE_NOUN_SET.has(tokenList[index - 1].form)) return index - 1;
   // 형용사 + 어 + 지다: "좋아졌다", "높아졌다".
   if (token.tag === 'VX' && token.form === '지' && tokenList[index - 1]?.tag === 'EC'
@@ -517,12 +517,13 @@ function detectKoreanScale(context) {
   return candidateList.filter(Boolean);
 }
 
-// 술어 어미가 관형형(ETM)으로 끝나 명사를 꾸미는지("크게 걱정하실 필요").
+// 술어 어미가 관형형(ETM)으로 끝나 명사를 꾸미는지("크게 걱정하실 필요", "제일 궁금해하시는 부분"). 선어말 어미와 "-어 하다" 같은 보조 용언은 건너본다.
 function endsInModifier({ tokenList, index }) {
-  for (let cursor = index + 1; cursor < tokenList.length && cursor <= index + 4; cursor += 1) {
+  for (let cursor = index + 1; cursor < tokenList.length && cursor <= index + 6; cursor += 1) {
     const token = tokenList[cursor];
     if (token.tag === 'ETM') return true;
-    if (token.tag !== 'EP') return false;
+    const isAuxiliaryLink = token.tag === 'EC' && tokenList[cursor + 1]?.tag === 'VX';
+    if (token.tag !== 'EP' && token.tag !== 'VX' && !isAuxiliaryLink) return false;
   }
   return false;
 }
@@ -679,15 +680,16 @@ function detectKoreanAnchoredChange(context) {
 
 function detectKoreanCandidateList({ text, tokenList }) {
   const context = createKoreanContext({ text, tokenList });
+  const changeList = [...detectKoreanChange(context), ...detectKoreanAnchoredChange(context)];
+  // 같은 자리를 변화·비교로도 잡았으면("광주 지사에 비해 … 눈에 띄게 낮았습니다") 비교로 보고 척도 후보는 내지 않는다.
+  const scaleList = [...detectKoreanScale(context), ...detectKoreanScaleAdverb(context), ...detectKoreanProportion(context)]
+    .filter((candidate) => !changeList.some((change) => candidate.start < change.end && change.start < candidate.end));
   return dedupeCandidateList([
     ...detectKoreanDemonstrative(context),
     ...detectKoreanAdjectiveNoun(context),
     ...detectKoreanNumber(context),
-    ...detectKoreanChange(context),
-    ...detectKoreanAnchoredChange(context),
-    ...detectKoreanScale(context),
-    ...detectKoreanScaleAdverb(context),
-    ...detectKoreanProportion(context),
+    ...changeList,
+    ...scaleList,
   ]);
 }
 
