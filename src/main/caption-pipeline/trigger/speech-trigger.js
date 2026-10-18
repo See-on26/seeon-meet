@@ -220,13 +220,19 @@ function detectKoreanAdjectiveNoun(context) {
     let startToken = null;
     if (PREDICATE_ADJ_TAG_SET.has(token.tag) && !NON_DESCRIPTIVE_ADJ_SET.has(token.form)) startToken = token;
     if (token.tag === 'VV' && ADJ_ANALYZED_AS_VERB_SET.has(token.form)) startToken = token;
-    if (token.tag === 'XSA' && index > 0 && ['XR', 'NNG'].includes(tokenList[index - 1].tag)) startToken = tokenList[index - 1];
+    // "뾰족한 거"처럼 Kiwi 가 어근을 부사(MAG)로 분석하는 형용사도 넣는다.
+    if (token.tag === 'XSA' && index > 0 && ['XR', 'NNG', 'MAG'].includes(tokenList[index - 1].tag)) startToken = tokenList[index - 1];
     // "오래된 것": 부사 + 되다는 상태를 나타내 형용사처럼 대상을 가린다.
     if (token.tag === 'XSV' && token.form === '되' && tokenList[index - 1]?.tag === 'MAG') startToken = tokenList[index - 1];
     if (!startToken) return;
     candidateList.push(buildCandidate({ text, type: TRIGGER_TYPE_MAP.adjectiveNoun, start: startToken.start, end: noun.end }));
   });
   return candidateList.filter(Boolean);
+}
+
+function isAdjectiveToken(token) {
+  if (!token) return false;
+  return PREDICATE_ADJ_TAG_SET.has(token.tag) || (token.tag === 'VV' && ADJ_ANALYZED_AS_VERB_SET.has(token.form));
 }
 
 function isNumberToken(token) {
@@ -317,6 +323,8 @@ function readPredicateStemIndex({ tokenList, index }) {
 }
 
 const ADJ_TO_CHANGE_VERB_PATTERN = /(?:아|어|여|해|워|와|러)지$/;
+// Kiwi 가 줄어든 꼴(크+어지 → 커지)을 동사 한 덩어리로 자르는 형용사+어지다.
+const CONTRACTED_ADJ_CHANGE_VERB_SET = new Set(['커지', '나빠지', '흐려지']);
 
 // 변화 술어의 줄기(stem) 토큰 위치. 없으면 -1.
 function findChangeStemIndex({ context, index }) {
@@ -327,13 +335,14 @@ function findChangeStemIndex({ context, index }) {
     return tokenList[index + 1]?.tag === 'ETM' ? -1 : index;
   }
   // "길어지다", "좋아지다"처럼 한 동사로 분석된 형용사+어지다.
-  if (PREDICATE_VERB_TAG_SET.has(token.tag) && ADJ_TO_CHANGE_VERB_PATTERN.test(token.form)
+  if (PREDICATE_VERB_TAG_SET.has(token.tag)
+    && (ADJ_TO_CHANGE_VERB_PATTERN.test(token.form) || CONTRACTED_ADJ_CHANGE_VERB_SET.has(token.form))
     && tokenList[index + 1]?.tag !== 'ETM') return index;
   if (token.tag === 'VV' && token.form === '미치' && tokenList[index - 1]?.form === '못') return index;
   if (token.tag === 'XSV' && index > 0 && CHANGE_NOUN_SET.has(tokenList[index - 1].form)) return index - 1;
   // 형용사 + 어 + 지다: "좋아졌다", "높아졌다".
   if (token.tag === 'VX' && token.form === '지' && tokenList[index - 1]?.tag === 'EC'
-    && PREDICATE_ADJ_TAG_SET.has(tokenList[index - 2]?.tag)) return index - 2;
+    && isAdjectiveToken(tokenList[index - 2])) return index - 2;
   // 비교: 비교 표지(보다·더·덜·에 비해·대비) 뒤 첫 술어. "보다 많았어요", "더 잘 버텼어요", "보다 단연 우세했어요".
   const stemIndex = readPredicateStemIndex({ tokenList, index });
   if (stemIndex < 0 || isComparisonMarker(token) || NON_DESCRIPTIVE_ADJ_SET.has(tokenList[stemIndex].form)) return -1;
@@ -512,15 +521,24 @@ const EN_UNIT_PATTERN_TEXT = [
   'mm', 'hours?', 'minutes?', 'seconds?', 'milliseconds?', 'ms', 'days?', 'weeks?', 'months?', 'units?', 'items?', 'cases?', 'calls?',
   'orders?', 'tickets?', 'trucks?', 'cars?', 'acres?', 'hectares?', 'degrees?', 'votes?', 'copies', 'pages?',
   'trips?', 'shipments?', 'reports?', 'complaints?', 'samples?', 'beds?', 'rooms?', 'stores?', 'sites?',
+  'rpm', 'kwh', 'mwh', 'gwh', 'kw', 'mw', 'watts?', 'kilowatts?', 'kilowatt-hours?', 'megawatts?', 'volts?', 'amps?',
+  'hz', 'khz', 'mhz', 'ghz', 'hertz', 'psi', 'kpa', 'mph', 'kph', 'decibels?', 'db', 'lbs?', 'ounces?', 'oz',
+  'kb', 'mb', 'gb', 'tb', 'kilobytes?', 'megabytes?', 'gigabytes?', 'terabytes?', 'fps', 'kcal', 'calories?',
+  '(?:square|sq|cubic) (?:meters?|metres?|feet|foot|kilometers?|km|miles?|inches?|yards?|centimeters?|cm|m|ft)',
 ].join('|');
-// 단위 목록에 없는 복수 명사("31 cups", "12 benches")도 개수 단위로 본다.
-const EN_PLURAL_COUNT_PATTERN = /\b\d[\d,]*(?:\.\d+)?\s(?!(?:is|was|has|its|this|us|yes|plus|always|perhaps|as|was)\b)[a-z]{2,}s\b/gi;
+// 단위 목록에 없는 복수 명사("31 cups", "12 benches", "9.6 newton-meters")도 개수·단위로 본다.
+const EN_PLURAL_COUNT_PATTERN = /\b\d[\d,]*(?:\.\d+)?\s(?!(?:is|was|has|its|this|us|yes|plus|always|perhaps|as|was)\b)[a-z]{2,}(?:-[a-z]+)*s\b/gi;
 const EN_NUMBER_PATTERN = new RegExp(
   `(?:\\$\\s?\\d[\\d,]*(?:\\.\\d+)?(?:\\s?(?:million|billion|thousand|k|m|bn)\\b)?`
   + `|\\b(?:\\d[\\d,]*(?:\\.\\d+)?|${[...EN_NUMBER_WORD_SET].join('|')})(?:\\s(?:hundred|thousand|million|billion))?\\s?(?:${EN_UNIT_PATTERN_TEXT})(?![a-z]))`,
   'gi',
 );
+// 목적어를 받으면 값의 변화가 아니다("dropped off the samples", "shifted the meeting").
+const EN_OBJECT_START_TEXT = '(?:the|a|an|our|their|your|my|his|her|its|this|that|these|those|some|them|it|him|me|us|at)';
 const EN_CHANGE_VERB_TEXT = [
+  `dropped off(?!\\s+${EN_OBJECT_START_TEXT}\\b)`, 'stretch(?:es|ed) out', 'shift(?:s|ed) (?:to|toward|towards|up|down|upward|downward|higher|lower)',
+  '(?:came|come|comes|coming) in (?:below|above|under|over|lower|higher|ahead of|behind|short of)',
+  'expand(?:s|ed)', 'contract(?:s|ed)',
   'increas(?:e|es|ed|ing)', 'decreas(?:e|es|ed|ing)', 'drop(?:s|ped|ping)?', 'fell', 'fall(?:s|en|ing)?', 'rose',
   'ris(?:e|es|en|ing)', 'grew', 'grow(?:s|n|ing)?', 'doubled', 'tripled', 'halved', 'declin(?:e|es|ed|ing)',
   'improv(?:e|es|ed|ing)', 'jump(?:s|ed)?', 'climb(?:s|ed)?', 'surg(?:e|es|ed)', 'shrank', 'shrunk', 'shrinks?',
@@ -566,6 +584,8 @@ const EN_NON_VALUE_CHANGE_RULE_LIST = [
   { head: /^fall$/i, before: /\b(?:next|last|this|early|late|in the)\s+$/i },
   { head: /^crash(?:es|ed)?$/i, after: /^\s+(?:twice|once|again|\d+\s+times|(?:two|three|four|five|several|many)\s+times)\b/i },
   { head: /^jump(?:s|ed)?$/i, after: /^\s+out\b/i },
+  // "expanded their team", "contracted a local vendor"처럼 목적어를 받으면 늘리기·계약이다.
+  { head: /^(?:expand|contract)(?:s|ed)$/i, after: new RegExp(`^\\s+(?:${EN_OBJECT_START_TEXT}|with|for)\\b`, 'i') },
   { head: /^[a-z]+ing$/i, before: /\bthe\s+$/i },
 ];
 // "over the eight weeks"처럼 기간을 나타내는 수는 화면 수치가 아니다.
@@ -637,7 +657,7 @@ function detectEnglishDemonstrative({ text, wordList }) {
 
 function detectEnglishAdjectiveNoun({ text }) {
   const candidateList = [];
-  for (const match of text.matchAll(/\bthe\s+(?:(?:most|least)\s+)?([a-z]+)\s+(?:one|ones|side|sides|part|parts)\b/gi)) {
+  for (const match of text.matchAll(/\bthe\s+(?:(?:most|least)\s+)?([a-z]+(?:-[a-z]+)*)\s+(?:one|ones|side|sides|part|parts)\b/gi)) {
     if (EN_ADJ_NOUN_EXCLUDE_SET.has(match[1].toLowerCase())) continue;
     candidateList.push(buildCandidate({ text, type: TRIGGER_TYPE_MAP.adjectiveNoun, start: match.index, end: match.index + match[0].length }));
   }
