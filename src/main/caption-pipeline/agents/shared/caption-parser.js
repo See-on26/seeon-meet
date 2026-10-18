@@ -206,6 +206,6 @@ function parseSlotCaptionContent({ content, narrationType, subKind, origin = nul
 module.exports = {
   GROUNDING_NONE_TOKEN, DEFAULT_GROUNDING_MAX_CHARS, CHARS_PER_WORD_ESTIMATE, ENGLISH_CHARS_PER_WORD_ESTIMATE,
   computeMaxChars, buildSlotOutputInstruction, truncateToWordCount, containsHanCharacter,
-  REJECT_KIND_MAP, SLOT_AGENT_MAX_TOKENS, describeAgentRejection, SPEECH_GAP_DECIDED_RULE,
+  REJECT_KIND_MAP, SLOT_AGENT_MAX_TOKENS, describeAgentRejection, SPEECH_GAP_DECIDED_RULE, NO_HAN_RULE, ENGLISH_NO_HAN_RULE,
   salvageSlotMap, isSlotJsonAttempt, parseGroundingText, parseSlotCaption,
 };

@@ -55,6 +55,8 @@ const INCOMPLETE_TAIL_PATTERN = new RegExp(`(?:${[
   '그', '이', '저', '어떤', '무슨',
 ].join('|')})$`);
 const INCOMPLETE_SUFFIX_PATTERN = /(?:는|던)$/;
+// "금일 오후 6시까지"의 "6시까지"는 기한 자체라 덜 끝난 말이 아니다. 숫자에 붙은 까지·부터는 남긴다.
+const NUMBERED_RANGE_TAIL_PATTERN = /\d\D{0,3}(?:까지|부터)$/;
 
 const SAFE_INCOMPLETE_TAIL_PATTERN = new RegExp(`(?:${[
   '및', '하고', '또는', '그리고', '또한', '에서', '에게', '한테', '부터', '까지', '보다', '처럼', '만큼',
@@ -120,8 +122,9 @@ function trimToCompletePhrase({ text, isConservative = false }) {
   const wordList = String(text || '').trim().split(/\s+/).filter(Boolean);
   while (wordList.length > 1) {
     const last = wordList[wordList.length - 1].replace(TRAILING_MARK_PATTERN, '');
+    const isNumberedRange = isConservative && NUMBERED_RANGE_TAIL_PATTERN.test(last);
     if (!last || INCOMPLETE_WORD_SET.has(last)
-      || tailPattern.test(last) || INCOMPLETE_SUFFIX_PATTERN.test(last)) {
+      || (!isNumberedRange && tailPattern.test(last)) || INCOMPLETE_SUFFIX_PATTERN.test(last)) {
       wordList.pop(); continue;
     }
     wordList[wordList.length - 1] = last;
@@ -134,6 +137,14 @@ function trimToCompletePhrase({ text, isConservative = false }) {
   return wordList.join(' ').replace(TRAILING_MARK_PATTERN, '');
 }
 
+// 지시 해설은 가리킨 대상의 이름·내용만 읽는다. "보는 중" 같은 상황 칸은 청자에게 정보가 아니라 두지 않는다.
+// seen 은 가리킨 곳에 보이는 것을 먼저 옮겨 적게 해 지어내기를 줄이는 근거 칸이다(읽히지 않는다).
+// 띄어쓰기 비교처럼 항목이 넷이면 11어절이 넘어서(효과영상 레이블) caption 은 12어절까지 받는다.
+const DEIXIS_SLOT_LIST = [
+  { key: 'seen', label: '가리킨 곳에 실제로 보이는 것 — 글자는 그대로, 그림·필기는 짧게', minWordCount: 0, maxWordCount: 20, isDiagnostic: true },
+  { key: 'caption', label: '청자에게 읽어 줄 해설 — 가리킨 대상의 이름·내용', minWordCount: 2, maxWordCount: 12, isPhrase: true },
+];
+
 const NARRATION_SLOT_MAP = {
   [NARRATION_TYPE_MAP.pageTransition]: {
     [PAGE_TRANSITION_KIND_MAP.slide]: [
@@ -145,24 +156,8 @@ const NARRATION_SLOT_MAP = {
     ],
   },
   [NARRATION_TYPE_MAP.deixis]: {
-    [DEIXIS_FORM_MAP.simple]: [
-      { key: 'target', label: '지시대상 묘사/내용 — 자료 종류(표·사진 등)까지 포함 (예: 2년간 매출 추이 표를)', minWordCount: 2, maxWordCount: 5, isPhrase: true },
-      { key: 'situation', label: "상황 묘사 — 발화 모사 ('보는 중', '주목' 등)", minWordCount: 2, maxWordCount: 2 },
-    ],
-    [DEIXIS_FORM_MAP.complete]: [
-      { key: 'mimicry', label: '발화 모사 — 기존 발화의 표현·어휘', minWordCount: 2, maxWordCount: 3, isDiagnostic: true },
-      { key: 'target', label: '지시대상 — 간략한 주제를 덧붙여', minWordCount: 1, maxWordCount: 2, isDiagnostic: true, isPhrase: true },
-      { key: 'explanation', label: '설명 — 묘사/설명·대상 사이의 관계성', minWordCount: 3, maxWordCount: 5, isDiagnostic: true, isPhrase: true },
-      {
-        key: 'sentence',
-        label: '위 세 요소(발화 모사 + 지시대상 + 설명)를 **모두 포함**하는 자연스러운 한 문장'
-          + ' (순서는 자연스럽게 바꿔도 된다)',
-        minWordCount: 6,
-        maxWordCount: 10,
-        // 문장은 어절 상한에서 자르면 "…도심 열의 약"처럼 값 앞에서 끊긴다. 허용치 안이면 통째로 받는다.
-        isWholeSentence: true,
-      },
-    ],
+    [DEIXIS_FORM_MAP.simple]: DEIXIS_SLOT_LIST,
+    [DEIXIS_FORM_MAP.complete]: DEIXIS_SLOT_LIST,
   },
   [NARRATION_TYPE_MAP.interpretation]: {
     [INTERPRETATION_KIND_MAP.valueToMeaning]: [
@@ -224,6 +219,11 @@ const CLAIM_SECOND_PAIR_SLOT_LIST = [
   { key: 'value2', label: '그 대상의 근거 값 — 반드시 수치. 같거나 없으면 빈 문자열', minWordCount: 0, maxWordCount: 5 },
 ];
 
+const ENGLISH_DEIXIS_LABEL_MAP = {
+  seen: 'what is actually visible where the speaker pointed — text as written, drawings/marks briefly',
+  caption: 'the narration read to the listener — the name, values or shape of the referenced item',
+};
+
 // 영어 캡션의 칸 설명. 칸 이름·어절(단어) 수는 한국어 칸과 같고, 설명만 영어 구에 맞게 바꾼다.
 const ENGLISH_SLOT_LABEL_MAP = {
   [NARRATION_TYPE_MAP.pageTransition]: {
@@ -236,18 +236,8 @@ const ENGLISH_SLOT_LABEL_MAP = {
     },
   },
   [NARRATION_TYPE_MAP.deixis]: {
-    [DEIXIS_FORM_MAP.simple]: {
-      target: 'the referenced item and its content, including the material type (e.g. "the two-year sales trend table")',
-      situation: 'short lead-in action phrase that mimics the speaker\'s verb and is read right before the target'
-        + ' (e.g. "Looking at", "Focusing on", "Comparing")',
-    },
-    [DEIXIS_FORM_MAP.complete]: {
-      mimicry: 'speaker mimicry — wording taken from the utterance',
-      target: 'the referenced item — with a brief topic',
-      explanation: 'explanation — what it shows or how it relates to the item',
-      sentence: 'one natural sentence that **includes all three** of the above (mimicry + item + explanation)'
-        + ' (the order may change)',
-    },
+    [DEIXIS_FORM_MAP.simple]: ENGLISH_DEIXIS_LABEL_MAP,
+    [DEIXIS_FORM_MAP.complete]: ENGLISH_DEIXIS_LABEL_MAP,
   },
   [NARRATION_TYPE_MAP.interpretation]: {
     [INTERPRETATION_KIND_MAP.valueToMeaning]: {
@@ -322,9 +312,7 @@ function scaleWordBudget({ minWordCount, maxWordCount, language }) {
 }
 
 // 영어 칸 가운데 어절 수를 그대로 옮기면 안 되는 칸. 지시 대상의 상황 칸은 대상 앞에 붙는 짧은 동작구("Looking at")다.
-const ENGLISH_WORD_RANGE_OVERRIDE_MAP = {
-  [NARRATION_TYPE_MAP.deixis]: { [DEIXIS_FORM_MAP.simple]: { situation: { minWordCount: 1, maxWordCount: 3 } } },
-};
+const ENGLISH_WORD_RANGE_OVERRIDE_MAP = {};
 
 function getSlotList({ narrationType, subKind, origin = null, hasSecondClaim = false, language = CAPTION_LANGUAGE_MAP.ko }) {
   const slotList = readSlotList({ narrationType, subKind, origin, hasSecondClaim });
@@ -550,10 +538,8 @@ const NARRATION_ASSEMBLE_MAP = {
     [PAGE_TRANSITION_KIND_MAP.document]: ({ slotMap }) => `페이지: ${slotMap.description}`,
   },
   [NARRATION_TYPE_MAP.deixis]: {
-    [DEIXIS_FORM_MAP.simple]: ({ slotMap }) => (
-      `${slotMap.target} ${slotMap.situation}`
-    ),
-    [DEIXIS_FORM_MAP.complete]: ({ slotMap }) => slotMap.sentence,
+    [DEIXIS_FORM_MAP.simple]: ({ slotMap }) => slotMap.caption,
+    [DEIXIS_FORM_MAP.complete]: ({ slotMap }) => slotMap.caption,
   },
   [NARRATION_TYPE_MAP.interpretation]: {
     [INTERPRETATION_KIND_MAP.valueToMeaning]: ({ slotMap }) => (
@@ -588,8 +574,8 @@ const ENGLISH_NARRATION_ASSEMBLE_MAP = {
     [PAGE_TRANSITION_KIND_MAP.document]: ({ slotMap }) => `Page: ${slotMap.description}`,
   },
   [NARRATION_TYPE_MAP.deixis]: {
-    [DEIXIS_FORM_MAP.simple]: ({ slotMap }) => `${slotMap.situation} ${slotMap.target}`,
-    [DEIXIS_FORM_MAP.complete]: ({ slotMap }) => slotMap.sentence,
+    [DEIXIS_FORM_MAP.simple]: ({ slotMap }) => slotMap.caption,
+    [DEIXIS_FORM_MAP.complete]: ({ slotMap }) => slotMap.caption,
   },
   [NARRATION_TYPE_MAP.interpretation]: {
     [INTERPRETATION_KIND_MAP.valueToMeaning]: ({ slotMap }) => `${slotMap.value} means ${slotMap.frame}`,

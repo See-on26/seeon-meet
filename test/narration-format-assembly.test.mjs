@@ -25,16 +25,34 @@ test('수치 해설(수치 → 뜻)은 지금처럼 "값은 해석틀을 의미"
     rawSlotMap: { value: '73%', frame: '작년 대비 재고 회전율' } }), '73%는 작년 대비 재고 회전율을 의미');
 });
 
-test('지시 해설의 상황 칸이 "가리키며" 같은 가리키는 동작이면 "확인 중" 으로 둔다(가리켰다는 사실은 정보가 아니다)', () => {
-  assert.equal(assemble({ narrationType: 'deixis', subKind: 'simple',
-    rawSlotMap: { target: '배송 지연 412건 항목', situation: '가리키며' } }), '배송 지연 412건 항목 확인 중');
-  assert.equal(assemble({ narrationType: 'deixis', subKind: 'simple',
-    rawSlotMap: { target: '배송 지연 412건 항목', situation: '가리키며 설명함' } }), '배송 지연 412건 항목 확인 중');
+// 효과영상 레이블(2026-10-17)의 지시 정답은 모두 "보는 중" 같은 상황 말 없이 대상 내용만이다.
+test('지시 해설은 caption(대상 내용)만 읽고, 근거 칸 seen 은 읽지 않는다', () => {
+  for (const subKind of ['simple', 'complete']) {
+    assert.deepEqual(getSlotList({ narrationType: 'deixis', subKind }).map((slot) => slot.key), ['seen', 'caption'], subKind);
+    assert.equal(assemble({ narrationType: 'deixis', subKind,
+      rawSlotMap: { seen: '배송 지연 412건이라고 적힌 항목', caption: '배송 지연 412건 항목' } }), '배송 지연 412건 항목', subKind);
+  }
 });
 
-test('지시 해설의 다른 상황 칸은 지금처럼 둔다', () => {
+test('지시 해설은 두 어절짜리 대상 이름도 받고, caption 이 비면 만들지 않는다', () => {
   assert.equal(assemble({ narrationType: 'deixis', subKind: 'simple',
-    rawSlotMap: { target: '응답 품질 변화 표', situation: '보는 중' } }), '응답 품질 변화 표 보는 중');
+    rawSlotMap: { seen: '초코송이라고 적힌 봉지', caption: '초코송이 과자' } }), '초코송이 과자');
+  assert.equal(assemble({ narrationType: 'deixis', subKind: 'simple', rawSlotMap: { seen: '빈 배경', caption: '' } }), null);
+});
+
+// 효과영상 메일 예시: VLM 은 "요청기한 금일 오후 6시까지"를 냈는데 끝맺음 다듬기가 "6시까지"를 덜 끝난 말로 보고 지웠다.
+test('지시 해설 끝의 "6시까지"처럼 숫자에 붙은 기한은 지우지 않는다', () => {
   assert.equal(assemble({ narrationType: 'deixis', subKind: 'simple',
-    rawSlotMap: { target: '응답 품질 변화 표', situation: '보며' } }), '응답 품질 변화 표 보며 설명함');
+    rawSlotMap: { seen: '요청기한 금일 오후 6시까지', caption: '요청기한 금일 오후 6시까지' } }), '요청기한 금일 오후 6시까지');
+  assert.equal(assemble({ narrationType: 'deixis', subKind: 'simple',
+    rawSlotMap: { seen: '신청 기간', caption: '신청 기간 3월부터' } }), '신청 기간 3월부터');
+  assert.equal(assemble({ narrationType: 'deixis', subKind: 'simple',
+    rawSlotMap: { seen: '마감 안내', caption: '제출 마감 오후까지' } }), '제출 마감');
+});
+
+test('지시 해설은 12어절까지 받고, 넘치면 끝을 맺을 수 있는 데서 자른다', () => {
+  const caption = '1번 할수 붙여 씀, 2번 할 수 띄어 씀, 3번 할수록 붙여 씀, 4번 할 수록 띄어 씀';
+  const text = assemble({ narrationType: 'deixis', subKind: 'simple', rawSlotMap: { seen: '네 문장', caption } });
+  assert.ok(text.split(' ').length <= 12, text);
+  assert.ok(caption.startsWith(text), text);
 });

@@ -14,17 +14,18 @@ test('지시 대상 프롬프트는 발화를 다시 판단하지 않고 화면 
   for (const subKind of ['simple', 'complete']) {
     const prompt = buildGroundingPrompt({ utterance: '', maxChars: 60, subKind });
     assert.match(prompt, /발화가 무엇을 말했는지 다시 따지지 말고/, subKind);
-    assert.match(prompt, /가리킨 대상을 화면에서 특정할 수 없다/, subKind);
-    assert.match(prompt, /"이미 안내된" 목록에 같은 대상/, subKind);
-    assert.match(prompt, /대상의 이름.*화면에서 읽어 반드시 밝힌다/, subKind);
-    assert.match(prompt, /발화 모사.*화면에 없어도 된다/, subKind);
+    // NONE 은 시각 근거가 없을 때뿐이다(이미 안내 목록은 모델에 주지 않는다 — v1.2 검증 ③).
+    assert.match(prompt, /시각 근거가 없을 때만 NONE이다/, subKind);
+    assert.match(prompt, /범주 이름만 쓰지 않는다/, subKind);
+    assert.doesNotMatch(prompt, /이미 안내/, subKind);
     assert.doesNotMatch(prompt, /발화가 대상의 내용까지|이름 글자가 발화에|진행 발화|문장이 끊겼|\(다\)/, subKind);
   }
 });
 
-test('지시 대상 프롬프트는 슬라이드 주제만 안내된 것을 대상과 겹친다고 보지 않는다', () => {
+// 이미 안내 목록을 주면 앞선 해설의 연도·이름을 이번 화면에 옮겨 적었다(10/18 v1.2 검증 ③). 겹침은 중복 거르기가 맡는다.
+test('지시 대상 프롬프트는 이미 안내된 해설 목록을 모델에 보이지 않는다', () => {
   const prompt = buildGroundingPrompt({ utterance: '', maxChars: 60, subKind: 'simple', describedElementList: ['슬라이드 1: 지점 현황'] });
-  assert.match(prompt, /목록이 슬라이드 주제만 말했다면 그 안의 대상은 아직 안내되지 않은 것이다/);
+  assert.doesNotMatch(prompt, /지점 현황/);
 });
 
 test('수치 프롬프트는 발표자가 이미 말했다는 이유로 거절하지 않는다', () => {

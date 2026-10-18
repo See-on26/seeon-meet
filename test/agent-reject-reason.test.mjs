@@ -29,17 +29,17 @@ test('이유 없이 "NONE"만 오면 거절은 맞지만 이유는 비어 있다
 });
 
 test('JSON 이 잘리거나 칸을 못 채우면 거절이 아니라 형식 오류로 남기고 원문을 둔다', () => {
-  const truncated = '{"target": "제주 지역을", "situ';
+  const truncated = '{"seen": "제주 지역", "capt';
   const result = parseSlotCaption({ content: truncated, ...deixisSimple });
   assert.equal(result.isGrounded, false);
   assert.equal(result.rejectKind, REJECT_KIND_MAP.format);
   assert.equal(result.rawContent, truncated);
-  const emptySlot = parseSlotCaption({ content: '{"target": "", "situation": "보는 중"}', ...deixisSimple });
+  const emptySlot = parseSlotCaption({ content: '{"seen": "제주 지역", "caption": ""}', ...deixisSimple });
   assert.equal(emptySlot.rejectKind, REJECT_KIND_MAP.format);
 });
 
 test('한자가 섞여 버린 해설도 그 사유와 원문을 남긴다', () => {
-  const content = '{"target": "中式 메뉴를", "situation": "보는 중"}';
+  const content = '{"seen": "中式 메뉴판", "caption": "中式 메뉴"}';
   const result = parseSlotCaption({ content, ...deixisSimple });
   assert.equal(result.rejectKind, REJECT_KIND_MAP.han);
   assert.equal(result.rawContent, content);

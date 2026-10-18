@@ -21,19 +21,17 @@ const silence = (rawSlotMap) => assembleNarration({
   origin: NARRATION_ORIGIN_MAP.silence, rawSlotMap,
 });
 
-test('지시 상황 칸: "보시는 중·보이는 중·보며 설명함"은 청자 쪽 동작 "보는 중"으로 맞춘다', () => {
-  for (const situation of ['보시는 중', '보이는 중', '보며 설명함', '보시며 설명함']) {
-    assert.equal(deixisSimple({ target: '월별 매출 추이 표를', situation }).slotMap.situation, '보는 중', situation);
-  }
-  assert.equal(deixisSimple({ target: '월별 매출 추이 표를', situation: '비교 중' }).slotMap.situation, '비교 중');
+test('지시 해설은 상황 칸 없이 caption 만 읽는다(보시는 중·확인 중 같은 동작 말이 붙지 않는다)', () => {
+  const result = deixisSimple({ seen: '월별 매출 추이 표', caption: '월별 매출 추이 표' });
+  assert.equal(result.text, '월별 매출 추이 표');
+  assert.equal(result.slotMap.situation, undefined);
 });
 
-test('지시 완전형 문장은 허용치(상한 + 2어절) 안이면 자르지 않고, 넘으면 지금처럼 상한에서 자른다', () => {
-  const base = { mimicry: '여기 보시면', target: '도심 열', explanation: '냉방기 배출열 비중 표시' };
-  const twelve = '여름에 특히 문제가 되는 냉방기 배출열은 도심 열의 약 25%를 차지함';
-  assert.equal(deixisComplete({ ...base, sentence: twelve }).slotMap.sentence, twelve);
-  const fourteen = '여름 한낮에 특히 문제가 되는 냉방기 배출열은 도심 열의 약 25%를 넘게 차지함';
-  assert.equal(deixisComplete({ ...base, sentence: fourteen }).slotMap.sentence.split(' ').length <= 10, true, '허용치를 넘으면 상한 10어절에서 자른다');
+test('지시 완전형도 caption 하나를 읽고, 상한(12어절)을 넘으면 끝을 맺을 수 있는 데서 자른다', () => {
+  const caption = '왼쪽 원형 분포, 가운데 세로로 긴 분포, 오른쪽 가로로 긴 분포의 산점도 세 개와 아래 설명 글';
+  const result = deixisComplete({ seen: '산점도 세 개', caption });
+  assert.ok(result.text.split(' ').length <= 12, result.text);
+  assert.ok(caption.startsWith(result.text), result.text);
 });
 
 test('"가장"은 자료 명사(장)로 끝맺은 것으로 보지 않는다', () => {
@@ -60,11 +58,13 @@ test('JSON 없이 쓴 무발화 묘사는 칸 하나짜리 JSON 으로 감싸 �
   assert.equal(wrapPlainSilenceContent({ content: '막대그래프', origin: NARRATION_ORIGIN_MAP.router }), '막대그래프');
 });
 
-test('지시 지시문은 대상 자신의 글자·수치만 쓰고 묶음은 개수로 말하게 하며, 무발화 지시문은 자료 종류마다 말할 것을 정한다', () => {
+test('지시 지시문은 종류별로 무엇을 말할지 정하고(P1-4), 무발화 지시문은 자료 종류마다 말할 것을 정한다', () => {
+  // 지시 지시문(v1.2 검증 P1-4): 연락처는 이름·번호 짝, 여러 그림은 각각의 모양, 꾸민 로고 상품은 종류·모양.
   const deixisPrompt = buildGroundingPrompt({ utterance: '여기 보시면', recentTranscript: '', maxChars: 80 });
-  assert.match(deixisPrompt, /대상 자신에 붙은 글자·수치만 쓴다/);
-  assert.match(deixisPrompt, /묶음 이름과 개수로 말한다/);
-  assert.match(deixisPrompt, /화면 요소 이름으로 때우지 마라/);
+  assert.match(deixisPrompt, /연락처는 이름과 번호의 짝을 caption에도 모두 남기고/);
+  assert.match(deixisPrompt, /여러 그림을 함께 가리키면 seen에 각 그림의 모양을 따로 적고/);
+  assert.match(deixisPrompt, /꾸민 로고만 있는 상품 사진은 상품명 대신 종류·모양을 말한다/);
+  assert.match(deixisPrompt, /범주 이름만 쓰지 않는다/);
   const silencePrompt = buildVisualDescriptionPrompt({ origin: NARRATION_ORIGIN_MAP.silence, minWordCount: 5, maxWordCount: 13 });
   assert.match(silencePrompt, /그래프·표: 가장 큰 값과 가장 작은 값/);
   assert.match(silencePrompt, /단계·과정 그림: 과정 이름·부제·용어/);

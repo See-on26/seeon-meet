@@ -106,9 +106,10 @@ export const NARRATION_WORD_RANGE_MAP = {
     [PAGE_TRANSITION_KIND_MAP.slide]: { minWordCount: 6, maxWordCount: 9 },
     [PAGE_TRANSITION_KIND_MAP.document]: { minWordCount: 6, maxWordCount: 9 },
   },
+  // 지시 해설은 대상 내용만 읽는다. 상품 이름(2어절)부터 번호 넷의 띄어쓰기 비교(10어절 남짓)까지 들어가게 둔다.
   [NARRATION_TYPE_MAP.deixis]: {
-    [DEIXIS_FORM_MAP.simple]: { minWordCount: 4, maxWordCount: 7 },
-    [DEIXIS_FORM_MAP.complete]: { minWordCount: 6, maxWordCount: 10 },
+    [DEIXIS_FORM_MAP.simple]: { minWordCount: 2, maxWordCount: 10 },
+    [DEIXIS_FORM_MAP.complete]: { minWordCount: 4, maxWordCount: 12 },
   },
   [NARRATION_TYPE_MAP.interpretation]: {
     [INTERPRETATION_KIND_MAP.valueToMeaning]: { minWordCount: 6, maxWordCount: 12 },

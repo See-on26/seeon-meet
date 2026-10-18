@@ -1,115 +1,125 @@
 const { NARRATION_TYPE_MAP, DEIXIS_FORM_MAP } = require('../contracts/narration-types');
 const {
-  GROUNDING_NONE_TOKEN, computeMaxChars, buildSlotOutputInstruction, SPEECH_GAP_DECIDED_RULE,
+  GROUNDING_NONE_TOKEN, NO_HAN_RULE, ENGLISH_NO_HAN_RULE, SPEECH_GAP_DECIDED_RULE,
 } = require('../agents/shared/caption-parser');
-const { DEFAULT_CAPTION_LANGUAGE } = require('../contracts/caption-language');
+const { CAPTION_LANGUAGE_MAP, DEFAULT_CAPTION_LANGUAGE } = require('../contracts/caption-language');
 const { buildOutputLanguageRuleList } = require('./output-language-rule');
 
-const DEFAULT_DEIXIS_MIN_WORD_COUNT = 4;
-const DEFAULT_DEIXIS_MAX_WORD_COUNT = 8;
+const DEFAULT_DEIXIS_MIN_WORD_COUNT = 2;
+const DEFAULT_DEIXIS_MAX_WORD_COUNT = 10;
 
+// 지시 해설은 가리킨 대상의 내용만 읽는다(효과영상 레이블 13자리, 2026-10-17: 정답이 모두 "보는 중" 없이 대상 내용만이다).
+// 대상이 둘 이상이면(라우터가 지시 공백 둘 이상으로 판단) 각각을 밝히게 한 줄만 더한다.
 const DEIXIS_FORM_RULE_MAP = {
-  [DEIXIS_FORM_MAP.simple]: [
-    '형식: (지시대상 묘사/내용 — 자료 종류 포함, 2~5어절) + (상황 묘사 — 발화 모사, 2어절).',
-    '  · 지시대상 슬롯 하나에 "무엇의 무슨 자료인지"를 함께 담는다. 자료 종류를 따로 쪼개지 마라.',
-    '  예) "여기를 보시면" → target="2년간 매출 추이 표를", situation="보는 중"',
-    '  예) "오른쪽 것을 주목해 주십쇼" → target="설문 결과 표를", situation="주목 중"',
-  ],
+  [DEIXIS_FORM_MAP.simple]: [],
   [DEIXIS_FORM_MAP.complete]: [
-    '형식: (발화 모사 2~3어절) + (지시대상 1~2어절) + (설명 3~5어절).',
-    '  · 세 요소를 각각 내되, **최종 문장(sentence)은 순서를 바꿔 자연스럽게** 만든다.',
-    '    셋의 내용은 문장 안에 모두 들어가야 한다. 주어-서술어 순서는 유연히 바꿔도 된다.',
-    '  예) "그 중에 가장 으뜸인 게 이거거든요"',
-    '      → mimicry="가장 으뜸인", target="E방식", explanation="다섯 방식 중 하나",',
-    '        sentence="다섯 방식 중 E방식이 가장 으뜸임"',
-    '  예) "이거랑 이게 여기 같이 있는 거거든요"',
-    '      → mimicry="같이 있는", target="워드 파일", explanation="텍스트와 텍스트 같은 이미지가",',
-    '        sentence="텍스트와 텍스트 같은 이미지가 워드 파일에 같이 있음"',
+    '발표자가 이 발화에서 대상을 둘 이상 가리켰다. 가리킨 순서대로 각각이 무엇인지 쉼표로 이어 적는다.',
   ],
 };
 
-function buildGroundingPrompt({ utterance, recentTranscript, maxChars,
-  hasPointingRegion = false, pointingOrderHint = '', describedElementList = [],
+// 레이블 정답의 절반이 화면 글자가 아니라 그림·아이콘·도형·필기 묘사였다(남녀 아이콘, 산점도 모양, 직선 필기, 상품 포장).
+// 가리킨 것의 종류마다 무엇을 말할지 정해 준다. 이 줄과 규칙 (2)를 뺀 짧은 판은 범주 요약이 늘었다(10/17 v2~v4).
+// 연락처 짝·여러 그림·로고 상품·선 하나 줄은 v1.2 검증(10/18, P1-4)에서 더했다. 예시는 평가 영상과 겹치지 않게 둔다.
+const POINTED_KIND_RULE_LIST = [
+  '가리킨 것에 따라 이렇게 적는다:',
+  '- 글자·숫자·목록: 화면에 적힌 이름과 값을 그대로 옮긴다. 항목이 여럿이면 모두 적는다(많으면 앞의 4개).'
+    + ' 연락처는 이름과 번호의 짝을 caption에도 모두 남기고, 용도 설명으로 대체하지 않는다.',
+  '- 사진·그림·물건: 무엇인지 이름으로 말한다. 꾸민 로고만 있는 상품 사진은 상품명 대신 종류·모양을 말한다.'
+    + ' 상품명은 같은 화면의 보통 글씨에서도 확인될 때만 쓴다. 간판의 보통 글씨는 그대로 옮긴다.',
+  '- 아이콘·색·기호: 뜻하는 것을 말로 옮긴다(학생 아이콘 → 학생, 범례의 파란 선 → 범례에 적힌 그 항목 이름).',
+  '- 그래프·도형·분포: 가리킨 구간이나 모양을 말한다(2015년 급락 구간, 가운데가 솟은 종 모양 곡선).',
+  '- 여러 그림을 함께 가리키면 seen에 각 그림의 모양을 따로 적고, caption에도 그 모양들을 쉼표로 이어 남긴다.'
+    + ' 공통 제목이나 개수로 줄이지 않는다.',
+  '- 필기(밑줄·동그라미·색칠·화살표·선): 어디에 무엇을 그렸는지 말한다(마감일에 빨간 동그라미, 오른쪽 위로 긋는 선).',
+  '- 현재 발화가 선 하나를 가리키면 화면에서 대응하는 선을 골라 실제 방향을 적는다. 앞뒤 발화에 나온 다른 선까지 나열하지 않는다.'
+    + ' 둘을 견주는 발화라면 두 선을 함께 적는다.',
+  '- 소리로는 구별되지 않는 차이(띄어쓰기·철자·기호): 그 낱말을 다시 쓰지 말고 번호와 "붙여 씀·띄어 씀"으로 말한다.'
+    + ' 같은 차이를 가진 항목은 번호를 묶어 말한다.',
+  '- 발표자가 둘 이상을 견주면("여기는 A인데 여기는 B") 짝을 지어 각각 적는다.',
+];
+
+const EXAMPLE_LIST = [
+  '예시 (발화 / 화면 → 출력):',
+  '  "이 세 곳에 신청하시면 됩니다" / 목록 "주민센터·구청 민원실·정부24"'
+    + ' → {"seen":"신청처 목록 주민센터, 구청 민원실, 정부24","caption":"주민센터, 구청 민원실, 정부24"}',
+  '  "보시면 32, 18이에요" / 막대 옆에 버스 아이콘 32, 지하철 아이콘 18'
+    + ' → {"seen":"버스 아이콘 막대 32, 지하철 아이콘 막대 18","caption":"버스 32, 지하철 18"}',
+  '  "이건 꼭 지키세요" / 문서의 "제출 마감 3월 5일"에 빨간 동그라미'
+    + ' → {"seen":"제출 마감 3월 5일에 빨간 동그라미","caption":"제출 마감 3월 5일에 빨간 동그라미"}',
+  '  "둘 중 뭐가 맞을까요?" / "1. 할수 있다  2. 할 수 있다"'
+    + ' → {"seen":"1. 할수 있다 2. 할 수 있다","caption":"1번 붙여 씀, 2번 띄어 씀"}',
+];
+
+function buildKoreanOutputInstruction({ minWordCount, maxWordCount }) {
+  return [
+    '출력 — JSON 한 줄만. JSON 앞뒤에 다른 글을 쓰지 않는다.',
+    '  "seen": caption에 쓸 글자·모양만 짧게. 배경·판단 과정 제외.',
+    `  "caption": 대상의 이름·값·모양 — ${minWordCount}~${maxWordCount}어절.`
+      + ' seen에서 확인한 항목별 내용을 범주로 다시 요약하지 않는다.',
+    NO_HAN_RULE,
+    `낼 수 없으면 JSON 대신 "${GROUNDING_NONE_TOKEN}: 이유" 한 줄을 낸다.`,
+  ].join('\n');
+}
+
+// 영어 캡션은 같은 출력 형식을 영어로 주고 영어 출력 규칙을 붙인다. 단어 수는 에이전트가 영어로 바꾼 예산이다.
+function buildEnglishOutputInstruction({ minWordCount, maxWordCount }) {
+  return [
+    'Output — one line of JSON only. Do not write anything before or after the JSON.',
+    '  "seen": only the text and shapes you will use in caption, briefly. No background or reasoning.',
+    `  "caption": the item's names, values or shapes — ${minWordCount}–${maxWordCount} words.`
+      + ' Do not re-summarize the item-by-item content of seen into a category.',
+    ENGLISH_NO_HAN_RULE,
+    `If you cannot, output a single line "${GROUNDING_NONE_TOKEN}: reason" instead of JSON.`,
+    ...buildOutputLanguageRuleList({
+      language: CAPTION_LANGUAGE_MAP.en,
+      detailLineList: ['caption 은 대상의 이름·값·모양을 담은 자연스러운 영어 명사구로 쓴다. 시스템은 caption 만 읽는다.',
+        '영어에서도 지시어(This·That·Here)로 시작하지 말고, "Looking at"·"Pointing at" 같은 동작 말을 붙이지 않는다.'
+          + ' 가리킨 표시(circle·dot·marker)는 필기일 때만 말한다.'],
+    }),
+  ].join('\n');
+}
+
+// "이미 안내된" 해설 목록(describedElementList)은 모델에 보이지 않는다. 목록을 주면 앞선 해설의 연도·이름을
+// 이번 화면에 옮겨 적었고(08b 연도 복사 8/11 → 목록을 빼면 0/35), 같은 내용이어도 NONE 이 되지 않았다(10/18 v1.2 검증 ③).
+// 겹친 해설은 재생 전 중복 거르기(narration-history)가 맡는다.
+function buildGroundingPrompt({ utterance, recentTranscript,
+  hasPointingRegion = false, pointingOrderHint = '',
   minWordCount = DEFAULT_DEIXIS_MIN_WORD_COUNT, maxWordCount = DEFAULT_DEIXIS_MAX_WORD_COUNT,
   subKind = null, mergedAnchorList = [], language = DEFAULT_CAPTION_LANGUAGE }) {
   const trimmedUtterance = (utterance || '').trim();
-  const formRuleList = DEIXIS_FORM_RULE_MAP[subKind]
-    || [...DEIXIS_FORM_RULE_MAP.simple, ...DEIXIS_FORM_RULE_MAP.complete];
+  const resolvedSubKind = subKind || DEIXIS_FORM_MAP.simple;
   return [
     hasPointingRegion
-      ? '이 이미지는 회의 공유화면에서 발표자가 방금 필기하거나 포인터로 가리킨 영역을 확대한 것이다.'
-      : '이 이미지는 회의에서 공유 중인 화면이다.',
-    `발표자가 방금 이렇게 말하며 화면의 무언가를 가리켰다: "${trimmedUtterance}"`,
-    recentTranscript
-      ? `발표자의 인접 발화(트리거 직전 1분 이내 + 직후 발화)는 다음과 같다: ${recentTranscript}`
-      : '',
-    describedElementList.length
-      ? `이미 안내된 시각 요소·내레이션이다(재설명 금지): ${describedElementList.join(' / ')}`
-      : '',
-    pointingOrderHint
-      ? `발표자가 화면을 다음 순서로 표시(필기/포인터)했다: ${pointingOrderHint}. 이 선후관계를 반영해 설명하라.`
-      : '',
-    mergedAnchorList.length
-      ? `발표자가 지시한 표현: ${mergedAnchorList.join(', ')}. 이 대상이 무엇인지도 문장 안에 함께 밝혀라.`
-      : '',
-    '청자는 화면을 볼 수 없다. 발표자가 가리킨 대상 중, 말로는 아직 설명되지 않은 시각 정보를 보충하는 캡션을 만들어라.',
+      ? '이 이미지는 발표 화면에서 발표자가 방금 포인터나 필기로 가리킨 부분을 확대한 것이다.'
+      : '이 이미지는 발표 화면(슬라이드·문서·사진·영상 장면)이다.',
+    `발표자가 화면의 무언가를 가리키며 이렇게 말했다: "${trimmedUtterance}"`,
+    recentTranscript ? `앞뒤 발화: ${recentTranscript}` : null,
+    pointingOrderHint ? `표시 순서: ${pointingOrderHint}. 현재 발화의 대상 선택에 참고한다.` : null,
+    mergedAnchorList.length ? `발표자가 가리킨 말: ${mergedAnchorList.join(', ')}. 각각이 무엇인지 모두 밝힌다.` : null,
+    ...DEIXIS_FORM_RULE_MAP[resolvedSubKind],
+    '',
+    '할 일: 화면을 볼 수 없는 청자에게, 발표자가 "이거·여기·이렇게"로 가리킨 것이 무엇인지 짧은 구 하나로 알려 준다.',
     SPEECH_GAP_DECIDED_RULE,
-    '가리킨 대상의 이름(지명·항목명·제품명 등)은 화면에서 읽어 반드시 밝힌다 — 지시어로만 들은 청자는 그것이 어느 것인지 모른다.',
+    '발화가 이미 말한 낱말을 되풀이하지 말고, 화면을 봐야만 알 수 있는 것을 적는다.',
     '',
-    '아래 둘 중 하나일 때만 캡션을 만들지 않는다:',
-    '  (가) 가리킨 대상을 화면에서 특정할 수 없다 — 가리킨 곳에 읽을 글자·그림이 없다.',
-    '  (나) "이미 안내된" 목록에 같은 대상과 같은 내용이 있다 — 표현이 달라도 같은 대상·같은 내용이면 겹친 것이다.',
-    '      "다양한 문서가 비정형"과 "각종 비정형 데이터 표"는 같은 내용이다.',
-    '      목록이 슬라이드 주제만 말했다면 그 안의 대상은 아직 안내되지 않은 것이다.',
-    '',
-    ...formRuleList,
+    ...POINTED_KIND_RULE_LIST,
     '',
     '규칙:',
-    '(1) **화면에서 읽은 낱말만 쓴다.** 발화에서 들린 이름이라도 화면에 없으면 쓰지 마라.',
-    '    발표자의 말은 잘못 들린 것일 수 있다 — 화면 글자와 다르면 화면 쪽을 믿어라.',
-    '    단, 발화 모사(발표자가 말한 성질·상태 표현)는 화면에 없어도 된다. 화면에서 읽어야 하는 것은 대상의 이름·내용이다.',
-    '(2) 발표자 발화의 문장 구성과 어휘를 모사하되, **지시어는 모사하지 않는다.**',
-    '    "이거·이런 식으로·여기·저기·이쪽"은 캡션에 옮기지 마라 — 청자는 그것을 볼 수 없다.',
-    '    발화가 "이런 식으로 엑셀을 쓰신다"면 대상은 "표 형태로 쓴 엑셀 파일"이다.',
-    '    발화가 대상 둘을 견주면("여기는 A인데 여기는 B") 그 대비를 살려라 —',
-    '    한쪽으로 뭉뚱그리면 뜻이 무너진다.',
-    '(3) 종결은 "~임", "~음", "~함"처럼 간결한 명사형으로 한다. 존댓말·설명체를 쓰지 않는다.',
-    '(4) 지시 대상은 **화면을 봐야만 알 수 있는 내용**으로 적는다.',
-    '    화면에 적힌 글자·수치·항목명을 실제로 읽어서 넣어라. 범주 이름으로 때우지 마라.',
-    '      나쁨: "각종 비정형 데이터 표"   ← 발표자가 이미 말한 이름이다',
-    '      좋음: "엑셀·스캔 문서·모바일 화면이 뒤섞인 자료"',
-    '      나쁨: "관리 항목"               좋음: "서버·DB 종류, 방화벽, DRM 등 11개 항목"',
-    '    스스로 물어라 — 눈을 감은 사람이 이 말을 듣고 화면을 그려 볼 수 있는가?',
-    '    **화면에 적힌 문구를 그대로 가져다 쓴다.** 뜻을 풀어 새 낱말을 만들지 마라.',
-    '      나쁨: "개인정보 유무 확인 가능한 지식"  ← "지식"은 화면에도 발화에도 없다',
-    '      좋음: "민감정보 포함 여부 항목"        ← 화면에 그대로 적혀 있다',
-    '    수식을 길게 잇지 마라("~할 수 있는 ~하는 ~"). 화면 문구 + 자료 종류면 충분하다.',
-    '    대상은 무엇인지(이름·값·뜻)로 쓴다. 상자·박스·도형·색 같은 화면 요소 이름으로 때우지 마라.',
-    '(5) 상황 슬롯은 **발표자가 실제로 쓴 동사**를 모사한다.',
-    '    "보시면" → "보는 중" / "주목해 주세요" → "주목 중" / "비교해 보면" → "비교 중"',
-    '    **"가리키며 설명함"은 쓰지 마라.** 가리켰다는 사실은 청자에게 아무 정보도 아니다.',
-    '    모사할 동사가 마땅치 않으면 "확인 중"처럼 짧게 둔다.',
-    '(6) 가리킨 대상에 항목명과 수치가 같이 있으면 둘 다 넣는다.',
-    '    **대상 자신에 붙은 글자·수치만 쓴다.** 옆에 있는 상자·목록이라도 제목이 다른 지명·항목이면 그 내용은 대상의 것이 아니다'
-      + ' — 대상에 붙이지 마라. 대상에 더 적힌 내용이 없으면 설명은 발화 모사와 자료 맥락(예: 지도에 표시된 지역)으로 채운다.',
-    '    값·항목 여러 개의 묶음을 가리켰으면 하나하나 늘어놓지 말고 묶음 이름과 개수로 말한다(예: "기준보다 작은 값 네 개").'
-      + ' 늘어놓으면 칸 어절 수를 넘어 목록이 중간에서 잘린다.',
-    `(7) 위 두 경우에 해당하면 "${GROUNDING_NONE_TOKEN}"이다. 그 밖에는 반드시 캡션을 만든다.`,
-    `(참고: 총 ${minWordCount}~${maxWordCount}어절, 최대 ${maxChars}자 분량이다.)`,
+    '(1) 화면에 없는 이름·숫자는 지어내지 않는다. 발화와 화면 글자가 다르면 화면을 따른다.',
+    '(2) 이름·숫자를 읽지 못하면 그 부분만 빼고 확인되는 종류·모양으로 설명한다. 익숙한 이름으로 보정하지 않는다.'
+      + ' 읽히는 이름·값이나 보이는 모양 대신 범주 이름만 쓰지 않는다.',
+    '(3) 지시어(이거·여기·이렇게·저기)를 쓰지 않는다. "가리킴·보는 중·설명함" 같은 행동 말도 붙이지 않는다 — 대상만 적는다.',
+    '(4) 명사로 끝나는 짧은 구로 쓴다. 존댓말·문장으로 끝내지 않는다.',
     '',
-    buildSlotOutputInstruction({
-      narrationType: NARRATION_TYPE_MAP.deixis,
-      subKind: subKind || DEIXIS_FORM_MAP.simple,
-      language,
-    }),
-    ...buildOutputLanguageRuleList({
-      language,
-      detailLineList: ['영어 캡션은 "~임/~함" 명사형 대신 자연스러운 영어 구로 쓴다.'
-        + ' 단순형(simple)은 시스템이 situation 을 target 앞에 붙여 읽는다(예: "Looking at the two-year sales trend table").',
-      '영어에서도 지시어(This·That·Here)로 시작하지 말고 대상 이름으로 말한다. situation 에 "Pointing at"을 쓰지 마라 — 발표자 동사를 모사한다("Looking at").'
-        + ' 가리킨 표시(circle·dot·marker)는 말하지 않는다.'],
-    }),
-  ].filter(Boolean).join('\n');
+    `가리킨 대상을 설명할 글자·그림·필기 등 시각 근거가 없을 때만 ${GROUNDING_NONE_TOKEN}이다.`,
+    '그 밖에는 확인되는 내용으로 설명한다.',
+    '',
+    ...EXAMPLE_LIST,
+    '',
+    language === CAPTION_LANGUAGE_MAP.en
+      ? buildEnglishOutputInstruction({ minWordCount, maxWordCount })
+      : buildKoreanOutputInstruction({ minWordCount, maxWordCount }),
+  ].filter((line) => line !== null).join('\n');
 }
 
 module.exports = { buildGroundingPrompt, DEIXIS_FORM_RULE_MAP, DEFAULT_DEIXIS_MIN_WORD_COUNT, DEFAULT_DEIXIS_MAX_WORD_COUNT };
