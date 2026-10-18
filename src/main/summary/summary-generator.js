@@ -12,6 +12,31 @@ const {
 } = require('../caption-pipeline/context/transcript-script');
 
 const RECAPTION_CONCURRENCY = 3;
+
+// 요약 진행 안내(화면에 보인다). 그 회의의 캡션 언어로 쓴다.
+const SUMMARY_PROGRESS_TEXT_MAP = {
+  ko: {
+    recaption: ({ doneCount, totalCount }) => `화면 정보 텍스트화 ${doneCount}/${totalCount}`,
+    collect: ({ screenCount, utteranceCount }) => `요약 재료 수집 — 화면 ${screenCount}개 · 발화 ${utteranceCount}건`,
+    script: () => '회의 스크립트 작성 중',
+    summarize: () => '회의 요약 생성 중',
+    rewrite: () => '요약본 듣는 글로 재구성 중',
+    speak: () => '요약본 음성 합성 중',
+    done: ({ textFileName, audioFileName }) => (audioFileName
+      ? `요약본 저장 완료 — ${textFileName} · ${audioFileName}` : `요약본 저장 완료 — ${textFileName} (음성 없음)`),
+  },
+  en: {
+    recaption: ({ doneCount, totalCount }) => `Describing screens ${doneCount}/${totalCount}`,
+    collect: ({ screenCount, utteranceCount }) => `Gathering summary material — ${screenCount} screens · ${utteranceCount} utterances`,
+    script: () => 'Writing the meeting transcript',
+    summarize: () => 'Creating the meeting summary',
+    rewrite: () => 'Rewriting the summary for listening',
+    speak: () => 'Synthesizing summary audio',
+    done: ({ textFileName, audioFileName }) => (audioFileName
+      ? `Summary saved — ${textFileName} · ${audioFileName}` : `Summary saved — ${textFileName} (no audio)`),
+  },
+};
+const readProgressText = (language) => SUMMARY_PROGRESS_TEXT_MAP[language] || SUMMARY_PROGRESS_TEXT_MAP.ko;
 // 화면 정보 텍스트화 결과를 스크립트 한 줄로 쓸 때의 최대 길이.
 const SCREEN_FILL_MAX_CHARS = 80;
 
@@ -68,12 +93,14 @@ function countScreen({ snapshot }) {
   return new Set((snapshot.transitionList || []).map((transition) => transition.slideMajor)).size;
 }
 
-function createSummaryGenerator({ config, summariesDir, onProgress = null }) {
-  const recaptionAgent = createSlideRecaptionAgent({ config });
-  const summaryAgent = createMeetingSummaryAgent({ config });
-  const rewriteAgent = createSummaryRewriteAgent({ config });
-  const ttsClient = createTtsClient({ config });
-
+// 에이전트·TTS 는 바꿔 끼울 수 있다(기본은 실제 모델·서버).
+function createSummaryGenerator({
+  config, summariesDir, onProgress = null,
+  recaptionAgent = createSlideRecaptionAgent({ config }),
+  summaryAgent = createMeetingSummaryAgent({ config }),
+  rewriteAgent = createSummaryRewriteAgent({ config }),
+  ttsClient = createTtsClient({ config }),
+}) {
   function reportProgress({ stage, message, doneCount = 0, totalCount = 0 }) {
     console.log(`[summary] ${message}`);
     onProgress?.({ stage, message, doneCount, totalCount });
@@ -95,7 +122,7 @@ function createSummaryGenerator({ config, summariesDir, onProgress = null }) {
   }
 
   // 전환 고지가 한 번도 없었던 화면만 회의 후에 텍스트로 바꿔 스크립트의 화면 줄을 채운다.
-  async function buildScreenFillByMajorMap({ snapshot, assetList }) {
+  async function buildScreenFillByMajorMap({ snapshot, assetList, language }) {
     const targetMajorSet = new Set(listSlideMajorWithoutTransitionLine({ snapshot }));
     const targetList = assetList.filter((asset) => targetMajorSet.has(String(asset.major)));
     let doneCount = 0;
@@ -107,7 +134,7 @@ function createSummaryGenerator({ config, summariesDir, onProgress = null }) {
         doneCount += 1;
         reportProgress({
           stage: SUMMARY_STAGE_MAP.recaption,
-          message: `화면 정보 텍스트화 ${doneCount}/${targetList.length}`,
+          message: readProgressText(language).recaption({ doneCount, totalCount: targetList.length }),
           doneCount, totalCount: targetList.length,
         });
         return recaption;
@@ -117,28 +144,31 @@ function createSummaryGenerator({ config, summariesDir, onProgress = null }) {
   }
 
   async function generate({ session, contextSnapshot = null }) {
+    // 요약은 회의가 끝난 뒤에 만든다. 그 회의의 캡션 언어(세션 기록)로 요약 글·음성·진행 안내를 낸다.
+    const language = session.captionLanguage || 'ko';
+    const progressText = readProgressText(language);
     const snapshot = contextSnapshot || buildSnapshotFromSession({ session });
     const assetList = resolveSlideAssetList({ slideMarkList: session.slideMarkList });
     reportProgress({
       stage: SUMMARY_STAGE_MAP.collect,
-      message: `요약 재료 수집 — 화면 ${countScreen({ snapshot })}개 · 발화 ${session.asrEntryList.length}건`,
+      message: progressText.collect({ screenCount: countScreen({ snapshot }), utteranceCount: session.asrEntryList.length }),
     });
 
-    const screenFillByMajorMap = await buildScreenFillByMajorMap({ snapshot, assetList });
+    const screenFillByMajorMap = await buildScreenFillByMajorMap({ snapshot, assetList, language });
 
     // 회의 스크립트 작성: 화자를 구분한 발화 + 화면 전환 AD 한 줄씩. 요약에는 이 스크립트에서 화자 이름만 뺀 것을 준다.
-    reportProgress({ stage: SUMMARY_STAGE_MAP.script, message: '회의 스크립트 작성 중' });
+    reportProgress({ stage: SUMMARY_STAGE_MAP.script, message: progressText.script() });
     const scriptText = buildTranscriptScript({ snapshot, screenFillByMajorMap });
     const summaryScriptText = buildTranscriptScript({ snapshot, screenFillByMajorMap, isSpeakerHidden: true });
 
-    reportProgress({ stage: SUMMARY_STAGE_MAP.summarize, message: '회의 요약 생성 중' });
+    reportProgress({ stage: SUMMARY_STAGE_MAP.summarize, message: progressText.summarize() });
     const { text: draftText, isTruncated: draftTruncated } = await summaryAgent.summarize({
-      scriptText: summaryScriptText,
+      scriptText: summaryScriptText, language,
     });
 
-    reportProgress({ stage: SUMMARY_STAGE_MAP.rewrite, message: '요약본 듣는 글로 재구성 중' });
+    reportProgress({ stage: SUMMARY_STAGE_MAP.rewrite, message: progressText.rewrite() });
     const { text, isTruncated } = await rewriteAgent.rewrite({
-      draftText, isTruncated: draftTruncated,
+      draftText, isTruncated: draftTruncated, language,
     });
 
     const documentText = buildSummaryDocument({
@@ -151,6 +181,7 @@ function createSummaryGenerator({ config, summariesDir, onProgress = null }) {
       },
       bodyText: text,
       isTruncated,
+      language,
     });
 
     const violationList = findMarkupViolationList({ text: documentText });
@@ -172,14 +203,14 @@ function createSummaryGenerator({ config, summariesDir, onProgress = null }) {
     }
 
     const audioFilePath = await synthesizeSummaryAudio({
-      sessionId: session.sessionId, documentText,
+      sessionId: session.sessionId, documentText, language,
     });
 
     reportProgress({
       stage: SUMMARY_STAGE_MAP.done,
-      message: audioFilePath
-        ? `요약본 저장 완료 — ${path.basename(textFilePath)} · ${path.basename(audioFilePath)}`
-        : `요약본 저장 완료 — ${path.basename(textFilePath)} (음성 없음)`,
+      message: progressText.done({
+        textFileName: path.basename(textFilePath), audioFileName: audioFilePath ? path.basename(audioFilePath) : null,
+      }),
     });
     return {
       isOk: true,
@@ -193,10 +224,10 @@ function createSummaryGenerator({ config, summariesDir, onProgress = null }) {
     };
   }
 
-  async function synthesizeSummaryAudio({ sessionId, documentText }) {
-    reportProgress({ stage: SUMMARY_STAGE_MAP.speak, message: '요약본 음성 합성 중' });
+  async function synthesizeSummaryAudio({ sessionId, documentText, language }) {
+    reportProgress({ stage: SUMMARY_STAGE_MAP.speak, message: readProgressText(language).speak() });
     try {
-      const mp3Buffer = await ttsClient.synthesizeLong({ text: documentText });
+      const mp3Buffer = await ttsClient.synthesizeLong({ text: documentText, language });
       const audioFilePath = path.join(
         summariesDir, buildSummaryFileName({ sessionId, extension: 'mp3' }),
       );
