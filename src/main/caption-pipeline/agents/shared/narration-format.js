@@ -162,7 +162,8 @@ const NARRATION_SLOT_MAP = {
   [NARRATION_TYPE_MAP.interpretation]: {
     [INTERPRETATION_KIND_MAP.valueToMeaning]: [
       { key: 'value', label: '발화에 나온 단순 수치 (예: 73%)', minWordCount: 1, maxWordCount: 2, mustContainValue: true },
-      { key: 'frame', label: '값의 해석틀 — 화면에서 찾은 대상·기준 (예: 작년 대비 A사 기업가치 성장률)', minWordCount: 3, maxWordCount: 5, isPhrase: true },
+      // 3번 판(2번 판에서): 해석틀에 화면에만 있는 기준(연도·단위)·비교 값·범위 끝을 담도록 8어절까지 받는다.
+      { key: 'frame', label: '값의 해석틀 — 화면에서 찾은 대상·기준과, 화면에만 있는 비교 값·범위 (예: 작년 대비 A사 기업가치 성장률, B사 41%)', minWordCount: 3, maxWordCount: 8, isPhrase: true },
     ],
     // 발화 표현을 칸에 넣으면 "…빨라졌습니다를 의미"처럼 발화가 그대로 붙는다. 대상과 근거 값만 화면에서 읽는다.
     // 대상 칸 4어절에서는 "…혈당 상승도"의 측정량 낱말이, 값 칸 6어절에서는 네 항목 목록의 뒤쪽이 잘렸다(발화 기반 23자리, 10/18).
@@ -238,7 +239,8 @@ const ENGLISH_SLOT_LABEL_MAP = {
   [NARRATION_TYPE_MAP.interpretation]: {
     [INTERPRETATION_KIND_MAP.valueToMeaning]: {
       value: 'the plain figure the speaker said (e.g. 73%)',
-      frame: 'what the figure measures — the item/basis found on screen (e.g. "Company A\'s year-over-year valuation growth rate")',
+      frame: 'what the figure measures — the item/basis found on screen, plus any comparison value or range shown only on screen'
+        + ' (e.g. "Company A\'s year-over-year valuation growth rate, Company B 41%")',
     },
     [INTERPRETATION_KIND_MAP.claimToValue]: {
       target: 'the item that changed or was compared — the item name written on screen; if the speaker grouped several items,'
