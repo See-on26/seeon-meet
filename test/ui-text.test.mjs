@@ -203,6 +203,21 @@ test('index.html 의 한국어 aria-label·title·placeholder 는 data-ui-text-*
   assert.ok(checkedCount >= 15, `속성 ${checkedCount}개`);
 });
 
+test('단축키 안내 줄에 전체 화면 단축키(윈도 F11 · 맥 Control+Cmd+F)를 패널 접기 다음에 보인다', () => {
+  const bodyHtml = readBodyHtml();
+  const start = bodyHtml.indexOf('<div class="shortcuts">');
+  const shortcutsHtml = bodyHtml.slice(start, bodyHtml.indexOf('</div>', start));
+  const fullScreenItem = '<span><span data-ui-text="shortcut.onWindows">윈도</span> <kbd>F11</kbd>'
+    + ' · <span data-ui-text="shortcut.onMac">맥</span> <kbd>Control</kbd>+<kbd>Cmd</kbd>+<kbd>F</kbd>'
+    + ' <span data-ui-text="shortcut.fullScreen">전체 화면</span></span>';
+  assert.ok(shortcutsHtml.includes(fullScreenItem), shortcutsHtml);
+  assert.ok(shortcutsHtml.indexOf('shortcut.panelToggle') < shortcutsHtml.indexOf('shortcut.fullScreen'));
+  assert.deepEqual(
+    ['shortcut.onWindows', 'shortcut.onMac', 'shortcut.fullScreen'].map((key) => [tKo(key), tEn(key)]),
+    [['윈도', 'Windows'], ['맥', 'Mac'], ['전체 화면', 'Full screen']],
+  );
+});
+
 test('index.html 은 data-ui-text 요소를 빼면 <body> 에 보이는 한국어 글자가 없다', () => {
   const restText = readBodyHtml()
     .replace(ANNOTATED_TEXT_ELEMENT_PATTERN, '')

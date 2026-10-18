@@ -2539,7 +2539,7 @@ document.addEventListener('pointerdown', (event) => {
   setSettingsPanelOpen(false);
 });
 
-// 패널 접기·펼치기(Ctrl+B): 창 폭은 main 이 바꾸고, 여기서는 패널과 띠 중 무엇을 보일지만 바꾼다.
+// 패널 접기·펼치기(Ctrl+B): Meet 화면 폭은 main 이 바꾸고, 여기서는 패널과 띠 중 무엇을 보일지만 바꾼다.
 // 화면 낭독기 안내 영역은 패널 밖에 두어 접혀 있어도 해설·안내를 읽는다.
 function renderViewerPanel({ isCollapsed }) {
   const hadFocusInPanel = document.querySelector('.app').contains(document.activeElement);
