@@ -82,9 +82,12 @@ import { showModal } from './modal.js';
 import { formatMeetingLabel } from '../core/archive/meeting-label.js';
 import { computeAnchoredPanelPosition } from '../core/ui/anchored-panel-position.js';
 
-import { RoiStore, SPEAKER_VERDICT_MAP } from '../core/roi/roi-store.js';
+import {
+  RoiStore, SPEAKER_VERDICT_MAP, ROI_CHANGE_CAUSE_MAP, resolveRoiChangeReset,
+} from '../core/roi/roi-store.js';
 import { MeetCaptureSession } from '../core/capture/meet-capture-session.js';
 import { fitWithinLongEdge } from '../core/capture/frame-scale.js';
+import { captureWhenSettled } from '../core/capture/settled-capture.js';
 import { wallToVideoTimeMs, resolveSpeechEndWallTs, attachCandidateEventVideoTime } from '../core/capture/video-time.js';
 import { createLogoTapCounter } from '../core/dev/logo-tap-counter.js';
 
@@ -557,6 +560,11 @@ window.seeon.onRoiUpdate((payload) => {
   speakerTimeline.record({ wallTs: Date.now(), name: isSpeakerTrackingOn() ? roiStore.getCurrentSpeakerName() : null });
   syncToggleAvailability();
 });
+// main 은 Meet 화면 크기를 바꾸기 직전에 새 크기를 알린다(패널 접기·펼치기, 전체 화면, 창 크기 변경).
+window.seeon.onMeetViewResized(({ width, height }) => {
+  roiStore.expectViewport({ vw: width, vh: height });
+  console.log(`[roi] Meet 화면 크기 변경 ${width}×${height} — 새 좌표가 자리 잡을 때까지 화면을 자르지 않음`);
+});
 buildModeButtons();
 
 const POINTING_SAMPLE_MS = 400;
@@ -665,6 +673,14 @@ async function captureFrameJpeg(subRegion = null) {
   return captureRegionJpeg(subRegion ? narrowToPointingRegion(frame, subRegion) : frame);
 }
 
+// 질문·명령·지시 해설·전환 고지는 그 순간의 화면이 있어야 한다. Meet 화면 크기가 바뀐 직후면 좌표가 자리 잡을 때까지 기다렸다가 찍는다.
+function captureFrameJpegWhenSettled(subRegion = null) {
+  return captureWhenSettled({
+    isSettling: () => roiStore.isLayoutSettling(),
+    capture: () => captureFrameJpeg(subRegion),
+  });
+}
+
 async function captureRegionJpeg(region) {
   if (!region || !captureSource.liveVideo) return null;
   const canvas = document.createElement('canvas');
@@ -681,21 +697,31 @@ function normRectToPx(rect, vw, vh) {
   return { x: rect.x * vw, y: rect.y * vh, w: rect.w * vw, h: rect.h * vh };
 }
 
+const ROI_CHANGE_REASON_MAP = {
+  [ROI_CHANGE_CAUSE_MAP.screen]: 'ROI 좌표 변경 → 전환 감지기 리셋',
+  [ROI_CHANGE_CAUSE_MAP.layout]: 'Meet 화면 크기 변경 → 전환 감지기 다시 기준 잡기',
+};
+
+// 공유 화면 좌표가 바뀌면 감지기 기준은 늘 다시 잡는다. Meet 화면 크기만 바뀐 경우는 같은 화면이 자리만 옮긴 것이라
+// 체류 판정 중인 전환 고지를 살려 둔다.
 function syncRoiGeneration({ ts }) {
   const generation = roiStore.getScreenGeneration();
   if (generation === lastScreenGeneration) return;
   lastScreenGeneration = generation;
+  const cause = roiStore.getLastChangeCause();
+  const { shouldResetDwell } = resolveRoiChangeReset({ cause });
   histogramGate.reset();
   pointingLocator.reset();
   recentPointingMemory.reset();
   pointingMotionTracker.reset();
   lastPointingMotionAt = -Infinity;
-  slideDwellGate.reset();
+  if (shouldResetDwell) slideDwellGate.reset();
   roiChangeSuppressUntil = ts + ROI_CHANGE_SUPPRESS_MS;
   markDebug({
     stage: DEBUG_STAGE_MAP.slide, verdict: DEBUG_VERDICT_MAP.info,
-    reason: 'ROI 좌표 변경 → 전환 감지기 리셋',
-    detail: `세대=${generation} · 공유화면=${roiStore.hasScreenShare() ? '있음' : '없음'}`,
+    reason: ROI_CHANGE_REASON_MAP[cause],
+    detail: `세대=${generation} · 공유화면=${roiStore.hasScreenShare() ? '있음' : '없음'}`
+      + ` · 체류 판정=${shouldResetDwell ? '초기화' : '유지'}`,
   });
 }
 
@@ -792,7 +818,7 @@ function releasePendingTransition({ slideLabel }) {
 }
 
 async function requestPageTransitionNarration(decision) {
-  const buffer = await captureFrameJpeg();
+  const buffer = await captureFrameJpegWhenSettled();
   if (!buffer) {
     releasePendingTransition({ slideLabel: decision.label });
     return;
@@ -1076,7 +1102,7 @@ async function runDeixisDecision(firedDecision) {
   const mode = getCurrentMode();
   const sessionSeq = experimentSeq;
   const [buffer, decision] = await Promise.all([
-    captureFrameJpeg(firedDecision.region), firedDecision.whenSealed ?? firedDecision,
+    captureFrameJpegWhenSettled(firedDecision.region), firedDecision.whenSealed ?? firedDecision,
   ]);
   if (!buffer || !decision) return;
   if (!captureSource.isActive || sessionSeq !== experimentSeq) return;
@@ -1274,7 +1300,7 @@ async function askQuestion({ command = null, questionText = null, inputSource = 
 }
 
 async function requestAnswer({ command, questionText, inputSource }) {
-  const buffer = await captureFrameJpeg();
+  const buffer = await captureFrameJpegWhenSettled();
   if (!buffer) {
     announce(t('question.captureFailed'));
     return;

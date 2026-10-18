@@ -3,7 +3,9 @@ const path = require('path');
 const { createMeetSession } = require('./meeting/session');
 const { MEET_HOME_URL, handleMeetWindowOpen } = require('./meeting/meet-navigation');
 const { getUaForUrl } = require('./meeting/ua');
-const { computeViewBoundsPair, computeToggledWindowBounds } = require('./viewer-panel-layout');
+const {
+  computeViewBoundsPair, computeToggledWindowBounds, createMeetResizeNotifier,
+} = require('./viewer-panel-layout');
 
 const SMOKE_URL = 'about:blank';
 
@@ -16,12 +18,22 @@ const getWindow = () => win;
 const getViewerView = () => viewerView;
 const getMeetView = () => meetView;
 
+// 캡처 영상은 Meet 화면 크기를 바꾸고 수십 ms 안에 새 크기로 오지만, Meet 좌표는 수백 ms 뒤에 온다.
+// 뷰어가 그 사이 옛 좌표로 새 화면을 자르지 않도록 크기를 바꾸기 전에 새 크기를 먼저 알린다.
+const meetResizeNotifier = createMeetResizeNotifier({
+  notify: ({ width, height }) => {
+    if (!viewerView || viewerView.webContents.isDestroyed()) return;
+    viewerView.webContents.send('meet-view-resized', { width, height });
+  },
+});
+
 function layoutView() {
   if (!win) return;
   const { width, height } = win.getContentBounds();
   const { meetBounds, viewerBounds } = computeViewBoundsPair({
     contentWidth: width, contentHeight: height, isCollapsed: isViewerCollapsed,
   });
+  meetResizeNotifier.observe(meetBounds);
   meetView.setBounds(meetBounds);
   viewerView.setBounds(viewerBounds);
 }
@@ -100,7 +112,10 @@ function createWindow() {
 
   viewerView.webContents.loadFile(path.join(__dirname, '..', 'renderer', 'app', 'index.html'));
 
-  win.on('closed', () => { win = null; viewerView = null; meetView = null; isViewerCollapsed = false; });
+  win.on('closed', () => {
+    win = null; viewerView = null; meetView = null; isViewerCollapsed = false;
+    meetResizeNotifier.reset();
+  });
 }
 
 module.exports = {

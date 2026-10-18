@@ -24,4 +24,22 @@ function computeToggledWindowBounds({ windowBounds, workArea, isCollapsed }) {
   return { ...windowBounds, x, width };
 }
 
-module.exports = { computeViewBoundsPair, computeToggledWindowBounds, VIEWER_PANEL_WIDTH_MAP };
+// Meet 화면 크기가 바뀔 때만 새 크기를 알린다. 처음 배치는 이전 크기에서 잰 좌표가 없어 기다릴 것이 없으므로 알리지 않는다.
+function createMeetResizeNotifier({ notify }) {
+  let lastSizeKey = null;
+  return {
+    observe({ width, height }) {
+      const sizeKey = `${width}x${height}`;
+      const isResized = lastSizeKey !== null && sizeKey !== lastSizeKey;
+      lastSizeKey = sizeKey;
+      if (isResized) notify({ width, height });
+    },
+    reset() {
+      lastSizeKey = null;
+    },
+  };
+}
+
+module.exports = {
+  computeViewBoundsPair, computeToggledWindowBounds, createMeetResizeNotifier, VIEWER_PANEL_WIDTH_MAP,
+};
