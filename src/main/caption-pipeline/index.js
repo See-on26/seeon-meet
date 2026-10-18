@@ -333,7 +333,7 @@ function registerPipeline({ getViewerView, meetingArchive = null }) {
   // 전달 Layer 앞의 TTS. 렌더러 대기 줄이 이번에 재생할 해설로 고른 것만 합성한다.
   ipcMain.handle('pipeline-tts', async (_event, { ts = Date.now(), text = '', source = null } = {}) => {
     try {
-      const wavData = await ttsClient.synthesize({ text });
+      const wavData = await ttsClient.synthesize({ text, language: getCaptionLanguage() });
       await appendRecord({ kind: RECORD_KIND_MAP.tts, ts, byteLength: wavData.byteLength });
       markDebug({
         stage: DEBUG_STAGE_MAP.tts, verdict: DEBUG_VERDICT_MAP.pass, narrationType: source, ts,
