@@ -45,8 +45,21 @@ test('few-shot 은 자기 묶음 유형의 예시만 담고, 두 묶음을 합�
   const speechList = ROUTER_PROMPT_MAP[JUDGE_GROUP_MAP.speech].fewShotList;
   for (const example of deixisList) assert.ok(example.input.candidateList.every((c) => DEIXIS_TYPE_LIST.includes(c.type)));
   for (const example of speechList) assert.ok(example.input.candidateList.every((c) => SPEECH_TYPE_LIST.includes(c.type)));
-  assert.equal(deixisList.length + speechList.length, 16);
+  assert.equal(deixisList.length + speechList.length, 27);
   assert.ok(deixisList.length >= 4 && speechList.length >= 8);
+});
+
+// QA 2-19: 앞에 후보가 여럿이면 뒤 발화가 대상을 밝혀도 O 로 넘기고, "가리킨다고 명시하지 않았다"며 O 를 주던 오탐을 줄인다.
+test('지시 대상 지시문은 뒤 발화·하나에만 붙은 말·짝지은 값으로 대상이 정해지면 X 로 보고, 확인 과잉으로 O 를 주지 않게 한다', () => {
+  const deixisPrompt = ROUTER_PROMPT_MAP[JUDGE_GROUP_MAP.deixis].systemPrompt;
+  const speechPrompt = ROUTER_PROMPT_MAP[JUDGE_GROUP_MAP.speech].systemPrompt;
+  assert.match(deixisPrompt, /뒤 발화가 대상을 밝히면 앞에 후보가 여럿이었어도 X 다/);
+  assert.match(deixisPrompt, /\*\*하나에만\*\* 붙은 말/);
+  assert.match(deixisPrompt, /값을 비교해 고를 수 있으므로 X 다/);
+  assert.match(deixisPrompt, /명시하지 않았다/);
+  for (const rule of ['뒤 발화가 대상을 밝히면', '하나에만']) assert.equal(speechPrompt.includes(rule), false, rule);
+  const deixisList = ROUTER_PROMPT_MAP[JUDGE_GROUP_MAP.deixis].fewShotList;
+  assert.ok(deixisList.some((example) => /주말 오후 시간대요/.test(example.input.after)), '뒤 발화가 밝히는 X 짝 예시');
 });
 
 function createFakeJudgeLlm(answerByGroup) {
