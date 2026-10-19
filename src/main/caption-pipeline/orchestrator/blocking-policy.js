@@ -18,6 +18,8 @@ const NARRATION_PRIORITY_MAP = {
 // 발화 기반·지시 해설 간격. 필기·포인터로 가리킨 곳이 있으면 대상이 분명해 더 짧게 둔다.
 const POINTED_MIN_INTERVAL_MS = 12000;
 const SPEECH_ONLY_MIN_INTERVAL_MS = 18000;
+// v5.4: 막은 해설에 없던 수치가 든 해설은 새 사실이므로 이 간격만 둔다(다섯 판 S 오답 판정: 정답 수치가 든 해설이 간격 억제로 버려짐).
+const NEW_FACT_MIN_INTERVAL_MS = 6000;
 // 페이지 전환 고지 직후 무발화 해설을 막는 간격. 무발화끼리는 silence-gate(60초·슬라이드당 1회)가 막는다.
 const SILENCE_AFTER_TRANSITION_MIN_INTERVAL_MS = 12000;
 
@@ -99,7 +101,7 @@ function readBlockingRelation({ narrationClass, blockedByClass }) {
 
 module.exports = {
   NARRATION_PRIORITY_MAP, BLOCKING_RULE_MAP, BLOCKING_RELATION_MAP, BLOCKING_RELATION_LABEL_MAP,
-  NARRATION_CLASS_LABEL_MAP, POINTED_MIN_INTERVAL_MS, SPEECH_ONLY_MIN_INTERVAL_MS,
+  NARRATION_CLASS_LABEL_MAP, POINTED_MIN_INTERVAL_MS, SPEECH_ONLY_MIN_INTERVAL_MS, NEW_FACT_MIN_INTERVAL_MS,
   SILENCE_AFTER_TRANSITION_MIN_INTERVAL_MS, normalizeNarrationClass, readNarrationPriority,
   findBlockingRule, resolveMinIntervalMs, readBlockingRelation,
 };

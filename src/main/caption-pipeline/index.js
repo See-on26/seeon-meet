@@ -280,7 +280,7 @@ function registerPipeline({ getViewerView, meetingArchive = null }) {
       return { isEmitted: false };
     }
     // 간격 억제: 어느 분류가 어느 분류를 얼마 동안 막는지는 orchestrator/blocking-policy.js 표가 정한다.
-    const rate = narrationHistory.findRateLimited({ narrationClass: resolvedClass, ts, hasPointingRegion });
+    const rate = narrationHistory.findRateLimited({ narrationClass: resolvedClass, ts, hasPointingRegion, text });
     if (rate.isRateLimited) {
       const blockingRelation = readBlockingRelation({
         narrationClass: resolvedClass, blockedByClass: rate.blockedByClass,

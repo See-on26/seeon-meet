@@ -788,6 +788,19 @@ function detectUnitlessValueNumber({ text }) {
   return candidateList.filter(Boolean);
 }
 
+// v5.4(10/19, 다섯 판 S 오답 판정의 트리거 누락 20문항에서): 지시어 없이 화면 자료를 가리킨 말과 단위 없는 범위 수.
+// - "오른쪽 그래프", "왼쪽 지도": 방향어 + 자료 명사
+// - "빨간 화살표로 표시한 부분": 도구(…로)로 표시·강조한 + 부분·곳·칸. 도구 없는 "표시한 거 말고요"는 그대로 뺀다.
+// - "시간당 20에서 30": 범위 수(뒤 숫자에만 단위가 붙은 "30에서 50mm"도 범위로 잡는다. 연도·시각·나이 범위는 뺀다)
+const KOREAN_SCREEN_PHRASE_PATTERN_LIST = [
+  { type: TRIGGER_TYPE_MAP.adjectiveNoun,
+    pattern: /(?<=^|\s)(?:왼쪽|오른쪽|위쪽|아래쪽|가운데|맨\s?위|맨\s?아래)(?:에\s있는|의)?\s?(?:그래프|그림|표|지도|사진|차트|도표)(?=[가-힣]{0,2}(?:\s|$|[.,?!]))/g },
+  { type: TRIGGER_TYPE_MAP.adjectiveNoun,
+    pattern: /(?<=[가-힣](?:로|으로)\s)(?:표시|강조|체크)(?:한|된|해\s?둔|해\s?놓은)\s(?:부분|곳|칸)(?=[가-힣]{0,2}(?:\s|$|[.,?!]))/g },
+  { type: TRIGGER_TYPE_MAP.number,
+    pattern: /(?<![\d.,])\d+(?:\.\d+)?\s?에서\s?\d+(?:\.\d+)?(?![\d.,]|\s?(?:%|퍼센트|프로|배|명|원|건|개|곳|위|점|톤|초|리터|킬로|달러|시간|개월|장|대|년|월|일|시|분|도|살|세|번))/g },
+];
+
 function detectKoreanCandidateList({ text, tokenList }) {
   const context = createKoreanContext({ text, tokenList });
   const changeList = [...detectKoreanChange(context), ...detectKoreanAnchoredChange(context)];
@@ -803,9 +816,20 @@ function detectKoreanCandidateList({ text, tokenList }) {
     ...detectKoreanAdjectiveNoun(context),
     ...detectKoreanNumber(context),
     ...detectUnitlessValueNumber({ text }),
+    ...collectPatternCandidateListByType({ text, patternList: KOREAN_SCREEN_PHRASE_PATTERN_LIST }),
     ...changeList,
     ...scaleList,
   ]);
+}
+
+function collectPatternCandidateListByType({ text, patternList }) {
+  const candidateList = [];
+  for (const { type, pattern } of patternList) {
+    for (const match of text.matchAll(pattern)) {
+      candidateList.push(buildCandidate({ text, type, start: match.index, end: match.index + match[0].length }));
+    }
+  }
+  return candidateList.filter(Boolean);
 }
 
 // ── 한국어 대체 규칙 (Kiwi 모델이 없거나 아직 준비되지 않았을 때) ──
@@ -1083,6 +1107,13 @@ function mergeOverlapping(candidateList) {
   return mergedList;
 }
 
+// v5.4: "I can show you the rows"처럼 지시어 없이 화면을 보여 주겠다는 말, than 없는 "do slightly better".
+const EN_SCREEN_PHRASE_PATTERN_LIST = [
+  { type: TRIGGER_TYPE_MAP.demonstrative, pattern: /\bshow\s+you\s+(?:the|what|how)\b/gi },
+  { type: TRIGGER_TYPE_MAP.change,
+    pattern: /\b(?:do|does|did|doing|perform(?:s|ed|ing)?|work(?:s|ed|ing)?)\s+(?:(?:slightly|a bit|a little|much|way|far|even|significantly)\s+)?(?:better|worse)\b(?!\s+than)/gi },
+];
+
 function detectEnglishCandidateList({ text }) {
   const wordList = listEnglishWord(text);
   const changeList = mergeOverlapping(collectPatternCandidateList({ text, type: TRIGGER_TYPE_MAP.change, patternList: EN_CHANGE_PATTERN_LIST }))
@@ -1099,6 +1130,7 @@ function detectEnglishCandidateList({ text }) {
       text, type: TRIGGER_TYPE_MAP.number, patternList: [EN_NUMBER_PATTERN, EN_PLURAL_COUNT_PATTERN],
     })).filter((candidate) => !isEnglishPeriodNumber({ text, candidate })),
     ...detectUnitlessValueNumber({ text }),
+    ...collectPatternCandidateListByType({ text, patternList: EN_SCREEN_PHRASE_PATTERN_LIST }),
     ...changeList,
     ...mergeOverlapping(scaleList),
   ]);
