@@ -140,9 +140,10 @@ function trimToCompletePhrase({ text, isConservative = false }) {
 // 지시 해설은 가리킨 대상의 이름·내용만 읽는다. "보는 중" 같은 상황 칸은 청자에게 정보가 아니라 두지 않는다.
 // seen 은 가리킨 곳에 보이는 것을 먼저 옮겨 적게 해 지어내기를 줄이는 근거 칸이다(읽히지 않는다).
 // 띄어쓰기 비교처럼 항목이 넷이면 11어절이 넘어서(효과영상 레이블) caption 은 12어절까지 받는다.
+// v5: 표의 머리글 + 관련 행, 격자의 전체 크기 + 위치를 담도록 14어절까지 받는다.
 const DEIXIS_SLOT_LIST = [
   { key: 'seen', label: '가리킨 곳에 실제로 보이는 것 — 글자는 그대로, 그림·필기는 짧게', minWordCount: 0, maxWordCount: 20, isDiagnostic: true },
-  { key: 'caption', label: '청자에게 읽어 줄 해설 — 가리킨 대상의 이름·내용', minWordCount: 2, maxWordCount: 12, isPhrase: true },
+  { key: 'caption', label: '청자에게 읽어 줄 해설 — 가리킨 대상의 이름·내용', minWordCount: 2, maxWordCount: 14, isPhrase: true },
 ];
 
 const NARRATION_SLOT_MAP = {

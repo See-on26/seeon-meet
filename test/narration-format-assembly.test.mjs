@@ -50,9 +50,9 @@ test('지시 해설 끝의 "6시까지"처럼 숫자에 붙은 기한은 지우�
     rawSlotMap: { seen: '마감 안내', caption: '제출 마감 오후까지' } }), '제출 마감');
 });
 
-test('지시 해설은 12어절까지 받고, 넘치면 끝을 맺을 수 있는 데서 자른다', () => {
+test('지시 해설은 14어절까지 받고, 넘치면 끝을 맺을 수 있는 데서 자른다', () => {
   const caption = '1번 할수 붙여 씀, 2번 할 수 띄어 씀, 3번 할수록 붙여 씀, 4번 할 수록 띄어 씀';
   const text = assemble({ narrationType: 'deixis', subKind: 'simple', rawSlotMap: { seen: '네 문장', caption } });
-  assert.ok(text.split(' ').length <= 12, text);
+  assert.ok(text.split(' ').length <= 14, text);
   assert.ok(caption.startsWith(text), text);
 });
