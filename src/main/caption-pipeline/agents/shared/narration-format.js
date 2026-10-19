@@ -164,14 +164,15 @@ const NARRATION_SLOT_MAP = {
     [INTERPRETATION_KIND_MAP.valueToMeaning]: [
       { key: 'value', label: '발화에 나온 단순 수치 (예: 73%)', minWordCount: 1, maxWordCount: 2, mustContainValue: true },
       // 3번 판(2번 판에서): 해석틀에 화면에만 있는 기준(연도·단위)·비교 값·범위 끝을 담도록 8어절까지 받는다.
-      { key: 'frame', label: '값의 해석틀 — 화면에서 찾은 대상·기준과, 화면에만 있는 비교 값·범위 (예: 작년 대비 A사 기업가치 성장률, B사 41%)', minWordCount: 3, maxWordCount: 8, isPhrase: true },
+      // v5: 라벨 수식어와 비교 값의 라벨까지 담도록 10어절까지 받는다.
+      { key: 'frame', label: '값의 해석틀 — 화면에서 찾은 대상·기준과, 화면에만 있는 비교 값·범위 (예: 작년 대비 A사 기업가치 성장률, B사 41%)', minWordCount: 3, maxWordCount: 10, isPhrase: true },
     ],
     // 발화 표현을 칸에 넣으면 "…빨라졌습니다를 의미"처럼 발화가 그대로 붙는다. 대상과 근거 값만 화면에서 읽는다.
     // 대상 칸 4어절에서는 "…혈당 상승도"의 측정량 낱말이, 값 칸 6어절에서는 네 항목 목록의 뒤쪽이 잘렸다(발화 기반 23자리, 10/18).
     // 전체 예산은 조립 뒤에 맞춘다(fitClaimPairToBudget).
     [INTERPRETATION_KIND_MAP.claimToValue]: [
       { key: 'target', label: '변화·비교의 대상 — 화면에 적힌 항목 이름. 발표자가 여러 항목을 묶어 부른 말이면 그 묶음 이름 (예: 첫 응답 시간, 4분기 매출, 인력)', minWordCount: 1, maxWordCount: 5, isPhrase: true },
-      { key: 'value', label: '화면에서 찾은 근거 값 — 반드시 수치. 변화면 바뀌기 전 값에서 바뀐 뒤 값(바뀐 뒤 값만 있으면 그 값), 비교면 두 대상과 각 값, 묶음 이름이면 항목 2개까지 각 이름과 값 (예: 9.2시간에서 3.1시간, 도심 33.8도 교외 29.1도, 개발자 120명과 디자이너 30명)', minWordCount: 1, maxWordCount: 8, mustContainValue: true },
+      { key: 'value', label: '화면에서 찾은 근거 값 — 반드시 수치. 변화면 바뀌기 전 값에서 바뀐 뒤 값(바뀐 뒤 값만 있으면 그 값), 비교면 두 대상과 각 값, 묶음 이름이면 항목 2개까지 각 이름과 값 (예: 9.2시간에서 3.1시간, 도심 33.8도 교외 29.1도, 개발자 120명과 디자이너 30명)', minWordCount: 1, maxWordCount: 10, mustContainValue: true },
     ],
   },
   [NARRATION_TYPE_MAP.visualDescription]: {
@@ -182,7 +183,7 @@ const NARRATION_SLOT_MAP = {
     // "○○보다 N배 큰 ○○" 네 칸으로는 "○○만 한", "○○를 다 덮는", "○○의 절반쯤", 측정값을 말할 수 없고
     // 칸을 잇다 "보다보다·배배"가 생겼다(발화 기반 척도 6자리, 10/18). 크기 묘사를 자유 구 하나로 받는다.
     [VISUAL_DESCRIPTION_KIND_MAP.scale]: [
-      { key: 'caption', label: '청자에게 읽어 줄 크기 묘사 — 발표자가 말한 대상을 화면 속 기준과 견준 크기, 그래프·표의 양이면 그 값 (예: 5층 건물의 두 배쯤 되는 크레인, 약 3만 명으로 가장 많은 3월 방문객)', minWordCount: 3, maxWordCount: 10, isPhrase: true },
+      { key: 'caption', label: '청자에게 읽어 줄 크기 묘사 — 발표자가 말한 대상을 화면 속 기준과 견준 크기, 그래프·표의 양이면 그 값 (예: 5층 건물의 두 배쯤 되는 크레인, 약 3만 명으로 가장 많은 3월 방문객)', minWordCount: 3, maxWordCount: 12, isPhrase: true },
     ],
   },
   [NARRATION_TYPE_MAP.speakerIdentity]: {

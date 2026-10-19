@@ -112,14 +112,16 @@ export const NARRATION_WORD_RANGE_MAP = {
     [DEIXIS_FORM_MAP.simple]: { minWordCount: 2, maxWordCount: 12 },
     [DEIXIS_FORM_MAP.complete]: { minWordCount: 4, maxWordCount: 14 },
   },
+  // v5: 값→의미는 라벨 수식어·비교 값의 라벨, 주장→값은 비교 상대·기준 날짜 몫으로 2어절 늘린다.
   [NARRATION_TYPE_MAP.interpretation]: {
-    [INTERPRETATION_KIND_MAP.valueToMeaning]: { minWordCount: 6, maxWordCount: 12 },
-    [INTERPRETATION_KIND_MAP.claimToValue]: { minWordCount: 6, maxWordCount: 12 },
+    [INTERPRETATION_KIND_MAP.valueToMeaning]: { minWordCount: 6, maxWordCount: 14 },
+    [INTERPRETATION_KIND_MAP.claimToValue]: { minWordCount: 6, maxWordCount: 14 },
   },
   [NARRATION_TYPE_MAP.visualDescription]: {
     [VISUAL_DESCRIPTION_KIND_MAP.reaction]: { minWordCount: 5, maxWordCount: 12 },
     // 척도는 크기 묘사 한 구(caption)다. "어른 손바닥만 한 사과"(3어절)부터 측정값 묘사까지 받는다.
-    [VISUAL_DESCRIPTION_KIND_MAP.scale]: { minWordCount: 3, maxWordCount: 10 },
+    // v5: "전체 N 중 n"처럼 기준을 붙인 값 몫으로 12어절까지.
+    [VISUAL_DESCRIPTION_KIND_MAP.scale]: { minWordCount: 3, maxWordCount: 12 },
   },
   [NARRATION_TYPE_MAP.speakerIdentity]: {
     [SPEAKER_IDENTITY_KIND_MAP.named]: { minWordCount: 2, maxWordCount: 3 },

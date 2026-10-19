@@ -8,7 +8,7 @@ const { buildOutputLanguageRuleList } = require('./output-language-rule');
 
 const DEFAULT_VISUAL_WORD_RANGE_MAP = {
   [VISUAL_DESCRIPTION_KIND_MAP.reaction]: { minWordCount: 5, maxWordCount: 12 },
-  [VISUAL_DESCRIPTION_KIND_MAP.scale]: { minWordCount: 3, maxWordCount: 10 },
+  [VISUAL_DESCRIPTION_KIND_MAP.scale]: { minWordCount: 3, maxWordCount: 12 },
 };
 
 const ENGLISH_IMAGE_PREFIX_RULE = '머리말 "Image:"(이미지 제시)는 시스템이 붙이므로 description 에 넣지 마라.';
@@ -56,6 +56,10 @@ function buildVisualDescriptionPrompt({ subKind = VISUAL_DESCRIPTION_KIND_MAP.re
       '할 일: 그 대상의 크기를 화면 속 기준과 견주거나, 측정값이면 값으로 한 구에 담는다.',
       '· 대상은 지금 발화가 크다고 한 것이다. 앞 발화에 마지막으로 나온 다른 이름을 새 대상으로 바꾸지 않는다.',
       '· 그래프·표의 양이면 견줄 물체를 찾지 않고 값을 쓴다.',
+      // v5(10/19, 다섯 판 S 오답 판정): 통계 패널·툴팁의 개수·값이 있는데 범주로 말하거나 어림했다. 4번 판의 "전체 N 중 n"을 더한다.
+      '· 통계 패널·툴팁·막대 위에 적힌 정확한 값·개수가 있으면 어림하지 말고 라벨과 짝지어 그대로 쓴다.',
+      '· 전체가 보이면 기준을 붙인다: "전체 N 중 n", "[대상] [값], [비교 대상] [값]". 격자·배치는 칸 수(가로 N칸·세로 M칸)로.',
+      '· 사진·지도처럼 숫자가 없는 화면은 함께 보이는 물체·지역과 견준다. 숫자가 없다는 이유로 NONE 을 내지 않는다.',
       '',
       '예시 (발화 + 화면 → caption):',
       '동등) "이 사과 크죠" + 손에 든 사과가 손바닥을 다 가림',
@@ -70,6 +74,8 @@ function buildVisualDescriptionPrompt({ subKind = VISUAL_DESCRIPTION_KIND_MAP.re
       '→ "약 3만 명으로 가장 많은 3월 방문객"',
       '측정값) "처음엔 시간이 상당히 걸렸어요" + 구간 막대 "준비 단계 48분"',
       '→ "준비 단계에만 걸린 48분"',
+      '개수) "지원자가 꽤 몰렸죠" + 통계 칸 "지원 1,240명 · 합격 62명"',
+      '→ "지원자 1,240명 중 합격 62명"',
       '없음) 대상도 견줄 기준도 읽을 값도 화면에 없음',
       `→ ${GROUNDING_NONE_TOKEN}: 대상과 기준이 화면에 없음`,
       '',

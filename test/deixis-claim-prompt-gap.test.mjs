@@ -54,9 +54,10 @@ test('변화·비교 수치 프롬프트는 대상·조건을 먼저 고정하�
 });
 
 // 값 칸 6어절에서는 네 항목 목록의 뒤쪽이 잘렸다(03#10). 전체 예산은 조립 뒤에 맞춘다.
-test('변화·비교 해설의 값 칸은 네 항목 목록이 들어가게 8어절까지 받는다', () => {
+// v5: 비교 상대·기준 날짜까지 담도록 10어절로 늘렸다.
+test('변화·비교 해설의 값 칸은 네 항목 목록과 비교 상대가 들어가게 10어절까지 받는다', () => {
   const valueSlot = getSlotList({ narrationType: 'interpretation', subKind: 'claim_to_value' }).find((slot) => slot.key === 'value');
-  assert.equal(valueSlot.maxWordCount, 8);
+  assert.equal(valueSlot.maxWordCount, 10);
   assert.match(valueSlot.label, /묶음/);
   const assemble = (rawSlotMap) => assembleNarration({ narrationType: 'interpretation', subKind: 'claim_to_value', rawSlotMap })?.text ?? null;
   assert.equal(assemble({ target: '설치 장비', value: 'RSU 79개와 WAVE 단말기 3,000개' }), '설치 장비, RSU 79개와 WAVE 단말기 3,000개');
@@ -66,7 +67,7 @@ test('변화·비교 해설의 값 칸은 네 항목 목록이 들어가게 8어
 // 실제 VLM 거절 이유(10/15): "특히 장비가 크게 늘었습니다"는 "이전 값이 없어 변화의 근거 값을 못 댐" 10/10.
 test('변화 수치는 같은 항목의 시간 변화만 "전 값에서 뒤 값"으로 잇고, 값·눈금을 못 찾을 때만 거절한다', () => {
   const prompt = buildInterpretationPrompt({ utterance: '가입자가 크게 늘었습니다.', subKind: 'claim_to_value' });
-  assert.match(prompt, /같은 항목이 시간에 따라 바뀐 것만 "전 값에서 뒤 값"/);
+  assert.match(prompt, /같은 항목이 시간에 따라 바뀐 것만 "\[시점\] 전 값에서 \[시점\] 뒤 값"\. 단위 환산·다른 항목에는 쓰지 않는다/);
   assert.match(prompt, /값이나 눈금을 화면에서 찾지 못할 때만 NONE이다/);
   assert.match(prompt, /축 눈금으로 어림해 "약"을 붙인다/);
   assert.doesNotMatch(prompt, /양쪽 수치/);
