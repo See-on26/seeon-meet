@@ -85,6 +85,16 @@ function readGapSource({ env }) {
   return DEFAULT_GAP_SOURCE;
 }
 
+// VLM 이 그림 한 장을 나눌 이미지 토큰 수 상한(해상도). 비우면 요청에 넣지 않아 서버에 띄운 값(--mm-processor-kwargs)을 쓴다.
+// 요청마다 바꾸려면 서버가 --trust-request-mm-kwargs 로 떠 있어야 한다.
+function readVlmMaxSoftTokens({ env }) {
+  const value = env.SEEON_VLM_MAX_SOFT_TOKENS;
+  if (value === undefined || value === '') return null;
+  if (/^[1-9]\d*$/.test(value)) return Number(value);
+  console.warn(`[pipeline] SEEON_VLM_MAX_SOFT_TOKENS="${value}" 은 양의 정수가 아닙니다 — 요청에 넣지 않고 서버 기본값을 씁니다`);
+  return null;
+}
+
 // OCR 은 임베딩 서비스에 붙어 있어 기본 주소를 임베딩 주소에서 만든다. 포트를 나누면 SEEON_OCR_URL 로 준다.
 function resolveOcrUrl({ env, embedUrl }) {
   if (env.SEEON_OCR_URL) return env.SEEON_OCR_URL;
@@ -104,6 +114,7 @@ function readPipelineConfig(env = process.env) {
   return {
     vlmUrl,
     vlmModel,
+    vlmMaxSoftTokens: readVlmMaxSoftTokens({ env }),
     asrUrl: env.SEEON_ASR_URL || DEFAULT_ASR_URL,
     // 회의 음성과 마이크 질문은 말하는 사람이 달라 언어를 따로 둔다(둘 다 기본 자동).
     asrLanguage: readAsrLanguage({ env, envName: 'SEEON_ASR_LANGUAGE' }),
