@@ -58,6 +58,22 @@ test('GPU 빈 응답은 그대로 돌려준다(파서가 NONE 처리)', async ()
   assert.equal(callList.length, 1);
 });
 
+test('content 가 비어 reasoning 을 답으로 쓸 때는 그 답을 돌려주고 경고를 한 번 남긴다', async () => {
+  installFetch(() => jsonResponse(200, { choices: [{ message: { content: '', reasoning: '생각 끝의 답' } }] }));
+  const warnList = [];
+  const originalWarn = console.warn;
+  console.warn = (...argList) => { warnList.push(argList.join(' ')); };
+  try {
+    const answer = await requestVlmContent({ config, jpegBuffer, prompt: 'p', label: '시험' });
+    assert.equal(answer, '생각 끝의 답');
+  } finally {
+    console.warn = originalWarn;
+  }
+  assert.equal(warnList.length, 1);
+  assert.match(warnList[0], /content 가 비어 reasoning 을 답으로 쓴다/);
+  assert.match(warnList[0], new RegExp(config.vlmModel));
+});
+
 test('폴백 설정·폴백 알림·우회 창은 더 이상 없다', () => {
   const pipelineConfig = readPipelineConfig({
     SEEON_VLM_FALLBACK_ENABLED: 'true', SEEON_BEDROCK_VLM_FALLBACK_MODEL_ID: 'anthropic.claude-haiku-4-5-20251001-v1:0',

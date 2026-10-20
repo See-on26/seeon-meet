@@ -7,13 +7,14 @@ const {
 
 const MAX_GAP_TOKENS = 120;
 const THINKING_MODEL_SUFFIX = '+thinking';
-// 사고가 한도에서 끊기면 이 문구로 사고를 닫고 답만 이어 쓰게 한다. vLLM 의 thinking_token_budget 은 생각 끝
-// 토큰만 넣어서, 모델이 답 칸에서 생각을 이어 가다 JSON 없이 끝난다.
-const THINKING_CLOSE_TEXT = '\n\n생각할 시간이 끝났다. 지금까지 따진 것으로 바로 고른다.\n</think>\n\n';
+// 사고가 한도에서 끊기면 그때까지의 생각을 이 머리말과 함께 user 메시지로 넘기고, 사고를 끈 채 답만 다시 묻는다.
+// vLLM 의 thinking_token_budget 은 생각 끝 토큰만 넣어서, 모델이 답 칸에서 생각을 이어 가다 JSON 없이 끝난다.
+// 생각 칸을 이어 쓰는 방식(continue_final_message)은 모델마다 생각 표기가 달라 템플릿에 따라 깨진다.
+const THINKING_HANDOFF_HEADER = '아래는 이 선택을 위해 따지던 생각이다. 시간이 끝나 중간에 끊겼다. 더 따지지 말고 이것으로 바로 고른다.';
 
-// 삽입 위치는 GPU 판정 LLM(8805, Qwen3.5-9B)이 고른다. 실패해도 Claude(Bedrock)로 넘기지 않고 규칙으로 고른다.
-// 품질 모드는 지연이 60초라 사고(thinking)를 켠다. 한도 없이 두면 사고가 6,000토큰(약 68초)을 넘기기도 해서
-// 1,024토큰(약 12초)에서 끊고 답하게 한다. 균형 모드는 지연이 10초라 사고 없이 바로 답한다(약 0.4초).
+// 삽입 위치는 GPU 판정 LLM(8805)이 고른다. 실패해도 Claude(Bedrock)로 넘기지 않고 규칙으로 고른다.
+// 품질 모드는 지연이 60초라 사고(thinking)를 켠다. 한도 없이 두면 사고가 수천 토큰을 넘기기도 해서
+// 1,024토큰에서 끊고 답하게 한다(실측 4.8~13.5초). 균형 모드는 지연이 10초라 사고 없이 바로 답한다(약 0.2~0.4초).
 // 성능·동시 모드는 delayMs=0이라 삽입 위치 추론을 호출하지 않는다. 모르는 모드는 사고 없이 묻는다.
 const GAP_REQUEST_BY_MODE_MAP = {
   listening: { isThinking: true, thinkingBudget: 1024, timeoutMs: 30000 },
@@ -112,8 +113,13 @@ function parseGapText({ text, gapCount }) {
   return { gapIndex: parsed.gapIndex, reason };
 }
 
+// 끊긴 생각을 원래 입력 뒤에 붙여 다시 물을 user 글을 만든다.
+function buildThinkingHandoffText({ userText, reasoning }) {
+  return [userText, '', THINKING_HANDOFF_HEADER, '"""', reasoning.trim(), '"""', '선택(JSON 한 줄):'].join('\n');
+}
+
 function createGapInferenceAgent({ config, fetchImpl = (...argList) => fetch(...argList) }) {
-  async function postChat({ messageList, maxTokens, isThinking, signal, extraBodyMap = {} }) {
+  async function postChat({ messageList, maxTokens, isThinking, signal }) {
     const response = await fetchImpl(config.judgeGpuUrl, {
       method: 'POST',
       headers: { 'content-type': 'application/json' },
@@ -123,7 +129,6 @@ function createGapInferenceAgent({ config, fetchImpl = (...argList) => fetch(...
         max_tokens: maxTokens,
         chat_template_kwargs: { enable_thinking: isThinking },
         messages: messageList,
-        ...extraBodyMap,
       }),
       signal,
     });
@@ -137,31 +142,30 @@ function createGapInferenceAgent({ config, fetchImpl = (...argList) => fetch(...
     };
   }
 
-  async function closeThinking({ messageList, reasoning, signal }) {
-    const { content, reasoning: answer } = await postChat({
-      messageList: [...messageList, { role: 'assistant', content: `<think>\n${reasoning}${THINKING_CLOSE_TEXT}` }],
+  // 사고를 끄고 묻으므로 답은 content 로만 온다. reasoning 칸의 글은 새로 연 생각일 수 있어 답으로 쓰지 않는다.
+  async function askWithThinkingHandoff({ baseMessageList, userText, reasoning, signal }) {
+    const { content } = await postChat({
+      messageList: [...baseMessageList, { role: 'user', content: buildThinkingHandoffText({ userText, reasoning }) }],
       maxTokens: MAX_GAP_TOKENS,
-      isThinking: true,
+      isThinking: false,
       signal,
-      extraBodyMap: { add_generation_prompt: false, continue_final_message: true },
     });
-    // 출력에 생각 끝 토큰이 없어 추론 파서가 답을 reasoning 칸에 담는다.
-    return content.trim() ? content : answer;
+    return content;
   }
 
-  // 두 요청(사고 → 사고 닫기)이 한 시간 한도를 나눠 쓴다.
+  // 두 요청(사고 → 생각 넘겨 다시 묻기)이 한 시간 한도를 나눠 쓴다.
   async function requestGapText({ gapRequest, userText }) {
     const signal = AbortSignal.timeout(gapRequest.timeoutMs);
-    const messageList = toChatMessageList({
-      systemPrompt: GAP_SYSTEM_PROMPT,
-      messageList: [...buildFewShotMessageList(), { role: 'user', content: [{ text: userText }] }],
-    });
+    const baseMessageList = toChatMessageList({ systemPrompt: GAP_SYSTEM_PROMPT, messageList: buildFewShotMessageList() });
+    const messageList = [...baseMessageList, ...toChatMessageList({ messageList: [{ role: 'user', content: [{ text: userText }] }] })];
     const first = await postChat({
       messageList, maxTokens: gapRequest.thinkingBudget + MAX_GAP_TOKENS, isThinking: gapRequest.isThinking, signal,
     });
     if (first.content.trim()) return first.content;
     const isThinkingCut = gapRequest.isThinking && first.finishReason === 'length' && Boolean(first.reasoning.trim());
-    const text = isThinkingCut ? await closeThinking({ messageList, reasoning: first.reasoning, signal }) : '';
+    const text = isThinkingCut
+      ? await askWithThinkingHandoff({ baseMessageList, userText, reasoning: first.reasoning, signal })
+      : '';
     if (!text.trim()) throw new Error(`GPU 삽입 위치 추론 빈 응답 (finish_reason=${first.finishReason})`);
     return text;
   }
@@ -204,5 +208,6 @@ function createGapInferenceAgent({ config, fetchImpl = (...argList) => fetch(...
 
 module.exports = {
   createGapInferenceAgent, buildGapInput, parseGapText, selectFallbackGapIndex, formatGapLine, countGapCandidateSource,
-  canPickBeforeTrigger, GAP_SYSTEM_PROMPT, GAP_SOURCE_MAP, GAP_REQUEST_BY_MODE_MAP, BOUNDARY_KIND_MAP,
+  canPickBeforeTrigger, buildThinkingHandoffText, GAP_SYSTEM_PROMPT, GAP_SOURCE_MAP, GAP_REQUEST_BY_MODE_MAP,
+  BOUNDARY_KIND_MAP,
 };
