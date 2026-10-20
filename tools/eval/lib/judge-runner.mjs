@@ -157,7 +157,7 @@ export function buildJudgeModelLabel({ config }) {
   return config.judgeBackend === 'gpu' ? `gpu:${config.judgeGpuModel}` : config.judgeModelId;
 }
 
-// 실제로 어느 경로가 답했는지 센다. gpu 백엔드인데 bedrock 이 있으면 그만큼 GPU 가 실패해 Bedrock 이 판정한 것이다.
+// 실제로 어느 경로가 답했는지 센다. gpu 백엔드는 Bedrock 으로 넘기지 않으므로, 여기에 bedrock 이 있으면 설정이 어긋난 것이다.
 export function countJudgeSource({ rawList }) {
   const countMap = {};
   for (const raw of rawList) {
