@@ -1,6 +1,6 @@
 const DEFAULT_VLM_URL = 'http://127.0.0.1:8801/v1/chat/completions';
 
-const DEFAULT_VLM_MODEL = 'qwen3.5-35b-a3b';
+const DEFAULT_VLM_MODEL = 'gemma-4-26b-a4b-qat';
 const DEFAULT_ASR_URL = 'http://127.0.0.1:8802/asr';
 const DEFAULT_TTS_URL = 'http://127.0.0.1:8803/tts';
 
@@ -15,9 +15,9 @@ const DEFAULT_SCREEN_TEXT_GROUNDING = 'on';
 // 교차 모드 틈 후보 위치: asr = ASR 조각 끝 시각(지금 동작), audio = 앱이 잰 회의 소리의 무음 구간.
 const GAP_SOURCE_LIST = ['asr', 'audio'];
 const DEFAULT_GAP_SOURCE = 'asr';
-// 탐지 단계 경량 LLM 판정 전용 서버. GPU 서버에서 VLM(8801)과 따로 Qwen3.5-9B 를 8805 에 띄운다.
+// 탐지 단계 LLM 판정 전용 서버. GPU 서버에서 VLM(8801)과 같은 모델(Gemma 4 26B-A4B)을 8805 에 따로 띄운다.
 const DEFAULT_JUDGE_GPU_URL = 'http://127.0.0.1:8805/v1/chat/completions';
-const DEFAULT_JUDGE_GPU_MODEL = 'qwen3.5-9b';
+const DEFAULT_JUDGE_GPU_MODEL = 'gemma-4-26b-a4b-qat';
 const DEFAULT_BEDROCK_REGION = 'us-east-1';
 
 const DEFAULT_BEDROCK_MODEL_ID = 'anthropic.claude-sonnet-5';
