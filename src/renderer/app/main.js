@@ -790,6 +790,7 @@ async function confirmSlideCandidate({ isFirst, imageData }) {
     return;
   }
   if (!decision.isNew && !decision.isRevisit) return;
+  pointingLocator.resetChangeHistory();
   const isRevisit = Boolean(decision.isRevisit);
   if (decision.isNew && buffer) {
     window.seeon.requestSlideText({ slideLabel: decision.label, buffer }).catch(() => {});
