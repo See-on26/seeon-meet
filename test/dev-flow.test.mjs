@@ -112,7 +112,7 @@ test('지시 흐름은 입력 → 트리거 → 통합 라우터 판정 → 지�
   ]);
   assert.deepEqual(stageListOf(flow), ['input', 'screen_dependency', 'budget', 'router', 'vlm', 'gap', 'tts', 'playback']);
   assert.equal(flow.stepList[0].detail, '빨간 막대들을 보시면');
-  assert.equal(flow.stepList[3].label, '경량 LLM 판단(통합 라우터)');
+  assert.equal(flow.stepList[3].label, 'LLM 판단(통합 라우터)');
   const agentStep = flow.stepList[4];
   assert.equal(agentStep.label, '지시 대상 설명 에이전트');
   assert.equal(agentStep.text, DEIXIS_TEXT);
@@ -153,7 +153,7 @@ test('무발화는 무발화 판단과 무발화 에이전트를 거쳐 들리�
   const played = findFlow(flowList, 40000);
   assert.equal(played.typeLabel, '무발화 기반');
   assert.deepEqual(stageListOf(played), ['input', 'silence', 'silence', 'tts', 'playback']);
-  assert.equal(played.stepList[1].label, '경량 LLM 판단(무발화)');
+  assert.equal(played.stepList[1].label, 'LLM 판단(무발화)');
   assert.equal(played.stepList[2].label, '무발화 기반 설명 에이전트');
   assert.equal(played.stepList[2].text, SILENCE_TEXT);
   assert.equal(played.outcome.playedMediaMs, 41000);
@@ -426,8 +426,8 @@ test('트리거 후보 기록은 그 후보를 판단한 결정 흐름에 붙고
   const [flow] = view.flowList;
   assert.deepEqual(flow.stepList.filter((step) => step.stage === 'router').map((step) => [step.stepKind, step.label]), [
     [STEP_KIND_MAP.trigger, '트리거 후보(형태소 분석)'],
-    [STEP_KIND_MAP.judge, '경량 LLM 판단(후보마다 O/X)'],
-    [STEP_KIND_MAP.judge, '경량 LLM 판단(통합 라우터)'],
+    [STEP_KIND_MAP.judge, 'LLM 판단(후보마다 O/X)'],
+    [STEP_KIND_MAP.judge, 'LLM 판단(통합 라우터)'],
   ]);
   assert.equal(flow.stepList.find((step) => step.stepKind === STEP_KIND_MAP.trigger).summary, '지시대명사:"이 부분", 단순 수치:"30%"');
   assert.deepEqual([flow.outcome.kind, flow.outcome.reason], [OUTCOME_KIND_MAP.dropped, 'no_audio']);

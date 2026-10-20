@@ -44,7 +44,7 @@ function readAsrLanguage({ env, envName }) {
   return DEFAULT_ASR_LANGUAGE;
 }
 
-// 탐지 단계 경량 LLM 판정(통합 라우터·무발화·지시 판정)의 백엔드. gpu 는 GPU 서버 LLM 만 쓰고 실패해도 Bedrock 으로 넘기지 않는다, bedrock 은 Bedrock 만 쓴다.
+// 탐지 단계 LLM 판정(통합 라우터·무발화·지시 판정)의 백엔드. gpu 는 GPU 서버 LLM 만 쓰고 실패해도 Bedrock 으로 넘기지 않는다, bedrock 은 Bedrock 만 쓴다.
 const JUDGE_BACKEND_LIST = ['gpu', 'bedrock'];
 const DEFAULT_JUDGE_BACKEND = 'gpu';
 

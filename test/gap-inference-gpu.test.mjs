@@ -4,7 +4,7 @@ import { createRequire } from 'node:module';
 
 const require = createRequire(import.meta.url);
 const {
-  createGapInferenceAgent, GAP_SOURCE_MAP, GAP_REQUEST_BY_MODE_MAP,
+  createGapInferenceAgent, buildThinkingHandoffText, GAP_SOURCE_MAP, GAP_REQUEST_BY_MODE_MAP,
 } = require('../src/main/caption-pipeline/output/gap-inference-agent.js');
 const { readPipelineConfig } = require('../src/main/caption-pipeline/config.js');
 
@@ -22,7 +22,7 @@ const request = { narrationText: '물류비 추이 표를 보는 중', narration
 const ANSWER = '{"gapIndex":1,"reason":"문장이 끝난 직후"}';
 
 // 응답을 차례로 돌려준다. 한 응답은 { status, content, reasoning, reasoningField, finishReason }.
-// reasoningField 는 생각을 싣는 칸 이름이다(Qwen 은 reasoning_content, Gemma 는 reasoning).
+// reasoningField 는 생각을 싣는 칸 이름이다(지금 Gemma 서버의 gemma4 파서는 reasoning, 옛 Qwen 서버는 reasoning_content).
 function createFakeFetch(responseList = [{ content: ANSWER }]) {
   const callList = [];
   const fetchImpl = async (url, init) => {
@@ -58,6 +58,16 @@ test('품질 모드는 GPU 판정 LLM 에 사고(thinking)를 켜고 사고 한�
 });
 
 const CUT_REASONING = '후보 [0]은 중단, [1]은 완결이다';
+
+test('끊긴 생각을 넘기는 글은 원래 입력, 빈 줄, 머리말, 따옴표로 감싼 생각, 답 요청 순서로 이어진다', () => {
+  const userText = '해설: 물류비 추이 표를 보는 중\n후보 틈:\n[0] 여기 이 표를 | 보시면';
+  const text = buildThinkingHandoffText({ userText, reasoning: `\n${CUT_REASONING}\n\n` });
+
+  assert.ok(text.startsWith(`${userText}\n\n`), '원래 입력을 맨 앞에 그대로 두고 빈 줄로 띄운다');
+  const [header, ...restList] = text.slice(userText.length + 2).split('\n');
+  assert.match(header, /끊겼다/);
+  assert.deepEqual(restList, ['"""', CUT_REASONING, '"""', '선택(JSON 한 줄):']);
+});
 
 test('사고가 한도에서 끊기면 그때까지의 생각을 user 메시지로 넘겨 사고 없이 한 번 더 묻는다', async () => {
   const { fetchImpl, callList } = createFakeFetch([

@@ -11,7 +11,7 @@ const ENGLISH_CHARS_PER_WORD_ESTIMATE = 7;
 
 const SLOT_PAIR_PATTERN = /"(\w+)"\s*:\s*"([^"]*)"/g;
 
-// Qwen 계열 VLM 이 화면의 한글 낱말을 중국어로 바꿔 쓰는 일이 있다(예: "중식" → "中式").
+// VLM 이 화면의 한글 낱말을 중국어로 바꿔 쓸 수 있다(옛 VLM(Qwen)이 "중식"을 "中式"으로 쓴 사례).
 // 한국어 TTS 가 읽지 못하고 자막에도 그대로 보이므로, 해설에 한자가 섞이면 내보내지 않는다.
 // 참가자 이름을 말하는 화자 해설은 여기를 거치지 않으므로 한자 이름은 막히지 않는다.
 const HAN_CHARACTER_PATTERN = /[\u3400-\u4dbf\u4e00-\u9fff\uf900-\ufaff]/;
