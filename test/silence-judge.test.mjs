@@ -68,6 +68,21 @@ test('모델 호출이 실패하면 차단한다', async () => {
 
 const { SILENCE_JUDGE_SYSTEM_PROMPT, SILENCE_FEW_SHOT_LIST } = require('../src/main/caption-pipeline/prompts/silence-judge.js');
 
+// 판단기를 Gemma 로 바꾼 뒤 늘어난 무발화 오탐: 녹음을 틀며 "들어 보세요", 생각·관점을 뜻하는 see·look,
+// 손으로 하는 활동을 화면을 보라는 단서로 읽었다. 보라는 대상이 눈으로 볼 자료일 때만 통과시킨다.
+test('무발화 판정기는 보라는 대상이 화면 자료일 때만 통과시키고, 듣기·손 활동·생각을 뜻하는 see·look 은 차단한다', () => {
+  assert.match(SILENCE_JUDGE_SYSTEM_PROMPT, /보라는 대상이 눈으로 볼 자료\([^)]*\)여야 한다/);
+  assert.match(SILENCE_JUDGE_SYSTEM_PROMPT, /"한번 보시죠"로 받아도 된다/);
+  assert.match(SILENCE_JUDGE_SYSTEM_PROMPT, /"보다·see·look"이 생각·이해·관점을 뜻하면 단서가 아니다/);
+  assert.match(SILENCE_JUDGE_SYSTEM_PROMPT, /녹음·음성·소리를 틀어 주며 "들어 보세요"라고 해도 듣는 것이다/);
+  assert.match(SILENCE_JUDGE_SYSTEM_PROMPT, /만져 보기/);
+  const blockedList = SILENCE_FEW_SHOT_LIST.filter((example) => !example.output.cue);
+  assert.ok(blockedList.some((example) => /녹음/.test(example.input.transcript) && /들어 보/.test(example.input.transcript)), '녹음을 틀며 들어 보라는 차단 예시');
+  assert.ok(blockedList.some((example) => /see if/.test(example.input.transcript)), '생각을 뜻하는 see 차단 예시');
+  assert.ok(blockedList.some((example) => /listen/.test(example.input.transcript)), '영어 듣기 차단 예시');
+  assert.ok(blockedList.some((example) => /만져/.test(example.input.transcript)), '손 활동 차단 예시');
+});
+
 test('단서는 침묵 바로 앞 마지막 문장에 있어야 한다 — 보라고 한 뒤 다른 얘기로 넘어갔으면 차단 예시가 있다', () => {
   assert.match(SILENCE_JUDGE_SYSTEM_PROMPT, /마지막 문장/);
   const movedOnExample = SILENCE_FEW_SHOT_LIST.find((example) => /보시죠/.test(example.input.transcript) && !example.output.cue);

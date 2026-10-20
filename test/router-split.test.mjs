@@ -45,8 +45,87 @@ test('few-shot 은 자기 묶음 유형의 예시만 담고, 두 묶음을 합�
   const speechList = ROUTER_PROMPT_MAP[JUDGE_GROUP_MAP.speech].fewShotList;
   for (const example of deixisList) assert.ok(example.input.candidateList.every((c) => DEIXIS_TYPE_LIST.includes(c.type)));
   for (const example of speechList) assert.ok(example.input.candidateList.every((c) => SPEECH_TYPE_LIST.includes(c.type)));
-  assert.equal(deixisList.length + speechList.length, 27);
+  assert.equal(deixisList.length + speechList.length, 38);
   assert.ok(deixisList.length >= 4 && speechList.length >= 8);
+});
+
+// 같은 앞 문맥·트리거 문장에서 뒤 발화만 다른 예시 쌍을 찾는다. 규칙이 한쪽(X)으로만 기울지 않게 O 짝을 함께 둔다.
+function findContrastPair({ exampleList, type, isNamed }) {
+  return exampleList.filter((example) => example.input.candidateList[0].type === type).some((left) => exampleList.some((right) => right !== left
+    && right.input.before === left.input.before && right.input.utterance === left.input.utterance
+    && left.output.judgeList[0].gap === 'X' && right.output.judgeList[0].gap === 'O'
+    && isNamed(left.input.after) && !isNamed(right.input.after)));
+}
+
+// 판단기를 Gemma 로 바꾼 뒤 늘어난 오탐: 앞에서 "두 후보의 성질이 서로 다르다"고만 한 뒤 뒤 발화가 이름을 대도
+// "그 이름이 그 성질인지 말하지 않았다"며 O 를 준다. 반대로 "서로 다르다"만으로 고를 수 있다며 X 를 주는 누락도 있다.
+test('형용사 + 지시 명사는 다르다는 말만으로 고르지 않고, 뒤 발화가 후보 이름을 대면 X 로 본다', () => {
+  const deixisPrompt = ROUTER_PROMPT_MAP[JUDGE_GROUP_MAP.deixis].systemPrompt;
+  assert.match(deixisPrompt, /다르다는 것·표시 방식만 말하면 어느 것인지 정해지지 않았다/);
+  assert.match(deixisPrompt, /성질이 서로 다르다"고만 했어도 마찬가지다/);
+  assert.match(deixisPrompt, /"그 이름이 그 성질을 가졌다고 말하지 않았다"며 O 로 하지 마라/);
+  assert.match(deixisPrompt, /실제 이름 없이 안내만 있으면 근거가 아니다/);
+  const deixisList = ROUTER_PROMPT_MAP[JUDGE_GROUP_MAP.deixis].fewShotList;
+  assert.ok(findContrastPair({ exampleList: deixisList, type: 'adjective_noun', isNamed: (after) => /서관이에요/.test(after) }), '한국어 이름 짝');
+  assert.ok(findContrastPair({ exampleList: deixisList, type: 'adjective_noun', isNamed: (after) => /: Bexa/.test(after) }), '영어 이름 짝');
+});
+
+// 여럿 가운데 하나만 결과가 달랐다고 짚은 뒤의 지시를, "만·only" 가 없다는 이유로 O 로 넘기는 오탐을 줄인다.
+test('지시 대상은 "만·only" 가 없어도 하나만 결과가 달랐다고 짚었으면 그 하나로 본다', () => {
+  const deixisPrompt = ROUTER_PROMPT_MAP[JUDGE_GROUP_MAP.deixis].systemPrompt;
+  assert.match(deixisPrompt, /"만·뿐·only"가 없어도 여럿 중 하나만 결과·상태가 달랐다고 말했으면/);
+  assert.match(deixisPrompt, /여럿을 나란히 말하기만 했으면 O 다/);
+  const deixisList = ROUTER_PROMPT_MAP[JUDGE_GROUP_MAP.deixis].fewShotList;
+  const resultExample = deixisList.find((example) => example.input.candidateList[0].type === 'demonstrative'
+    && example.output.judgeList[0].gap === 'X' && !/만|뿐|only/i.test(example.input.before) && /세 매장/.test(example.input.before));
+  assert.ok(resultExample, '만·only 없이 결과로 하나를 짚은 X 예시');
+});
+
+// 앞에서 항목을 여럿 나열한 뒤 발표자가 하나를 골랐거나 뒤 발화가 항목 이름을 댄 수치를 O 로 넘기는 오탐을 줄인다.
+// 세는 방법·출처만 말한 뒤 발화는 여전히 O 다(새 판단기가 옛 판단기보다 잘 잡던 누락을 지킨다).
+test('단순 수치는 발표자가 고른 항목이나 뒤 발화가 댄 항목 이름으로 X 를 주고, 세는 방법만 말하면 O 다', () => {
+  const speechPrompt = ROUTER_PROMPT_MAP[JUDGE_GROUP_MAP.speech].systemPrompt;
+  assert.match(speechPrompt, /앞에서도 뒤에서도 그중 어느 것의 값인지 말하지 않았으면 O 다/);
+  assert.match(speechPrompt, /발표자가 지금 다룰 항목 하나를 이름으로 골랐다/);
+  assert.match(speechPrompt, /뒤 발화가 다른 말 뒤에라도 그 수치가 어느 항목의 값인지 이름을 댔다/);
+  assert.match(speechPrompt, /세는 방법·출처·범위\([^)]*\)만 말하면 어느 항목인지 정해지지 않았다 → O/);
+  assert.match(speechPrompt, /항목 이름을 댄 구절도 근거다/);
+  assert.match(speechPrompt, /값이 적힌 곳\(장부·기록표·칸·대장\)만 말한 것도 같다/);
+  const speechList = ROUTER_PROMPT_MAP[JUDGE_GROUP_MAP.speech].fewShotList;
+  assert.ok(findContrastPair({ exampleList: speechList, type: 'number', isNamed: (after) => /출입문 고장 건수/.test(after) }), '뒤 발화 항목 이름 짝');
+  assert.ok(speechList.some((example) => example.input.candidateList[0].type === 'number' && example.output.judgeList[0].gap === 'X'
+    && /only cover/.test(example.input.before) && example.output.judgeList[0].evidence === "I'll only cover signage today"), '발표자가 고른 항목 X 예시');
+});
+
+// 척도 유형 이름의 "추상적"을 "추상적인 대상이면 O"로 읽어, 생각·가능성·기간처럼 사진에 찍히지 않는 주어에도 O 를 주는 오탐을 줄인다.
+test('추상적 척도는 주어가 눈으로 볼 수 있는 것인지 먼저 보고, "추상적 표현"을 O 의 이유로 쓰지 않는다', () => {
+  const speechPrompt = ROUTER_PROMPT_MAP[JUDGE_GROUP_MAP.speech].systemPrompt;
+  assert.match(speechPrompt, /먼저 "크다·많다·짧다"의 주어\(무엇이 큰가·많은가\)를 찾는다/);
+  assert.match(speechPrompt, /사진에 찍히지 않는 것도 같다/);
+  assert.match(speechPrompt, /"추상적인 표현이라 수치가 없다"는 O 의 이유가 아니다/);
+  assert.match(speechPrompt, /앞 문맥 앞쪽에 나온 숫자도 그 대상의 값이면 된다/);
+  const scaleXList = ROUTER_PROMPT_MAP[JUDGE_GROUP_MAP.speech].fewShotList
+    .filter((example) => example.input.candidateList[0].type === 'scale' && example.output.judgeList[0].gap === 'X');
+  assert.ok(scaleXList.some((example) => /기대/.test(example.input.utterance)), '생각·감정 주어 X 예시');
+  assert.ok(scaleXList.some((example) => /review window/.test(example.input.utterance)), '영어 기간 주어 X 예시');
+});
+
+test('변화·비교·결론은 그 대상의 앞뒤 값이 앞 문맥에 이미 있으면 X, 다른 대상 값이거나 한쪽뿐이면 O 다', () => {
+  const speechPrompt = ROUTER_PROMPT_MAP[JUDGE_GROUP_MAP.speech].systemPrompt;
+  assert.match(speechPrompt, /바뀌기 전·후 값\(비교면 양쪽 값\)이 앞 문맥에 이미 나왔으면 트리거 문장이 값을 다시 말하지 않아도 X 다/);
+  assert.match(speechPrompt, /값이 다른 대상의 것이거나 한쪽만 있으면 O 다/);
+  const changeExample = ROUTER_PROMPT_MAP[JUDGE_GROUP_MAP.speech].fewShotList.find((example) => example.input.candidateList[0].type === 'change'
+    && example.output.judgeList[0].gap === 'X' && !example.input.after.match(/\d/) && /\d/.test(example.input.before));
+  assert.ok(changeExample, '앞 문맥 값으로 X 를 주는 변화 예시');
+});
+
+// 근거를 옮길 때 순서를 바꾸거나 두 곳을 합쳐 써서 코드 확인(not_in_context)에 걸려 O 로 뒤집히는 일을 줄인다.
+test('근거는 순서·낱말을 바꾸지 않고 옮기고, 떨어진 두 곳은 "…"로 잇게 한다', () => {
+  for (const group of Object.values(JUDGE_GROUP_MAP)) {
+    const prompt = ROUTER_PROMPT_MAP[group].systemPrompt;
+    assert.match(prompt, /순서·낱말을 바꾸지 않고 그대로 옮긴다/, group);
+    assert.match(prompt, /각 구절을 그대로 옮겨 "…"로 잇는다/, group);
+  }
 });
 
 // QA 2-19: 앞에 후보가 여럿이면 뒤 발화가 대상을 밝혀도 O 로 넘기고, "가리킨다고 명시하지 않았다"며 O 를 주던 오탐을 줄인다.
