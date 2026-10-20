@@ -3,7 +3,8 @@
 # 사용: bash ~/gpu-server/setup-judge.sh
 #
 # 판정 LLM 은 VLM(8801)과 같은 모델(Gemma 4 26B-A4B-it QAT 4비트)을 따로 띄운 것이라 가중치도 같다.
-# 그래서 setup-vlm.sh 가 받은 가중치를 그대로 쓰고, 없을 때만 같은 리비전으로 받는다. venv 도 VLM 의 /data/venv-vllm-35 를 같이 쓴다.
+# 그래서 setup-vlm.sh 와 같은 리비전을 받는다. 이미 받았으면 캐시에서 금방 끝나고, 빠진 파일이 있으면 그것만 받는다.
+# venv 도 VLM 의 /data/venv-vllm-35 를 같이 쓴다.
 # A100(sm_80)은 네이티브 FP8 을 못 쓰므로 FP8 체크포인트를 받지 않는다(README "절대 쓰면 안 되는 것").
 set -euo pipefail
 
@@ -24,14 +25,15 @@ fi
 
 # shellcheck disable=SC1091
 source /data/venv-vllm-35/bin/activate
-if [ ! -f "$SNAPSHOT_DIR/model.safetensors" ]; then
-  hf download "$MODEL_REPO" --revision "$MODEL_REVISION"
-fi
+hf download "$MODEL_REPO" --revision "$MODEL_REVISION"
 # 받은 파일이 기록해 둔 해시와 같은지 본다(파일 이름은 링크라 sha256sum 이 실제 내용을 읽는다).
 (cd "$SNAPSHOT_DIR" && sha256sum -c "$SHA256_FILE")
 
 echo "[setup-judge] 완료. 다음 순서로 올린다 (README '판정 LLM(8805)' 참고):"
-echo "  1) seeon-vlm.service 의 --gpu-memory-utilization 이 0.55 인지 확인 (0.85 면 판정 LLM 이 들어갈 자리가 없다)"
-echo "  2) sudo cp ~/gpu-server/systemd/seeon-judge.service /etc/systemd/system/ && sudo systemctl daemon-reload"
-echo "  3) sudo systemctl restart seeon-vlm && sudo systemctl enable --now seeon-judge"
-echo "  4) 앱 전용 키의 authorized_keys 줄에 permitopen=\"127.0.0.1:8805\" 가 있는지 확인한다"
+echo "  1) /etc/systemd/system 의 seeon-vlm·seeon-judge 유닛을 *.bak-YYYYMMDD 로 백업 (처음 올리는 서버라 없으면 건너뜀)"
+echo "  2) sudo cp ~/gpu-server/systemd/seeon-vlm.service ~/gpu-server/systemd/seeon-judge.service /etc/systemd/system/"
+echo "  3) sudo systemctl daemon-reload"
+echo "  4) sudo systemctl restart seeon-vlm"
+echo "  5) sudo systemctl enable seeon-judge && sudo systemctl restart seeon-judge (이미 떠 있어도 새 유닛으로 다시 띄운다)"
+echo "  6) curl -s localhost:8801/v1/models · localhost:8805/v1/models 에 gemma-4-26b-a4b-qat 가 보이는지 확인"
+echo "  7) 앱 전용 키의 authorized_keys 줄에 permitopen=\"127.0.0.1:8805\" 가 있는지 확인한다"
