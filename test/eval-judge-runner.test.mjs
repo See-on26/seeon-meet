@@ -484,8 +484,8 @@ test('판정 원문 해시에 판정 LLM 경로 모듈(judge-llm.js)과 설정(c
 });
 
 test('판정 모델 이름표: gpu 백엔드면 GPU 모델(폴백 Bedrock), bedrock 이면 Bedrock 모델', () => {
-  assert.equal(buildJudgeModelLabel({ config: { judgeBackend: 'gpu', judgeGpuModel: 'qwen3.5-35b-a3b', judgeModelId: 'anthropic.claude-sonnet-5' } }),
-    'gpu:qwen3.5-35b-a3b');
+  assert.equal(buildJudgeModelLabel({ config: { judgeBackend: 'gpu', judgeGpuModel: 'gemma-4-26b-a4b-qat', judgeModelId: 'anthropic.claude-sonnet-5' } }),
+    'gpu:gemma-4-26b-a4b-qat');
   assert.equal(buildJudgeModelLabel({ config: { judgeBackend: 'bedrock', judgeModelId: 'anthropic.claude-sonnet-5' } }), 'anthropic.claude-sonnet-5');
 });
 
