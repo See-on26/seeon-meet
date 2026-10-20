@@ -55,6 +55,8 @@ const INCOMPLETE_TAIL_PATTERN = new RegExp(`(?:${[
   '그', '이', '저', '어떤', '무슨',
 ].join('|')})$`);
 const INCOMPLETE_SUFFIX_PATTERN = /(?:는|던)$/;
+// "신청 마감 20일까지"의 "20일까지"는 기한 자체라 덜 끝난 말이 아니다. 숫자에 붙은 까지·부터는 남긴다.
+const NUMBERED_RANGE_TAIL_PATTERN = /\d\D{0,3}(?:까지|부터)$/;
 
 const SAFE_INCOMPLETE_TAIL_PATTERN = new RegExp(`(?:${[
   '및', '하고', '또는', '그리고', '또한', '에서', '에게', '한테', '부터', '까지', '보다', '처럼', '만큼',
@@ -120,8 +122,9 @@ function trimToCompletePhrase({ text, isConservative = false }) {
   const wordList = String(text || '').trim().split(/\s+/).filter(Boolean);
   while (wordList.length > 1) {
     const last = wordList[wordList.length - 1].replace(TRAILING_MARK_PATTERN, '');
+    const isNumberedRange = isConservative && NUMBERED_RANGE_TAIL_PATTERN.test(last);
     if (!last || INCOMPLETE_WORD_SET.has(last)
-      || tailPattern.test(last) || INCOMPLETE_SUFFIX_PATTERN.test(last)) {
+      || (!isNumberedRange && tailPattern.test(last)) || INCOMPLETE_SUFFIX_PATTERN.test(last)) {
       wordList.pop(); continue;
     }
     wordList[wordList.length - 1] = last;
@@ -443,7 +446,7 @@ function normalizeSlotMap({ slotList, rawSlotMap, language = CAPTION_LANGUAGE_MA
     const isTruncated = countWord({ text }) > slot.maxWordCount;
     if (isTruncated) {
       slotMap[slot.key] = trimToCompletePhrase({
-        text: slot.mustContainValue ? dropValuelessTailItem({ text: truncated }) : truncated,
+        text: slot.mustContainValue ? fitWholeItemList({ text, maxWordCount: slot.maxWordCount }) : truncated,
       });
     }
     else if (slot.isPhrase) slotMap[slot.key] = trimToCompletePhrase({ text: truncated, isConservative: true });
@@ -454,10 +457,85 @@ function normalizeSlotMap({ slotList, rawSlotMap, language = CAPTION_LANGUAGE_MA
 
 // 값 목록("A 9.2시간에서 3.1시간, 고객 만족도 72점…")이 어절 수에서 잘리면 마지막 항목이 "고객"처럼
 // 이름만 남는다. 쉼표 뒤 조각에 수치가 없으면 그 조각을 버린다.
+// 숫자 안의 쉼표("3,000개", "1,250명")에서 나누면 "3, 000개"처럼 값이 깨진다. 쉼표 뒤 띄어쓰기나 숫자 아닌 이웃이 있을 때만 항목 경계로 본다.
+const ITEM_SEPARATOR_PATTERN = /\s*,\s+|(?<!\d)\s*,\s*|\s*,\s*(?!\d)/;
+
+function splitItemList({ text }) {
+  return String(text || '').split(ITEM_SEPARATOR_PATTERN).map((item) => item.trim()).filter(Boolean);
+}
+
 function dropValuelessTailItem({ text }) {
-  const itemList = String(text || '').split(/\s*,\s*/);
+  const itemList = String(text || '').split(ITEM_SEPARATOR_PATTERN);
   while (itemList.length > 1 && !hasValueToken({ text: itemList[itemList.length - 1] })) itemList.pop();
   return itemList.join(', ');
+}
+
+// 값 목록을 어절 상한에 맞출 때는 쉼표로 나뉜 항목을 통째로 넣거나 뺀다. 항목 가운데에서 자르면
+// "…, 2분기 신규"처럼 이름만 남고, 그 이름에 숫자가 들어 있어 완결된 항목처럼 보이기 때문이다.
+// 첫 항목부터 상한을 넘으면 어절에서 자르는 예전 방식으로 둔다.
+function fitWholeItemList({ text, maxWordCount }) {
+  const rawItemList = splitItemList({ text });
+  const itemList = countWord({ text: rawItemList.join(', ') }) > maxWordCount ? dropRepeatedItemWord({ itemList: rawItemList }) : rawItemList;
+  const keptList = [];
+  for (const item of itemList) {
+    if (countWord({ text: [...keptList, item].join(', ') }) > maxWordCount) break;
+    keptList.push(item);
+  }
+  if (!keptList.length) return dropValuelessTailItem({ text: truncateSlot({ text, maxWordCount }) });
+  return dropValuelessTailItem({ text: keptList.join(', ') });
+}
+
+// 값 항목마다 되풀이된 낱말("1차 시험 82점, 2차 시험 88점"의 "시험")을 뺀다. 대개 대상 칸이 이미 말한 측정량 낱말이다.
+// 항목이 셋 이상이면 하나를 빼고 모두에 나온 낱말도 뺀다. 낱말을 빼서 항목에 숫자만 남으면 그 항목은 그대로 둔다
+// (조건 이름이 사라지면 어느 값이 어느 항목의 것인지 모른다).
+const BARE_NUMBER_WORD_PATTERN = /^[+\-−]?\d[\d.,]*$/;
+
+function dropRepeatedItemWord({ itemList }) {
+  if (itemList.length < 2) return itemList;
+  const wordListList = itemList.map((item) => item.split(/\s+/));
+  const needCount = itemList.length >= 3 ? itemList.length - 1 : itemList.length;
+  const countMap = new Map();
+  for (const wordList of wordListList) {
+    for (const word of new Set(wordList.filter((item) => !/\d/.test(item)))) countMap.set(word, (countMap.get(word) || 0) + 1);
+  }
+  const repeatedSet = new Set([...countMap].filter(([, count]) => count >= needCount).map(([word]) => word));
+  if (!repeatedSet.size) return itemList;
+  return wordListList.map((wordList) => {
+    const kept = wordList.filter((word) => !repeatedSet.has(word));
+    return kept.some((word) => !BARE_NUMBER_WORD_PATTERN.test(word)) ? kept.join(' ') : wordList.join(' ');
+  });
+}
+
+// 대상 칸에 조건 이름 목록("본관 방문객 수, 별관 방문객 수")을, 값 칸에 이름 없는 값 목록("320명, 140명")을 따로 쓰면
+// 대상 칸이 상한에서 잘려 둘째 조건이 빠지고 둘째 값이 첫 조건의 값처럼 읽힌다. 항목 수가 같으면 순서대로 짝지어 값 칸으로 옮기고,
+// 항목 이름의 같은 끝말("방문객 수")은 대상 칸에 한 번만 둔다. 칸 상한을 적용하기 전(원 답 칸)에 한다.
+const BARE_VALUE_ITEM_PATTERN = /^(?:약\s*|about\s+)?[+\-−]?\d[\d.,]*\s*(?:%|퍼센트|[A-Za-z/]+|원|명|건|개|번|회|배|분|초|시간|일|년|도|점|위|세|℃)?$/;
+// 끝말 바로 앞의 기능어("운동 후 맥박"의 "후")는 조건에 속하므로 끝말로 묶지 않는다.
+const PAIR_FUNCTION_WORD_SET = new Set(['후', '전', '때', '중', '뒤', '동안', '이후', '이전', '당시', '시', 'after', 'before', 'during']);
+
+function pairTargetItemListWithValueList({ target, value }) {
+  const targetItemList = splitItemList({ text: target });
+  const valueItemList = splitItemList({ text: value });
+  if (targetItemList.length < 2 || targetItemList.length !== valueItemList.length) return null;
+  if (!valueItemList.every((item) => BARE_VALUE_ITEM_PATTERN.test(item))) return null;
+  const wordListList = targetItemList.map((item) => item.split(/\s+/));
+  const readTailWord = (wordList, offset) => wordList[wordList.length - 1 - offset];
+  let commonCount = 0;
+  while (wordListList.every((wordList) => wordList.length > commonCount + 1
+    && readTailWord(wordList, commonCount) === readTailWord(wordListList[0], commonCount))
+    && !PAIR_FUNCTION_WORD_SET.has(readTailWord(wordListList[0], commonCount))) commonCount += 1;
+  // 같은 끝말(측정량 낱말)이 없으면 대상 칸이 비므로 짝짓지 않는다.
+  if (!commonCount) return null;
+  const commonTail = wordListList[0].slice(-commonCount).join(' ');
+  const pairList = wordListList.map((wordList, index) => `${wordList.slice(0, wordList.length - commonCount).join(' ')} ${valueItemList[index]}`);
+  return { target: commonTail, value: pairList.join(', ') };
+}
+
+// 주장→값은 대상 칸의 조건 목록과 값 칸의 이름 없는 값 목록을 짝지어 둔다.
+function pairClaimSlot({ narrationType, subKind, rawSlotMap }) {
+  const isClaim = narrationType === NARRATION_TYPE_MAP.interpretation && subKind === INTERPRETATION_KIND_MAP.claimToValue;
+  const paired = isClaim ? pairTargetItemListWithValueList({ target: rawSlotMap?.target, value: rawSlotMap?.value }) : null;
+  return paired ? { ...rawSlotMap, ...paired } : rawSlotMap;
 }
 
 // 끝 문장부호("…막대 그래프.")는 떼고 본다. 붙은 채 보면 받을 수 있는 길이의 묘사도 미완결로 버려진다.
@@ -526,9 +604,29 @@ function assembleClaimPair({ target, value, language = CAPTION_LANGUAGE_MAP.ko }
   return isTargetRepeatedInValue({ target, value, language }) ? value : `${target}, ${value}`;
 }
 
+// 칸마다 상한이 있어도 칸을 이은 해설은 전체 예산을 넘을 수 있다. 첫 쌍이 전체 어절·글자 예산을 넘으면
+// 정보가 적은 쪽부터 줄인다: ① 값 항목마다 되풀이된 낱말을 빼고 ② 대상 칸 앞쪽 꾸밈말을 빼되 끝의 측정량 낱말은 남기고(최소 2어절)
+// ③ 그래도 넘치면 값 목록 뒤 항목부터 통째로 뺀다.
+const MIN_TARGET_WORD_COUNT = 2;
+
+function fitClaimPairToBudget({ target, value, maxWordCount, maxChars, language = CAPTION_LANGUAGE_MAP.ko }) {
+  const isOver = (text) => (Number.isFinite(maxWordCount) && countWord({ text }) > maxWordCount)
+    || (Number.isFinite(maxChars) && text.length > maxChars);
+  let itemList = splitItemList({ text: value });
+  let targetWordList = String(target || '').split(/\s+/).filter(Boolean);
+  const build = () => assembleClaimPair({
+    target: targetWordList.join(' '), value: dropValuelessTailItem({ text: itemList.join(', ') }), language,
+  });
+  let fitted = build();
+  if (isOver(fitted)) { itemList = dropRepeatedItemWord({ itemList }); fitted = build(); }
+  while (isOver(fitted) && targetWordList.length > MIN_TARGET_WORD_COUNT) { targetWordList = targetWordList.slice(1); fitted = build(); }
+  while (isOver(fitted) && itemList.length > 1) { itemList.pop(); fitted = build(); }
+  return fitted;
+}
+
 // 둘째 쌍은 대상과 수치가 다 있을 때만 붙이고, 두 쌍이 어절 예산을 넘으면 첫 쌍만 읽는다.
-function assembleClaimToValue({ slotMap, maxWordCount, language = CAPTION_LANGUAGE_MAP.ko }) {
-  const first = assembleClaimPair({ target: slotMap.target, value: slotMap.value, language });
+function assembleClaimToValue({ slotMap, maxWordCount, maxChars, language = CAPTION_LANGUAGE_MAP.ko }) {
+  const first = fitClaimPairToBudget({ target: slotMap.target, value: slotMap.value, maxWordCount, maxChars, language });
   if (!slotMap.target2 || !hasValueToken({ text: slotMap.value2 })) return first;
   const both = `${first}. ${assembleClaimPair({ target: slotMap.target2, value: slotMap.value2, language })}`;
   return Number.isFinite(maxWordCount) && countWord({ text: both }) > maxWordCount ? first : both;
@@ -593,8 +691,8 @@ const ENGLISH_NARRATION_ASSEMBLE_MAP = {
   },
   [NARRATION_TYPE_MAP.interpretation]: {
     [INTERPRETATION_KIND_MAP.valueToMeaning]: ({ slotMap }) => `${slotMap.value} means ${slotMap.frame}`,
-    [INTERPRETATION_KIND_MAP.claimToValue]: ({ slotMap, maxWordCount }) => assembleClaimToValue({
-      slotMap, maxWordCount, language: CAPTION_LANGUAGE_MAP.en,
+    [INTERPRETATION_KIND_MAP.claimToValue]: ({ slotMap, maxWordCount, maxChars }) => assembleClaimToValue({
+      slotMap, maxWordCount, maxChars, language: CAPTION_LANGUAGE_MAP.en,
     }),
   },
   [NARRATION_TYPE_MAP.visualDescription]: {
@@ -621,40 +719,41 @@ function capitalizeFirst(text) {
 }
 
 // 한국어 끝맺음 검사(자료 명사·조사·관형형)와 상황 칸 보정은 영어에 맞지 않아 쓰지 않는다. 빈 칸·수치 검사는 같다.
-function assembleEnglishNarration({ narrationType, subKind, rawSlotMap, index, origin, hasSecondClaim, maxWordCount }) {
+function assembleEnglishNarration({ narrationType, subKind, rawSlotMap, index, origin, hasSecondClaim, maxWordCount, maxChars }) {
   const slotList = getSlotList({ narrationType, subKind, origin, hasSecondClaim, language: CAPTION_LANGUAGE_MAP.en });
   const assemble = ENGLISH_NARRATION_ASSEMBLE_MAP[narrationType]?.[subKind];
   if (!slotList || !assemble) return null;
-  const slotMap = normalizeEnglishSlotMap({ slotList, rawSlotMap });
+  const slotMap = normalizeEnglishSlotMap({ slotList, rawSlotMap: pairClaimSlot({ narrationType, subKind, rawSlotMap }) });
   if (hasEmptyRequiredSlot({ slotList, slotMap })) return null;
   if (hasValuelessSlot({ slotList, slotMap })) return null;
-  const joined = assemble({ slotMap, index, maxWordCount }).replace(/\s+/g, ' ').trim();
+  const joined = assemble({ slotMap, index, maxWordCount, maxChars }).replace(/\s+/g, ' ').trim();
   return { text: capitalizeFirst(dropRepeatedWordAtSeam({ text: joined })), slotMap };
 }
 
 function assembleNarration({ narrationType, subKind, rawSlotMap, index = '', origin = null,
-  hasSecondClaim = false, maxWordCount = null, language = CAPTION_LANGUAGE_MAP.ko }) {
+  hasSecondClaim = false, maxWordCount = null, maxChars = null, language = CAPTION_LANGUAGE_MAP.ko }) {
   if (language === CAPTION_LANGUAGE_MAP.en) {
     return assembleEnglishNarration({
-      narrationType, subKind, rawSlotMap, index, origin, hasSecondClaim, maxWordCount,
+      narrationType, subKind, rawSlotMap, index, origin, hasSecondClaim, maxWordCount, maxChars,
     });
   }
   const slotList = getSlotList({ narrationType, subKind, origin, hasSecondClaim });
   const assemble = NARRATION_ASSEMBLE_MAP[narrationType]?.[subKind];
   if (!slotList || !assemble) return null;
-  const slotMap = normalizeSlotMap({ slotList, rawSlotMap });
+  const slotMap = normalizeSlotMap({ slotList, rawSlotMap: pairClaimSlot({ narrationType, subKind, rawSlotMap }) });
   if (slotMap.situation) slotMap.situation = completeSituationSlot({ situation: slotMap.situation });
   if (hasEmptyRequiredSlot({ slotList, slotMap })) return null;
   if (hasValuelessSlot({ slotList, slotMap })) return null;
   if (hasInvalidTailSlot({ slotList, slotMap })) return null;
-  const joined = assemble({ slotMap, index, maxWordCount }).replace(/\s+/g, ' ').trim();
+  const joined = assemble({ slotMap, index, maxWordCount, maxChars }).replace(/\s+/g, ' ').trim();
   return { text: dropRepeatedWordAtSeam({ text: joined }), slotMap };
 }
 
 module.exports = {
   NARRATION_SLOT_MAP, getSlotList, computeSlotTotal, buildSlotInstruction, DESCRIPTION_TAIL_NOUN_LIST, hasCompleteTailNoun,
   cutAtTailNoun,
-  normalizeSlotMap, hasEmptyRequiredSlot, hasValuelessSlot, hasValueToken, assembleNarration, countWord, truncateSlot,
+  normalizeSlotMap, pairTargetItemListWithValueList, hasEmptyRequiredSlot, hasValuelessSlot, hasValueToken, assembleNarration,
+  countWord, truncateSlot,
   trimToCompletePhrase, hasFinalConsonant, attachJosa, isWithinEnglishSlotLimit, SLOT_OVERAGE_TOLERANCE_WORD_COUNT,
   scaleWordBudget, ENGLISH_WORD_SCALE, trimEnglishDanglingTail,
 };
