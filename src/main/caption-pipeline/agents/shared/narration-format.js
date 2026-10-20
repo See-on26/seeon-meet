@@ -184,16 +184,10 @@ const NARRATION_SLOT_MAP = {
       // 무발화 묘사는 값·변화를 담아 "…그래프"로 끝맺는다. 5어절에서 자르면 자료 종류 꼬리가 빠져 묘사가 버려진다.
       { key: 'description', label: '이미지에 대한 묘사 (반응을 일으키는 요소 포함)', minWordCount: 3, maxWordCount: 8, isPhrase: true },
     ],
+    // "○○보다 N배 큰 ○○" 네 칸으로는 "○○만 한", "○○의 절반쯤 되는"을 말할 수 없고, 칸을 이으면 "보다보다"처럼 말이 겹친다.
+    // 크기 묘사를 구 하나로 받는다. 상한은 척도 어절 예산(4~8어절)의 상한과 같다.
     [VISUAL_DESCRIPTION_KIND_MAP.scale]: [
-      { key: 'comparison', label: '비교 대상 (화면 속 다른 객체, 예: 소나무)', minWordCount: 1, maxWordCount: 2 },
-      {
-        key: 'scale',
-        label: '비교 척도 — 숫자만 (예: 4). **숫자로 가늠할 수 없으면 빈 문자열**',
-        minWordCount: 0,
-        maxWordCount: 1,
-      },
-      { key: 'direction', label: '방향 — "큰" 또는 "작은" 중 하나', minWordCount: 1, maxWordCount: 1 },
-      { key: 'target', label: '그 대상 (예: 불상)', minWordCount: 1, maxWordCount: 1, isPhrase: true },
+      { key: 'caption', label: '청자에게 읽어 줄 크기 묘사 — 발표자가 말한 대상을 화면 속 비교 대상과 견준 크기 (예: 소나무보다 4배 정도 큰 불상)', minWordCount: 3, maxWordCount: 8, isPhrase: true },
     ],
   },
   [NARRATION_TYPE_MAP.speakerIdentity]: {
@@ -272,10 +266,8 @@ const ENGLISH_SLOT_LABEL_MAP = {
       description: 'description of the image (including what triggers the reaction)',
     },
     [VISUAL_DESCRIPTION_KIND_MAP.scale]: {
-      comparison: 'comparison object (another object on screen, e.g. the pine tree)',
-      scale: 'scale — number only (e.g. 4). **Empty string if it cannot be estimated as a number**',
-      direction: 'direction — exactly "larger" or "smaller"',
-      target: 'the item itself (e.g. the Buddha statue)',
+      caption: 'size description read to the listener — the item the speaker called big/small compared with a reference on screen'
+        + ' (e.g. "a Buddha statue about four times taller than the pine tree")',
     },
   },
   [NARRATION_TYPE_MAP.speakerIdentity]: {
@@ -636,9 +628,7 @@ const NARRATION_ASSEMBLE_MAP = {
     [VISUAL_DESCRIPTION_KIND_MAP.reaction]: ({ slotMap }) => (
       `이미지 제시, ${String(slotMap.description || '').replace(/^\s*이미지 제시\s*,?\s*/, '')}`
     ),
-    [VISUAL_DESCRIPTION_KIND_MAP.scale]: ({ slotMap }) => (slotMap.scale
-      ? `${slotMap.comparison}보다 ${slotMap.scale}배 ${slotMap.direction} ${slotMap.target}`
-      : `${slotMap.comparison}보다 ${slotMap.direction} ${slotMap.target}`),
+    [VISUAL_DESCRIPTION_KIND_MAP.scale]: ({ slotMap }) => slotMap.caption,
   },
   [NARRATION_TYPE_MAP.speakerIdentity]: {
     [SPEAKER_IDENTITY_KIND_MAP.named]: ({ slotMap }) => `${slotMap.speakerName}님이 말합니다`,
@@ -649,7 +639,6 @@ const NARRATION_ASSEMBLE_MAP = {
 // 영어 캡션의 조립 틀. 고정 문구(머리말·연결어)는 시스템이 붙이고, 칸에는 화면에서 읽은 구만 들어간다.
 // 모델이 형식 예시를 흉내 내 머리말("Image:")을 직접 쓰면 떼고 붙인다.
 const ENGLISH_IMAGE_PREFIX_PATTERN = /^\s*image\s*(?:presented|shown)?\s*[:,]\s*/i;
-const ENGLISH_SCALE_SUFFIX_PATTERN = /\s*(?:x|times)$/i;
 const ENGLISH_LEADING_ARTICLE_PATTERN = /^the\s+/i;
 
 const ENGLISH_NARRATION_ASSEMBLE_MAP = {
@@ -671,12 +660,7 @@ const ENGLISH_NARRATION_ASSEMBLE_MAP = {
     [VISUAL_DESCRIPTION_KIND_MAP.reaction]: ({ slotMap }) => (
       `Image: ${String(slotMap.description || '').replace(ENGLISH_IMAGE_PREFIX_PATTERN, '')}`
     ),
-    [VISUAL_DESCRIPTION_KIND_MAP.scale]: ({ slotMap }) => {
-      const scale = String(slotMap.scale || '').replace(ENGLISH_SCALE_SUFFIX_PATTERN, '');
-      return scale
-        ? `${slotMap.target}, ${scale} times ${slotMap.direction} than ${slotMap.comparison}`
-        : `${slotMap.target}, ${slotMap.direction} than ${slotMap.comparison}`;
-    },
+    [VISUAL_DESCRIPTION_KIND_MAP.scale]: ({ slotMap }) => slotMap.caption,
   },
   [NARRATION_TYPE_MAP.speakerIdentity]: {
     [SPEAKER_IDENTITY_KIND_MAP.named]: ({ slotMap }) => `${slotMap.speakerName} is speaking`,

@@ -69,13 +69,15 @@ function buildVisualDescriptionPrompt({ subKind = VISUAL_DESCRIPTION_KIND_MAP.re
       '  · 좋은 비교 대상 = 듣기만 해도 크기·길이가 가늠되는 것.',
       '  예) "이 불상 보시면 정말 크죠?" + 사진에 소나무가 함께 있음 → "소나무보다 4배 정도 큰 불상"',
       '',
-      '형식(참고): (적절한 비교 대상으로 묘사하는 표현) + (그 대상).',
+      '형식(참고): caption 한 구에 (비교 대상과 견준 크기) + (그 대상)을 담는다.',
+      '  "○○보다 N배 큰 △△", "○○만 한 △△", "○○의 절반쯤 되는 △△"처럼 자연스럽게 견준다.',
       ...commonTailList,
       '· 화면에 실제로 보이는 것만 쓴다. 크기를 지어내지 않는다.',
-      `· **비교 대상을 찾을 수 없으면 "${GROUNDING_NONE_TOKEN}"만 출력한다.** 배수를 모르면 scale을 빈 문자열로 둔다.`,
+      `· **비교 대상을 찾을 수 없으면 "${GROUNDING_NONE_TOKEN}"만 출력한다.** 배수를 모르면 "○○보다 큰 △△"처럼 배수 없이 쓴다.`,
       ...buildOutputLanguageRuleList({
         language,
-        detailLineList: ['시스템이 "(target), 4 times larger than (comparison)" 꼴로 조립한다. direction 은 "larger" 또는 "smaller" 다.'],
+        detailLineList: ['caption 은 대상과 비교 대상을 견준 크기를 담은 자연스러운 영어 명사구로 쓴다'
+          + '(예: "a Buddha statue about four times taller than the pine tree"). 시스템은 caption 만 읽는다.'],
       }),
     ].filter(Boolean).join('\n');
   }

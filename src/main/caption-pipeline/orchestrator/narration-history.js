@@ -46,7 +46,7 @@ function createNarrationHistory({
 } = {}) {
   let entryList = [];
 
-  // 대상 칸: 수치 해설은 target, 지시 해설은 caption(가리킨 대상의 이름·내용)이다.
+  // 대상 칸: 수치 해설은 target, 지시·척도 해설은 caption(가리킨 대상의 이름·내용, 견준 크기 묘사)이다.
   function buildTargetTokenSet({ slotMap }) {
     const targetText = slotMap?.target ?? slotMap?.caption;
     const raw = typeof targetText === 'string' ? targetText : '';
