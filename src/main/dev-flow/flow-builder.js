@@ -42,10 +42,10 @@ const AGENT_LABEL_MAP = {
 // 사진 단독 화면의 묘사는 시각 묘사 에이전트가 만들지만 재생 분류가 페이지 전환이라 페이지 전환 설명 에이전트에 딸린 것으로 보인다.
 const PHOTO_DESCRIPTION_AGENT_LABEL = '페이지 전환 설명 에이전트(사진 묘사)';
 
-const ROUTER_JUDGE_LABEL = '경량 LLM 판단(통합 라우터)';
-const CANDIDATE_JUDGE_LABEL = '경량 LLM 판단(후보마다 O/X)';
+const ROUTER_JUDGE_LABEL = 'LLM 판단(통합 라우터)';
+const CANDIDATE_JUDGE_LABEL = 'LLM 판단(후보마다 O/X)';
 const TRIGGER_CANDIDATE_LABEL = '트리거 후보(형태소 분석)';
-const SILENCE_JUDGE_LABEL = '경량 LLM 판단(무발화)';
+const SILENCE_JUDGE_LABEL = 'LLM 판단(무발화)';
 
 const STEP_KIND_MAP = {
   input: '입력',
@@ -396,7 +396,7 @@ function buildAgentStep({ entry, typeKey, label = resolveAgentLabel({ entry, typ
   return createStep({ entry, stepKind: STEP_KIND_MAP.agent, label, summary, text: text ?? null, elapsedMs });
 }
 
-// 무발화 기록 하나는 조건 → 경량 LLM 판단 → 생성 → 내보내기 결과를 함께 싣는다. 사유로 어느 단계인지 가른다.
+// 무발화 기록 하나는 조건 → LLM 판단 → 생성 → 내보내기 결과를 함께 싣는다. 사유로 어느 단계인지 가른다.
 function buildSilenceStepList({ entry }) {
   const reason = entry.reason || '';
   if (entry.verdict === 'pass') {

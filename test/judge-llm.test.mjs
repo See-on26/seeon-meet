@@ -8,7 +8,7 @@ const { createJudgeLlm, toChatMessageList, JUDGE_SOURCE_MAP } = judgeLlmModule;
 const { readPipelineConfig } = require('../src/main/caption-pipeline/config.js');
 
 const gpuConfig = {
-  judgeBackend: 'gpu', judgeGpuUrl: 'http://gpu.test/v1/chat/completions', judgeGpuModel: 'qwen-test',
+  judgeBackend: 'gpu', judgeGpuUrl: 'http://gpu.test/v1/chat/completions', judgeGpuModel: 'judge-test',
   judgeModelId: 'anthropic.claude-sonnet-5', bedrockApiKey: 'key', bedrockRegion: 'us-east-1',
 };
 
@@ -59,7 +59,7 @@ test('GPU 백엔드면 GPU LLM 에 추론 없이(enable_thinking false) 온도 0
   assert.equal(converse.callList.length, 0);
   const [call] = gpu.callList;
   assert.equal(call.url, gpuConfig.judgeGpuUrl);
-  assert.equal(call.body.model, 'qwen-test');
+  assert.equal(call.body.model, 'judge-test');
   assert.equal(call.body.temperature, 0);
   assert.equal(call.body.max_tokens, 300);
   assert.deepEqual(call.body.chat_template_kwargs, { enable_thinking: false });
@@ -68,7 +68,7 @@ test('GPU 백엔드면 GPU LLM 에 추론 없이(enable_thinking false) 온도 0
   assert.ok(call.hasSignal);
 });
 
-// QA: GPU 판정(9B)이 실패할 때 Claude(Bedrock)로 넘기던 폴백을 없애고 GPU 서버만 쓴다.
+// QA: GPU 판정이 실패할 때 Claude(Bedrock)로 넘기던 폴백을 없애고 GPU 서버만 쓴다.
 test('GPU 백엔드는 GPU 가 실패하거나 빈 답을 내면 Bedrock 키가 있어도 Claude 로 넘기지 않고 오류를 던진다', async () => {
   for (const gpu of [createGpuFetch({ error: new Error('connect ECONNREFUSED') }), createGpuFetch({ content: '   ' }), createGpuFetch({ status: 503 })]) {
     const converse = createConverse();
@@ -119,6 +119,7 @@ test('파이프라인 설정: 판정 백엔드는 기본 gpu, VLM·GPU 판정은
   assert.equal(customConfig.judgeBackend, 'bedrock');
   assert.equal(customConfig.judgeGpuUrl, 'http://x/v1/chat/completions');
   assert.equal(customConfig.judgeGpuModel, 'm');
+  assert.equal(readPipelineConfig({ SEEON_VLM_MODEL: 'v' }).vlmModel, 'v');
   const originalWarn = console.warn;
   console.warn = () => {};
   try {

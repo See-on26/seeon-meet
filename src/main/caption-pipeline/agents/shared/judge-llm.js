@@ -1,11 +1,11 @@
 const { requestConverseText } = require('./bedrock-converse');
 
-// 탐지 단계 경량 LLM 판정(통합 라우터·무발화 판정·지시 판정)을 어디로 보낼지. gpu 는 GPU 서버 LLM 만 쓰고
+// 탐지 단계 LLM 판정(통합 라우터·무발화 판정·지시 판정)을 어디로 보낼지. gpu 는 GPU 서버 LLM 만 쓰고
 // 실패해도 Claude(Bedrock)로 넘기지 않는다. bedrock 을 고르거나 설정에 백엔드가 없으면(옛 호출) Bedrock 만 쓴다.
 const JUDGE_BACKEND_MAP = { gpu: 'gpu', bedrock: 'bedrock' };
 const JUDGE_SOURCE_MAP = { gpu: 'gpu', bedrock: 'bedrock' };
 
-// 판정 답은 짧은 JSON 이라 GPU 는 보통 0.5~2초다. 이보다 오래 걸리면 판정을 포기한다(늦은 해설은 쓸모가 없다).
+// 판정 답은 짧은 JSON 이라 GPU 는 보통 1초 안에 답한다(실측 p95 약 0.65초). 이보다 오래 걸리면 판정을 포기한다(늦은 해설은 쓸모가 없다).
 const GPU_JUDGE_TIMEOUT_MS = 6000;
 
 function toMessageText({ content }) {
