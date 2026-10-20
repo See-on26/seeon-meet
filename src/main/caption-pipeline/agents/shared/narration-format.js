@@ -137,6 +137,13 @@ function trimToCompletePhrase({ text, isConservative = false }) {
   return wordList.join(' ').replace(TRAILING_MARK_PATTERN, '');
 }
 
+// 지시 해설은 가리킨 대상의 이름·내용(caption)만 읽는다. "보는 중" 같은 상황 말은 청자에게 정보가 아니라 두지 않는다.
+// seen 은 가리킨 곳에 보이는 것을 먼저 옮겨 적게 해 지어내기를 줄이는 근거 칸이다(읽히지 않는다).
+// caption 상한은 상황 칸을 둘 때의 칸 합과 같다(단순형: 대상 5 + 상황 2, 완전형: 문장 10).
+const DEIXIS_SEEN_SLOT = {
+  key: 'seen', label: '가리킨 곳에 실제로 보이는 것 — 글자는 그대로, 그림·필기는 짧게', minWordCount: 0, maxWordCount: 20, isDiagnostic: true,
+};
+
 const NARRATION_SLOT_MAP = {
   [NARRATION_TYPE_MAP.pageTransition]: {
     [PAGE_TRANSITION_KIND_MAP.slide]: [
@@ -149,21 +156,15 @@ const NARRATION_SLOT_MAP = {
   },
   [NARRATION_TYPE_MAP.deixis]: {
     [DEIXIS_FORM_MAP.simple]: [
-      { key: 'target', label: '지시대상 묘사/내용 — 자료 종류(표·사진 등)까지 포함 (예: 2년간 매출 추이 표를)', minWordCount: 2, maxWordCount: 5, isPhrase: true },
-      { key: 'situation', label: "상황 묘사 — 발화 모사 ('보는 중', '주목' 등)", minWordCount: 2, maxWordCount: 2 },
+      DEIXIS_SEEN_SLOT,
+      { key: 'caption', label: '청자에게 읽어 줄 해설 — 가리킨 대상의 이름·내용, 자료 종류(표·사진 등)까지 (예: 2년간 매출 추이 표)', minWordCount: 2, maxWordCount: 7, isPhrase: true },
     ],
     [DEIXIS_FORM_MAP.complete]: [
-      { key: 'mimicry', label: '발화 모사 — 기존 발화의 표현·어휘', minWordCount: 2, maxWordCount: 3, isDiagnostic: true },
-      { key: 'target', label: '지시대상 — 간략한 주제를 덧붙여', minWordCount: 1, maxWordCount: 2, isDiagnostic: true, isPhrase: true },
-      { key: 'explanation', label: '설명 — 묘사/설명·대상 사이의 관계성', minWordCount: 3, maxWordCount: 5, isDiagnostic: true, isPhrase: true },
+      DEIXIS_SEEN_SLOT,
+      // 완전형은 대상을 여럿 잇는 구라 어절 상한에서 자르면 마지막 대상이 잘린다. 허용치 안이면 통째로 받는다.
       {
-        key: 'sentence',
-        label: '위 세 요소(발화 모사 + 지시대상 + 설명)를 **모두 포함**하는 자연스러운 한 문장'
-          + ' (순서는 자연스럽게 바꿔도 된다)',
-        minWordCount: 6,
-        maxWordCount: 10,
-        // 문장은 어절 상한에서 자르면 "…도심 열의 약"처럼 값 앞에서 끊긴다. 허용치 안이면 통째로 받는다.
-        isWholeSentence: true,
+        key: 'caption', label: '청자에게 읽어 줄 해설 — 가리킨 대상 각각의 이름·내용을 가리킨 순서대로 쉼표로',
+        minWordCount: 2, maxWordCount: 10, isPhrase: true, isWholeSentence: true,
       },
     ],
   },
@@ -228,6 +229,7 @@ const CLAIM_SECOND_PAIR_SLOT_LIST = [
 ];
 
 // 영어 캡션의 칸 설명. 칸 이름·어절(단어) 수는 한국어 칸과 같고, 설명만 영어 구에 맞게 바꾼다.
+const ENGLISH_DEIXIS_SEEN_LABEL = 'what is actually visible where the speaker pointed — text as written, drawings/marks briefly';
 const ENGLISH_SLOT_LABEL_MAP = {
   [NARRATION_TYPE_MAP.pageTransition]: {
     [PAGE_TRANSITION_KIND_MAP.slide]: {
@@ -240,16 +242,13 @@ const ENGLISH_SLOT_LABEL_MAP = {
   },
   [NARRATION_TYPE_MAP.deixis]: {
     [DEIXIS_FORM_MAP.simple]: {
-      target: 'the referenced item and its content, including the material type (e.g. "the two-year sales trend table")',
-      situation: 'short lead-in action phrase that mimics the speaker\'s verb and is read right before the target'
-        + ' (e.g. "Looking at", "Focusing on", "Comparing")',
+      seen: ENGLISH_DEIXIS_SEEN_LABEL,
+      caption: 'the narration read to the listener — the name and content of the referenced item, including the material type'
+        + ' (e.g. "the two-year sales trend table")',
     },
     [DEIXIS_FORM_MAP.complete]: {
-      mimicry: 'speaker mimicry — wording taken from the utterance',
-      target: 'the referenced item — with a brief topic',
-      explanation: 'explanation — what it shows or how it relates to the item',
-      sentence: 'one natural sentence that **includes all three** of the above (mimicry + item + explanation)'
-        + ' (the order may change)',
+      seen: ENGLISH_DEIXIS_SEEN_LABEL,
+      caption: 'the narration read to the listener — the name and content of each referenced item, in the order pointed at, separated by commas',
     },
   },
   [NARRATION_TYPE_MAP.interpretation]: {
@@ -324,22 +323,16 @@ function scaleWordBudget({ minWordCount, maxWordCount, language }) {
   return { minWordCount, maxWordCount: scaleMaxWordCount({ count: maxWordCount, language }) };
 }
 
-// 영어 칸 가운데 어절 수를 그대로 옮기면 안 되는 칸. 지시 대상의 상황 칸은 대상 앞에 붙는 짧은 동작구("Looking at")다.
-const ENGLISH_WORD_RANGE_OVERRIDE_MAP = {
-  [NARRATION_TYPE_MAP.deixis]: { [DEIXIS_FORM_MAP.simple]: { situation: { minWordCount: 1, maxWordCount: 3 } } },
-};
-
 function getSlotList({ narrationType, subKind, origin = null, hasSecondClaim = false, language = CAPTION_LANGUAGE_MAP.ko }) {
   const slotList = readSlotList({ narrationType, subKind, origin, hasSecondClaim });
   if (!slotList || language !== CAPTION_LANGUAGE_MAP.en) return slotList;
   const isSilenceDescription = slotList === SILENCE_DESCRIPTION_SLOT_LIST;
   const labelMap = isSilenceDescription
     ? ENGLISH_SILENCE_DESCRIPTION_LABEL_MAP : (ENGLISH_SLOT_LABEL_MAP[narrationType]?.[subKind] || {});
-  const overrideMap = isSilenceDescription ? {} : (ENGLISH_WORD_RANGE_OVERRIDE_MAP[narrationType]?.[subKind] || {});
   return slotList.map((slot) => ({
     ...slot,
     label: labelMap[slot.key] || slot.label,
-    ...(overrideMap[slot.key] || scaleWordBudget({ minWordCount: slot.minWordCount, maxWordCount: slot.maxWordCount, language })),
+    ...scaleWordBudget({ minWordCount: slot.minWordCount, maxWordCount: slot.maxWordCount, language }),
   }));
 }
 
@@ -560,25 +553,6 @@ function hasValuelessSlot({ slotList, slotMap }) {
     && !hasValueToken({ text: slotMap[slot.key] }));
 }
 
-const CONNECTIVE_ENDING_LIST = ['며', '고', '서', '면서', '거나', '지만', '는데', '어서', '아서'];
-const SITUATION_FALLBACK_TAIL = '설명함';
-// 가리켰다는 사실은 청자에게 정보가 아니다(지시 프롬프트 규칙 5). 모사할 동사가 없을 때 쓰는 "확인 중"으로 둔다.
-const POINTING_SITUATION_PATTERN = /가리키|가리킴|가리켜/;
-const POINTING_SITUATION_REPLACEMENT = '확인 중';
-// "보시면"을 높임말 그대로("보시는 중")나 피동("보이는 중")으로 옮기거나 "보며 설명함"으로 쓰면 어색하다. 청자 쪽 동작 "보는 중"으로 맞춘다.
-const LOOKING_SITUATION_PATTERN = /^(?:보시는 중|보이는 중|보며 설명함|보시며 설명함)$/;
-const LOOKING_SITUATION_REPLACEMENT = '보는 중';
-
-function completeSituationSlot({ situation }) {
-  const text = String(situation || '').trim();
-  if (!text) return text;
-  if (POINTING_SITUATION_PATTERN.test(text)) return POINTING_SITUATION_REPLACEMENT;
-  if (LOOKING_SITUATION_PATTERN.test(text)) return LOOKING_SITUATION_REPLACEMENT;
-  const last = text.split(/\s+/).pop();
-  const isConnective = CONNECTIVE_ENDING_LIST.some((ending) => last.endsWith(ending));
-  return isConnective ? `${text} ${SITUATION_FALLBACK_TAIL}` : text;
-}
-
 function dropRepeatedWordAtSeam({ text }) {
   const wordList = String(text || '').split(' ');
   const keptList = wordList.filter((word, index) => index === 0 || word !== wordList[index - 1]);
@@ -648,10 +622,8 @@ const NARRATION_ASSEMBLE_MAP = {
     [PAGE_TRANSITION_KIND_MAP.document]: ({ slotMap }) => `페이지: ${slotMap.description}`,
   },
   [NARRATION_TYPE_MAP.deixis]: {
-    [DEIXIS_FORM_MAP.simple]: ({ slotMap }) => (
-      `${slotMap.target} ${slotMap.situation}`
-    ),
-    [DEIXIS_FORM_MAP.complete]: ({ slotMap }) => slotMap.sentence,
+    [DEIXIS_FORM_MAP.simple]: ({ slotMap }) => slotMap.caption,
+    [DEIXIS_FORM_MAP.complete]: ({ slotMap }) => slotMap.caption,
   },
   [NARRATION_TYPE_MAP.interpretation]: {
     [INTERPRETATION_KIND_MAP.valueToMeaning]: ({ slotMap }) => (
@@ -686,8 +658,8 @@ const ENGLISH_NARRATION_ASSEMBLE_MAP = {
     [PAGE_TRANSITION_KIND_MAP.document]: ({ slotMap }) => `Page: ${slotMap.description}`,
   },
   [NARRATION_TYPE_MAP.deixis]: {
-    [DEIXIS_FORM_MAP.simple]: ({ slotMap }) => `${slotMap.situation} ${slotMap.target}`,
-    [DEIXIS_FORM_MAP.complete]: ({ slotMap }) => slotMap.sentence,
+    [DEIXIS_FORM_MAP.simple]: ({ slotMap }) => slotMap.caption,
+    [DEIXIS_FORM_MAP.complete]: ({ slotMap }) => slotMap.caption,
   },
   [NARRATION_TYPE_MAP.interpretation]: {
     [INTERPRETATION_KIND_MAP.valueToMeaning]: ({ slotMap }) => `${slotMap.value} means ${slotMap.frame}`,
@@ -718,7 +690,7 @@ function capitalizeFirst(text) {
   return text ? `${text[0].toUpperCase()}${text.slice(1)}` : text;
 }
 
-// 한국어 끝맺음 검사(자료 명사·조사·관형형)와 상황 칸 보정은 영어에 맞지 않아 쓰지 않는다. 빈 칸·수치 검사는 같다.
+// 한국어 끝맺음 검사(자료 명사·조사·관형형)는 영어에 맞지 않아 쓰지 않는다. 빈 칸·수치 검사는 같다.
 function assembleEnglishNarration({ narrationType, subKind, rawSlotMap, index, origin, hasSecondClaim, maxWordCount, maxChars }) {
   const slotList = getSlotList({ narrationType, subKind, origin, hasSecondClaim, language: CAPTION_LANGUAGE_MAP.en });
   const assemble = ENGLISH_NARRATION_ASSEMBLE_MAP[narrationType]?.[subKind];
@@ -741,7 +713,6 @@ function assembleNarration({ narrationType, subKind, rawSlotMap, index = '', ori
   const assemble = NARRATION_ASSEMBLE_MAP[narrationType]?.[subKind];
   if (!slotList || !assemble) return null;
   const slotMap = normalizeSlotMap({ slotList, rawSlotMap: pairClaimSlot({ narrationType, subKind, rawSlotMap }) });
-  if (slotMap.situation) slotMap.situation = completeSituationSlot({ situation: slotMap.situation });
   if (hasEmptyRequiredSlot({ slotList, slotMap })) return null;
   if (hasValuelessSlot({ slotList, slotMap })) return null;
   if (hasInvalidTailSlot({ slotList, slotMap })) return null;
