@@ -5,6 +5,7 @@ const {
 } = require('../agents/shared/caption-parser');
 const { DEFAULT_CAPTION_LANGUAGE } = require('../contracts/caption-language');
 const { buildOutputLanguageRuleList } = require('./output-language-rule');
+const { buildScreenTextBlock, SCREEN_TEXT_USAGE_MAP } = require('./screen-text-block');
 
 const DEFAULT_VISUAL_WORD_RANGE_MAP = {
   [VISUAL_DESCRIPTION_KIND_MAP.reaction]: { minWordCount: 5, maxWordCount: 12 },
@@ -14,9 +15,18 @@ const DEFAULT_VISUAL_WORD_RANGE_MAP = {
 const ENGLISH_IMAGE_PREFIX_RULE = '머리말 "Image:"(이미지 제시)는 시스템이 붙이므로 description 에 넣지 마라.';
 const ENGLISH_MATERIAL_TAIL_RULE = 'description 은 자료 종류를 나타내는 영어 낱말(photo·chart·table·diagram·flowchart 등)로 끝맺는다.';
 
+// 척도 해설에 넣을 같은 화면 OCR 덩어리. 줄 고르기는 발화와 지시 구의 낱말을 본다. 줄이 없으면 빈 덩어리다.
+function buildScaleScreenTextBlock({ screenLineList = [], utterance = '', mergedAnchorList = [] }) {
+  return buildScreenTextBlock({
+    lineList: screenLineList,
+    keywordSourceList: [utterance || '', ...mergedAnchorList],
+    usage: SCREEN_TEXT_USAGE_MAP.scale,
+  });
+}
+
 function buildVisualDescriptionPrompt({ subKind = VISUAL_DESCRIPTION_KIND_MAP.reaction,
   utterance = '', recentTranscript = '', minWordCount, maxWordCount, maxChars = null,
-  describedElementList = [], mergedAnchorList = [], origin = null, language = DEFAULT_CAPTION_LANGUAGE }) {
+  describedElementList = [], mergedAnchorList = [], origin = null, screenLineList = [], language = DEFAULT_CAPTION_LANGUAGE }) {
   const defaultRange = DEFAULT_VISUAL_WORD_RANGE_MAP[subKind]
     || DEFAULT_VISUAL_WORD_RANGE_MAP[VISUAL_DESCRIPTION_KIND_MAP.reaction];
   const effectiveMinWordCount = Number.isFinite(minWordCount) ? minWordCount : defaultRange.minWordCount;
@@ -44,6 +54,7 @@ function buildVisualDescriptionPrompt({ subKind = VISUAL_DESCRIPTION_KIND_MAP.re
   // 척도: 발화 기반 척도 6자리(10/18)에서 고른 예시 중심 판(척도_B). 동등·겹침·배수·측정값 꼴을 예시로 보이고
   // 크기 묘사를 caption 한 구로 받는다. 예시는 평가 영상과 겹치지 않는 내용으로 둔다.
   if (isScale) {
+    const screenTextBlock = buildScaleScreenTextBlock({ screenLineList, utterance, mergedAnchorList });
     return [
       '이 이미지는 회의에서 공유 중인 화면이다.',
       `발표자가 방금 이렇게 말했다: "${(utterance || '').trim()}"`,
@@ -52,6 +63,9 @@ function buildVisualDescriptionPrompt({ subKind = VISUAL_DESCRIPTION_KIND_MAP.re
         ? `발표자가 지시한 표현: ${mergedAnchorList.join(', ')}. 이 대상이 무엇인지도 함께 밝혀라.`
         : null,
       '',
+      // 화면 글자 덩어리는 청자 줄 바로 앞에 빈 줄 하나를 두고 넣는다. 덩어리가 없으면 프롬프트는 글자 하나까지 그대로다.
+      screenTextBlock.text ? `${screenTextBlock.text}
+` : null,
       '청자는 화면을 볼 수 없다. 발표자는 크기·양을 "크다·엄청 많다" 같은 말로만 했다. 정보 공백 판단은 끝났다.',
       '할 일: 그 대상의 크기를 화면 속 기준과 견주거나, 측정값이면 값으로 한 구에 담는다.',
       '· 대상은 지금 발화가 크다고 한 것이다. 앞 발화에 마지막으로 나온 다른 이름을 새 대상으로 바꾸지 않는다.',
@@ -149,4 +163,4 @@ function buildVisualDescriptionPrompt({ subKind = VISUAL_DESCRIPTION_KIND_MAP.re
   ].filter(Boolean).join('\n');
 }
 
-module.exports = { buildVisualDescriptionPrompt, DEFAULT_VISUAL_WORD_RANGE_MAP };
+module.exports = { buildVisualDescriptionPrompt, buildScaleScreenTextBlock, DEFAULT_VISUAL_WORD_RANGE_MAP };
