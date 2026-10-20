@@ -48,7 +48,12 @@ async function requestVlmContent({ config, jpegBuffer, jpegBufferList, prompt, l
 
   const content = message?.content;
   if (typeof content === 'string' && content.trim()) return content;
-  return message?.reasoning ?? content;
+  const reasoning = message?.reasoning;
+  // 사고를 끄고 묻는데도 답이 reasoning 칸에만 오면 그 글을 답으로 쓴다. 모델에 따라 이 글이 생각일 수 있어 횟수를 보려고 남긴다.
+  if (typeof reasoning === 'string' && reasoning.trim()) {
+    console.warn(`[vlm] content 가 비어 reasoning 을 답으로 쓴다 (${label}, 모델 ${config.vlmModel}, ${reasoning.length}자)`);
+  }
+  return reasoning ?? content;
 }
 
 module.exports = { buildVlmRequestBody, requestVlmContent, REQUEST_TIMEOUT_MS };

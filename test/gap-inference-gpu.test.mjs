@@ -11,7 +11,7 @@ const { readPipelineConfig } = require('../src/main/caption-pipeline/config.js')
 const GPU_URL = 'http://gpu.test/v1/chat/completions';
 const config = {
   ...readPipelineConfig({ AWS_BEARER_TOKEN_BEDROCK: 'key' }),
-  judgeGpuUrl: GPU_URL, judgeGpuModel: 'qwen3.5-9b',
+  judgeGpuUrl: GPU_URL, judgeGpuModel: 'gemma-4-26b-a4b-qat',
 };
 
 const gapList = [
@@ -21,16 +21,19 @@ const gapList = [
 const request = { narrationText: '물류비 추이 표를 보는 중', narrationType: 'deixis', gapList };
 const ANSWER = '{"gapIndex":1,"reason":"문장이 끝난 직후"}';
 
-// 응답을 차례로 돌려준다. 한 응답은 { status, content, reasoning, finishReason }.
+// 응답을 차례로 돌려준다. 한 응답은 { status, content, reasoning, reasoningField, finishReason }.
+// reasoningField 는 생각을 싣는 칸 이름이다(Qwen 은 reasoning_content, Gemma 는 reasoning).
 function createFakeFetch(responseList = [{ content: ANSWER }]) {
   const callList = [];
   const fetchImpl = async (url, init) => {
     callList.push({ url, body: JSON.parse(init.body) });
-    const { status = 200, content = '', reasoning = '', finishReason = 'stop' } = responseList[callList.length - 1] || {};
+    const {
+      status = 200, content = '', reasoning = '', reasoningField = 'reasoning_content', finishReason = 'stop',
+    } = responseList[callList.length - 1] || {};
     return {
       ok: status >= 200 && status < 300,
       status,
-      json: async () => ({ choices: [{ message: { content, reasoning_content: reasoning }, finish_reason: finishReason }] }),
+      json: async () => ({ choices: [{ message: { content, [reasoningField]: reasoning }, finish_reason: finishReason }] }),
     };
   };
   return { fetchImpl, callList };
@@ -43,37 +46,64 @@ test('품질 모드는 GPU 판정 LLM 에 사고(thinking)를 켜고 사고 한�
 
   assert.equal(callList.length, 1);
   assert.equal(callList[0].url, GPU_URL);
-  assert.equal(callList[0].body.model, 'qwen3.5-9b');
+  assert.equal(callList[0].body.model, 'gemma-4-26b-a4b-qat');
   assert.equal(callList[0].body.chat_template_kwargs.enable_thinking, true);
   assert.equal(callList[0].body.max_tokens, GAP_REQUEST_BY_MODE_MAP.listening.thinkingBudget + 120);
   assert.equal(callList[0].body.messages[0].role, 'system');
   assert.equal(callList[0].body.messages.at(-1).role, 'user');
   assert.deepEqual(
     { gapIndex: result.gapIndex, source: result.source, modelId: result.modelId },
-    { gapIndex: 1, source: GAP_SOURCE_MAP.gpu, modelId: 'qwen3.5-9b+thinking' },
+    { gapIndex: 1, source: GAP_SOURCE_MAP.gpu, modelId: 'gemma-4-26b-a4b-qat+thinking' },
   );
 });
 
-test('사고가 한도에서 끊기면 그때까지의 사고를 닫고 답만 한 번 더 받는다', async () => {
+const CUT_REASONING = '후보 [0]은 중단, [1]은 완결이다';
+
+test('사고가 한도에서 끊기면 그때까지의 생각을 user 메시지로 넘겨 사고 없이 한 번 더 묻는다', async () => {
   const { fetchImpl, callList } = createFakeFetch([
-    { content: '', reasoning: '후보 [0]은 중단, [1]은 완결이다', finishReason: 'length' },
-    // 출력에 생각 끝 토큰이 없어 추론 파서가 답을 reasoning 칸에 담는다.
-    { content: '', reasoning: `\n\n${ANSWER}` },
+    { content: '', reasoning: CUT_REASONING, finishReason: 'length' },
+    { content: ANSWER },
   ]);
   const agent = createGapInferenceAgent({ config, fetchImpl });
   const result = await agent.infer({ ...request, mode: 'listening' });
 
   assert.equal(callList.length, 2);
-  const closing = callList[1].body;
-  assert.equal(closing.continue_final_message, true);
-  assert.equal(closing.add_generation_prompt, false);
-  assert.equal(closing.max_tokens, 120);
-  assert.deepEqual(closing.messages.slice(0, -1), callList[0].body.messages);
-  const assistantText = closing.messages.at(-1).content;
-  assert.equal(closing.messages.at(-1).role, 'assistant');
-  assert.match(assistantText, /^<think>\n후보 \[0\]은 중단, \[1\]은 완결이다/);
-  assert.match(assistantText, /<\/think>\n\n$/);
+  const first = callList[0].body;
+  const handoff = callList[1].body;
+  assert.equal('continue_final_message' in handoff, false);
+  assert.equal('add_generation_prompt' in handoff, false);
+  assert.equal(handoff.chat_template_kwargs.enable_thinking, false);
+  assert.equal(handoff.max_tokens, 120);
+  assert.deepEqual(handoff.messages.slice(0, -1), first.messages.slice(0, -1));
+  const lastMessage = handoff.messages.at(-1);
+  assert.equal(lastMessage.role, 'user');
+  assert.ok(lastMessage.content.includes(first.messages.at(-1).content), '원래 입력을 그대로 담는다');
+  assert.ok(lastMessage.content.includes(CUT_REASONING), '끊긴 생각을 담는다');
   assert.deepEqual({ gapIndex: result.gapIndex, source: result.source }, { gapIndex: 1, source: GAP_SOURCE_MAP.gpu });
+});
+
+test('생각을 넘겨 다시 물었는데 답이 content 없이 reasoning 에만 오면 그 글을 쓰지 않고 규칙으로 고른다', async () => {
+  const { fetchImpl } = createFakeFetch([
+    { content: '', reasoning: CUT_REASONING, finishReason: 'length' },
+    { content: '', reasoning: ANSWER },
+  ]);
+  const agent = createGapInferenceAgent({ config, fetchImpl });
+  const result = await agent.infer({ ...request, mode: 'listening' });
+
+  assert.equal(result.source, GAP_SOURCE_MAP.fallback);
+});
+
+test('끊긴 생각이 reasoning 칸(Gemma)에 와도 생각을 넘겨 다시 묻는다', async () => {
+  const { fetchImpl, callList } = createFakeFetch([
+    { content: '', reasoning: CUT_REASONING, reasoningField: 'reasoning', finishReason: 'length' },
+    { content: ANSWER },
+  ]);
+  const agent = createGapInferenceAgent({ config, fetchImpl });
+  const result = await agent.infer({ ...request, mode: 'listening' });
+
+  assert.equal(callList.length, 2);
+  assert.ok(callList[1].body.messages.at(-1).content.includes(CUT_REASONING));
+  assert.equal(result.gapIndex, 1);
 });
 
 test('균형 모드는 같은 GPU 판정 LLM 에 사고 없이 묻는다', async () => {
@@ -84,7 +114,7 @@ test('균형 모드는 같은 GPU 판정 LLM 에 사고 없이 묻는다', async
   assert.equal(callList[0].body.chat_template_kwargs.enable_thinking, false);
   assert.equal(callList[0].body.max_tokens, 120);
   assert.equal(result.source, GAP_SOURCE_MAP.gpu);
-  assert.equal(result.modelId, 'qwen3.5-9b');
+  assert.equal(result.modelId, 'gemma-4-26b-a4b-qat');
 });
 
 test('사고는 품질 모드에만 켜고 시간도 그 모드 지연 안에서 넉넉히 준다', () => {
