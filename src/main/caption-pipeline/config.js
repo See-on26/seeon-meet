@@ -9,7 +9,7 @@ const DEFAULT_EMBED_URL = 'http://127.0.0.1:8804/embed';
 // 슬라이드 전사 백엔드. ocr 은 임베딩 서비스(같은 GPU 서버 프로세스)의 /ocr 로 화면 글자를 읽어 VLM 호출을 줄인다.
 const SLIDE_TEXT_BACKEND_LIST = ['vlm', 'ocr'];
 const DEFAULT_SLIDE_TEXT_BACKEND = 'vlm';
-// 수치 해설(변화·비교, 값→의미)에 그 요청 프레임의 OCR 글자를 근거로 넣는다. 「화면 글자 읽기」(전사 백엔드)와 따로 켠다.
+// 수치 해설(변화·비교, 값→의미)과 척도 해설에 그 요청 프레임의 OCR 글자를 근거로 넣는다. 「화면 글자 읽기」(전사 백엔드)와 따로 켠다.
 const SCREEN_TEXT_GROUNDING_LIST = ['on', 'off'];
 const DEFAULT_SCREEN_TEXT_GROUNDING = 'on';
 // 교차 모드 틈 후보 위치: asr = ASR 조각 끝 시각(지금 동작), audio = 앱이 잰 회의 소리의 무음 구간.

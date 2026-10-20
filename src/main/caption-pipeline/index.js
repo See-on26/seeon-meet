@@ -48,7 +48,8 @@ const { createOcrClient } = require('./agents/shared/ocr-client');
 const { createSlideTextStore } = require('./orchestrator/slide-text-store');
 const { verifyValuePresence, VALUE_PRESENCE_VERDICT_MAP, VALUE_CHECK_SOURCE_MAP } = require('./orchestrator/value-presence');
 const {
-  createScreenTextGrounding, shouldStartScreenTextGrounding, finalizeScreenTextRecord, formatScreenTextSummary,
+  createScreenTextGrounding, shouldStartScreenTextGrounding, isScreenTextNarrationType, finalizeScreenTextRecord,
+  formatScreenTextSummary,
 } = require('./orchestrator/screen-text-grounding');
 const { createContextStore, toSlideMajor, LABEL_STATUS_MAP } = require('./context/context-store');
 const { createSlideLabeler } = require('./context/slide-labeler');
@@ -232,7 +233,7 @@ function registerPipeline({ getViewerView, meetingArchive = null }) {
   const slideTextAgent = createSlideTextAgent({
     config, ocrClient, getBackend: () => sessionSlideTextBackend,
   });
-  // 수치 해설 근거 OCR 은 「화면 글자 읽기」 설정과 상관없이 돈다(그 설정은 슬라이드 전사 엔진만 고른다).
+  // 수치·척도 해설 근거 OCR 은 「화면 글자 읽기」 설정과 상관없이 돈다(그 설정은 슬라이드 전사 엔진만 고른다).
   const screenTextGrounding = createScreenTextGrounding({
     ocrClient, isEnabled: () => config.isScreenTextGroundingEnabled,
   });
@@ -920,8 +921,8 @@ function registerPipeline({ getViewerView, meetingArchive = null }) {
     const beforeText = typeof beforeTranscript === 'string' ? beforeTranscript : (recentTranscript || '');
     const afterText = typeof afterTranscript === 'string' ? afterTranscript : '';
     try {
-      // 수치 해설이 될 수 있는 요청이면 판단 LLM 과 함께 같은 프레임의 OCR 을 시작한다. 수치 해설이 아니면 결과를 버린다.
-      const screenTextTask = isRouterMode && shouldStartScreenTextGrounding({ triggerCandidateList })
+      // 수치·척도 해설이 될 수 있는 요청이면 판단 LLM 과 함께 같은 프레임의 OCR 을 시작한다. 수치·척도 해설이 아니면 결과를 버린다.
+      const screenTextTask = isRouterMode && shouldStartScreenTextGrounding({ triggerCandidateList, isScaleEnabled: config.isScaleEnabled })
         ? screenTextGrounding.start({ jpegBuffer: Buffer.from(buffer) })
         : null;
       let judgeReason = null;
@@ -999,8 +1000,8 @@ function registerPipeline({ getViewerView, meetingArchive = null }) {
       stage = PIPELINE_STAGE_MAP.vlm;
 
       const narrationType = selectedCandidate?.type || NARRATION_TYPE_MAP.deixis;
-      // 수치 해설이면 판단 뒤 상한까지만 OCR 을 기다려 그 줄을 근거로 넘긴다. 늦거나 없으면 덩어리 없이(지금 프롬프트로) 만든다.
-      const screenText = narrationType === NARRATION_TYPE_MAP.interpretation && screenTextTask
+      // 수치·척도 해설이면 판단 뒤 상한까지만 OCR 을 기다려 그 줄을 근거로 넘긴다. 늦거나 없으면 덩어리 없이(지금 프롬프트로) 만든다.
+      const screenText = isScreenTextNarrationType(narrationType) && screenTextTask
         ? await screenTextTask.waitForPrompt()
         : null;
 
@@ -1016,6 +1017,7 @@ function registerPipeline({ getViewerView, meetingArchive = null }) {
       const extraArgByTypeMap = {
         [NARRATION_TYPE_MAP.visualDescription]: {
           subKind: selectedCandidate?.subKind || VISUAL_DESCRIPTION_KIND_MAP.scale,
+          screenLineList: screenText?.lineList || [],
         },
         [NARRATION_TYPE_MAP.deixis]: { hasPointingRegion, pointingOrderHint },
         [NARRATION_TYPE_MAP.interpretation]: { screenLineList: screenText?.lineList || [] },
