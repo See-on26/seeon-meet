@@ -30,9 +30,11 @@ uv pip install vllm --torch-backend=auto --extra-index-url https://wheels.vllm.a
 # 가중치는 HF_HOME(/data/hf-cache)에 받는다 — systemd 유닛이 같은 HF_HOME·리비전을 쓴다(HF_HUB_OFFLINE=1 이라 기동 때는 받지 않는다)
 MODEL_REPO=cyankiwi/gemma-4-26B-A4B-it-qat-AWQ-INT4
 MODEL_REVISION=18a3c7285c33ee39d3e5e16ee6fb2c18f4955ef9
+# 스냅샷 폴더로 cd 한 뒤에 대조하므로, 상대 경로로 불러도(cd ~/gpu-server && bash setup-vlm.sh) 찾게 절대 경로로 정한다.
+SHA256_FILE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/gemma4-26b-a4b-qat-18a3c72.sha256"
 hf download "$MODEL_REPO" --revision "$MODEL_REVISION"
 # 받은 파일이 기록해 둔 해시와 같은지 본다(파일 이름은 링크라 sha256sum 이 실제 내용을 읽는다).
-(cd "$HF_HOME/hub/models--${MODEL_REPO/\//--}/snapshots/$MODEL_REVISION" && sha256sum -c "$(dirname "$0")/gemma4-26b-a4b-qat-18a3c72.sha256")
+(cd "$HF_HOME/hub/models--${MODEL_REPO/\//--}/snapshots/$MODEL_REVISION" && sha256sum -c "$SHA256_FILE")
 
 echo "[setup-vlm] 완료. 버전 확인 (README 현재 상태에 기록할 것):"
 python --version

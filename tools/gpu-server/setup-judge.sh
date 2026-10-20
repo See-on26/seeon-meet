@@ -13,7 +13,9 @@ export HF_HOME=/data/hf-cache
 MODEL_REPO=cyankiwi/gemma-4-26B-A4B-it-qat-AWQ-INT4
 MODEL_REVISION=18a3c7285c33ee39d3e5e16ee6fb2c18f4955ef9
 SNAPSHOT_DIR="$HF_HOME/hub/models--${MODEL_REPO/\//--}/snapshots/$MODEL_REVISION"
-SHA256_FILE="$(dirname "$0")/gemma4-26b-a4b-qat-18a3c72.sha256"
+# 스냅샷 폴더로 cd 한 뒤에 대조하므로, 상대 경로로 불러도(cd ~/gpu-server && bash setup-judge.sh) 찾게 절대 경로로 정한다.
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+SHA256_FILE="$SCRIPT_DIR/gemma4-26b-a4b-qat-18a3c72.sha256"
 
 if [ ! -x /data/venv-vllm-35/bin/vllm ]; then
   echo "[setup-judge] /data/venv-vllm-35 가 없다 — setup-vlm.sh 를 먼저 돌릴 것" >&2
