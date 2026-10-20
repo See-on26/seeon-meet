@@ -119,7 +119,7 @@ function readPipelineConfig(env = process.env) {
     bedrockModelId,
     bedrockApiKey: env.AWS_BEARER_TOKEN_BEDROCK || '',
     judgeModelId,
-    // 판정 GPU LLM 은 VLM 과 따로 띄운 경량 모델(Qwen3.5-9B)에 글만 보낸다. 실패해도 Bedrock 으로 넘기지 않는다.
+    // 판정 GPU LLM 은 VLM 과 같은 모델을 8805 에 따로 띄운 것이고 글만 보낸다. 실패해도 Bedrock 으로 넘기지 않는다.
     // judgeModelId 는 판정 백엔드를 bedrock 으로 골랐을 때 쓴다. 삽입 위치 추론은 판정 백엔드와 상관없이 이 GPU LLM 을 쓴다.
     judgeBackend: readJudgeBackend({ env }),
     judgeGpuUrl: env.SEEON_JUDGE_GPU_URL || DEFAULT_JUDGE_GPU_URL,
