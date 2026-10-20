@@ -61,7 +61,7 @@ test('모델 설정에는 비밀값이 실리지 않는다', () => {
   assert.equal(modelConfig.hasBedrockCredentials, true);
   assert.doesNotMatch(JSON.stringify(modelConfig), /secret-token-value/);
   assert.deepEqual([modelConfig.judgeBackend, modelConfig.judgeGpuUrl, modelConfig.judgeGpuModel],
-    ['gpu', 'http://127.0.0.1:8805/v1/chat/completions', 'qwen3.5-9b'], '판단 LLM 이 어느 GPU 서버로 갔는지 남긴다');
+    ['gpu', 'http://127.0.0.1:8805/v1/chat/completions', 'gemma-4-26b-a4b-qat'], '판단 LLM 이 어느 GPU 서버로 갔는지 남긴다');
 });
 
 test('모델 설정에 삽입 위치 추론의 모드별 사고 여부·한도·시간을 남기고, 다시 골라도 그대로다', () => {
