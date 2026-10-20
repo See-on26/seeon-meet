@@ -1,6 +1,6 @@
-// 수치 해설(변화·비교, 값→의미)에 그 요청 프레임을 OCR 로 읽은 글자를 근거로 넣는다.
+// 수치 해설(변화·비교, 값→의미)과 척도 해설에 그 요청 프레임을 OCR 로 읽은 글자를 근거로 넣는다.
 // OCR 은 판단 LLM 과 함께 시작해 겹쳐 돌리고, 판단 뒤에는 상한(SCREEN_TEXT_WAIT_MS)까지만 기다린다.
-// 늦거나 실패하거나 믿기 어려우면 덩어리 없이(지금과 같은 프롬프트로) 생성한다. 수치 해설이 아니면 OCR 결과는 버린다.
+// 늦거나 실패하거나 믿기 어려우면 덩어리 없이(지금과 같은 프롬프트로) 생성한다. 수치·척도 해설이 아니면 OCR 결과는 버린다.
 const { NARRATION_TYPE_MAP } = require('../contracts/narration-types');
 const { NARRATION_BY_TRIGGER_TYPE_MAP } = require('../router/unified-router');
 const { OCR_MIN_MEAN_SCORE, OCR_MAX_VERTICAL_BOX_RATIO } = require('../agents/slide-text-agent');
@@ -22,10 +22,22 @@ const SCREEN_TEXT_SKIP_REASON_MAP = {
   overCharLimit: 'over_char_limit',
 };
 
-// 수치 해설은 단순 수치·변화 트리거에서만 나온다. 그런 후보가 없는 요청에는 OCR 을 보내지 않는다(GPU 서버 CPU 절약).
-function shouldStartScreenTextGrounding({ triggerCandidateList = [] } = {}) {
-  return (Array.isArray(triggerCandidateList) ? triggerCandidateList : []).some((candidate) => Boolean(candidate?.phrase)
-    && NARRATION_BY_TRIGGER_TYPE_MAP[candidate.type]?.type === NARRATION_TYPE_MAP.interpretation);
+// 근거를 받는 해설. 지시 해설은 받지 않는다 — OCR 글자를 주면 옆 상자의 글자·숫자를 가리킨 대상에 붙였다.
+const SCREEN_TEXT_NARRATION_TYPE_LIST = [NARRATION_TYPE_MAP.interpretation, NARRATION_TYPE_MAP.visualDescription];
+
+function isScreenTextNarrationType(narrationType) {
+  return SCREEN_TEXT_NARRATION_TYPE_LIST.includes(narrationType);
+}
+
+// 수치·척도 해설은 단순 수치·변화·척도 트리거에서만 나온다. 그런 후보가 없는 요청에는 OCR 을 보내지 않는다(GPU 서버 CPU 절약).
+// 척도를 꺼 두면 척도 후보는 해설이 되지 않으므로 OCR 을 시작하는 이유가 되지 않는다.
+function shouldStartScreenTextGrounding({ triggerCandidateList = [], isScaleEnabled = true } = {}) {
+  return (Array.isArray(triggerCandidateList) ? triggerCandidateList : []).some((candidate) => {
+    if (!candidate?.phrase) return false;
+    const narrationType = NARRATION_BY_TRIGGER_TYPE_MAP[candidate.type]?.type;
+    if (narrationType === NARRATION_TYPE_MAP.visualDescription && !isScaleEnabled) return false;
+    return isScreenTextNarrationType(narrationType);
+  });
 }
 
 // 근거로 쓸 수 있는지는 슬라이드 전사가 OCR 을 믿는 기준(평균 점수·세로 글씨 비율)과 같다.
@@ -57,7 +69,7 @@ function createSkippedTask(skipReason) {
 }
 
 function createScreenTextGrounding({ ocrClient, isEnabled = () => true, waitMs = SCREEN_TEXT_WAIT_MS, now = Date.now }) {
-  // 판단 LLM 을 부르기 전에 부른다. 돌려받은 작업은 수치 해설일 때만 기다리고(waitForPrompt), 값 검사는 끝난 결과만 본다(peekFrameText).
+  // 판단 LLM 을 부르기 전에 부른다. 돌려받은 작업은 수치·척도 해설일 때만 기다리고(waitForPrompt), 값 검사는 끝난 결과만 본다(peekFrameText).
   function start({ jpegBuffer }) {
     if (!isEnabled()) return createSkippedTask(SCREEN_TEXT_SKIP_REASON_MAP.disabled);
     if (!ocrClient) return createSkippedTask('ocr_error:OCR 클라이언트 없음');
@@ -118,7 +130,7 @@ function createScreenTextGrounding({ ocrClient, isEnabled = () => true, waitMs =
   return { start };
 }
 
-// 기록(수치 해설 레코드·흐름 창)에 남길 화면 글자 요약. 줄 수·글자 수는 프롬프트에 실제로 들어간 양이다.
+// 기록(수치·척도 해설 레코드·흐름 창)에 남길 화면 글자 요약. 줄 수·글자 수는 프롬프트에 실제로 들어간 양이다.
 function finalizeScreenTextRecord({ record, screenTextBlock = null }) {
   const lineCount = screenTextBlock?.lineCount ?? 0;
   const charCount = screenTextBlock?.charCount ?? 0;
@@ -140,6 +152,6 @@ function formatScreenTextSummary(record) {
 }
 
 module.exports = {
-  createScreenTextGrounding, shouldStartScreenTextGrounding, evaluateOcrResult, finalizeScreenTextRecord,
+  createScreenTextGrounding, shouldStartScreenTextGrounding, isScreenTextNarrationType, evaluateOcrResult, finalizeScreenTextRecord,
   formatScreenTextSummary, SCREEN_TEXT_WAIT_MS, SCREEN_TEXT_CONFIDENT_SCORE, SCREEN_TEXT_SOURCE_MAP, SCREEN_TEXT_SKIP_REASON_MAP,
 };

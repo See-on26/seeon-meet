@@ -21,19 +21,19 @@ const silence = (rawSlotMap) => assembleNarration({
   origin: NARRATION_ORIGIN_MAP.silence, rawSlotMap,
 });
 
-test('지시 상황 칸: "보시는 중·보이는 중·보며 설명함"은 청자 쪽 동작 "보는 중"으로 맞춘다', () => {
-  for (const situation of ['보시는 중', '보이는 중', '보며 설명함', '보시며 설명함']) {
-    assert.equal(deixisSimple({ target: '월별 매출 추이 표를', situation }).slotMap.situation, '보는 중', situation);
-  }
-  assert.equal(deixisSimple({ target: '월별 매출 추이 표를', situation: '비교 중' }).slotMap.situation, '비교 중');
+test('지시 해설은 상황 칸 없이 caption 만 읽는다(보시는 중·확인 중 같은 동작 말이 붙지 않는다)', () => {
+  const result = deixisSimple({ seen: '월별 매출 추이 표', caption: '월별 매출 추이 표' });
+  assert.equal(result.text, '월별 매출 추이 표');
+  assert.equal(result.slotMap.situation, undefined);
 });
 
-test('지시 완전형 문장은 허용치(상한 + 2어절) 안이면 자르지 않고, 넘으면 지금처럼 상한에서 자른다', () => {
-  const base = { mimicry: '여기 보시면', target: '도심 열', explanation: '냉방기 배출열 비중 표시' };
-  const twelve = '여름에 특히 문제가 되는 냉방기 배출열은 도심 열의 약 25%를 차지함';
-  assert.equal(deixisComplete({ ...base, sentence: twelve }).slotMap.sentence, twelve);
-  const fourteen = '여름 한낮에 특히 문제가 되는 냉방기 배출열은 도심 열의 약 25%를 넘게 차지함';
-  assert.equal(deixisComplete({ ...base, sentence: fourteen }).slotMap.sentence.split(' ').length <= 10, true, '허용치를 넘으면 상한 10어절에서 자른다');
+test('지시 완전형 caption 은 허용치(상한 10 + 2어절) 안이면 자르지 않고, 넘으면 끝을 맺을 수 있는 데서 자른다', () => {
+  const twelve = '왼쪽 위 서울 지점 매출 120억, 오른쪽 아래 부산 지점 매출 80억';
+  assert.equal(deixisComplete({ seen: '지점 두 곳의 매출 상자', caption: twelve }).text, twelve);
+  const caption = '왼쪽 위 서울 지점 매출, 오른쪽 아래 부산 지점 매출과 두 지점의 차이를 적은 설명';
+  const result = deixisComplete({ seen: '지점 두 곳의 매출 상자', caption });
+  assert.ok(result.text.split(' ').length <= 10, result.text);
+  assert.ok(caption.startsWith(result.text), result.text);
 });
 
 test('"가장"은 자료 명사(장)로 끝맺은 것으로 보지 않는다', () => {

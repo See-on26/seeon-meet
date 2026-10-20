@@ -25,16 +25,9 @@ test('수치 해설(수치 → 뜻)은 지금처럼 "값은 해석틀을 의미"
     rawSlotMap: { value: '73%', frame: '작년 대비 재고 회전율' } }), '73%는 작년 대비 재고 회전율을 의미');
 });
 
-test('지시 해설의 상황 칸이 "가리키며" 같은 가리키는 동작이면 "확인 중" 으로 둔다(가리켰다는 사실은 정보가 아니다)', () => {
+test('지시 해설은 상황 칸 없이 대상 내용(caption)만 읽는다', () => {
   assert.equal(assemble({ narrationType: 'deixis', subKind: 'simple',
-    rawSlotMap: { target: '배송 지연 412건 항목', situation: '가리키며' } }), '배송 지연 412건 항목 확인 중');
+    rawSlotMap: { seen: '응답 품질 변화 표', caption: '응답 품질 변화 표' } }), '응답 품질 변화 표');
   assert.equal(assemble({ narrationType: 'deixis', subKind: 'simple',
-    rawSlotMap: { target: '배송 지연 412건 항목', situation: '가리키며 설명함' } }), '배송 지연 412건 항목 확인 중');
-});
-
-test('지시 해설의 다른 상황 칸은 지금처럼 둔다', () => {
-  assert.equal(assemble({ narrationType: 'deixis', subKind: 'simple',
-    rawSlotMap: { target: '응답 품질 변화 표', situation: '보는 중' } }), '응답 품질 변화 표 보는 중');
-  assert.equal(assemble({ narrationType: 'deixis', subKind: 'simple',
-    rawSlotMap: { target: '응답 품질 변화 표', situation: '보며' } }), '응답 품질 변화 표 보며 설명함');
+    rawSlotMap: { target: '응답 품질 변화 표', situation: '보는 중' } }), null, '옛 칸으로 온 답은 caption 이 없어 만들지 않는다');
 });

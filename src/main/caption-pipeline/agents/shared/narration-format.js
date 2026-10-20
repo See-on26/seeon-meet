@@ -55,6 +55,8 @@ const INCOMPLETE_TAIL_PATTERN = new RegExp(`(?:${[
   '그', '이', '저', '어떤', '무슨',
 ].join('|')})$`);
 const INCOMPLETE_SUFFIX_PATTERN = /(?:는|던)$/;
+// "신청 마감 20일까지"의 "20일까지"는 기한 자체라 덜 끝난 말이 아니다. 숫자에 붙은 까지·부터는 남긴다.
+const NUMBERED_RANGE_TAIL_PATTERN = /\d\D{0,3}(?:까지|부터)$/;
 
 const SAFE_INCOMPLETE_TAIL_PATTERN = new RegExp(`(?:${[
   '및', '하고', '또는', '그리고', '또한', '에서', '에게', '한테', '부터', '까지', '보다', '처럼', '만큼',
@@ -120,8 +122,9 @@ function trimToCompletePhrase({ text, isConservative = false }) {
   const wordList = String(text || '').trim().split(/\s+/).filter(Boolean);
   while (wordList.length > 1) {
     const last = wordList[wordList.length - 1].replace(TRAILING_MARK_PATTERN, '');
+    const isNumberedRange = isConservative && NUMBERED_RANGE_TAIL_PATTERN.test(last);
     if (!last || INCOMPLETE_WORD_SET.has(last)
-      || tailPattern.test(last) || INCOMPLETE_SUFFIX_PATTERN.test(last)) {
+      || (!isNumberedRange && tailPattern.test(last)) || INCOMPLETE_SUFFIX_PATTERN.test(last)) {
       wordList.pop(); continue;
     }
     wordList[wordList.length - 1] = last;
@@ -133,6 +136,13 @@ function trimToCompletePhrase({ text, isConservative = false }) {
   }
   return wordList.join(' ').replace(TRAILING_MARK_PATTERN, '');
 }
+
+// 지시 해설은 가리킨 대상의 이름·내용(caption)만 읽는다. "보는 중" 같은 상황 말은 청자에게 정보가 아니라 두지 않는다.
+// seen 은 가리킨 곳에 보이는 것을 먼저 옮겨 적게 해 지어내기를 줄이는 근거 칸이다(읽히지 않는다).
+// caption 상한은 상황 칸을 둘 때의 칸 합과 같다(단순형: 대상 5 + 상황 2, 완전형: 문장 10).
+const DEIXIS_SEEN_SLOT = {
+  key: 'seen', label: '가리킨 곳에 실제로 보이는 것 — 글자는 그대로, 그림·필기는 짧게', minWordCount: 0, maxWordCount: 20, isDiagnostic: true,
+};
 
 const NARRATION_SLOT_MAP = {
   [NARRATION_TYPE_MAP.pageTransition]: {
@@ -146,21 +156,15 @@ const NARRATION_SLOT_MAP = {
   },
   [NARRATION_TYPE_MAP.deixis]: {
     [DEIXIS_FORM_MAP.simple]: [
-      { key: 'target', label: '지시대상 묘사/내용 — 자료 종류(표·사진 등)까지 포함 (예: 2년간 매출 추이 표를)', minWordCount: 2, maxWordCount: 5, isPhrase: true },
-      { key: 'situation', label: "상황 묘사 — 발화 모사 ('보는 중', '주목' 등)", minWordCount: 2, maxWordCount: 2 },
+      DEIXIS_SEEN_SLOT,
+      { key: 'caption', label: '청자에게 읽어 줄 해설 — 가리킨 대상의 이름·내용, 자료 종류(표·사진 등)까지 (예: 2년간 매출 추이 표)', minWordCount: 2, maxWordCount: 7, isPhrase: true },
     ],
     [DEIXIS_FORM_MAP.complete]: [
-      { key: 'mimicry', label: '발화 모사 — 기존 발화의 표현·어휘', minWordCount: 2, maxWordCount: 3, isDiagnostic: true },
-      { key: 'target', label: '지시대상 — 간략한 주제를 덧붙여', minWordCount: 1, maxWordCount: 2, isDiagnostic: true, isPhrase: true },
-      { key: 'explanation', label: '설명 — 묘사/설명·대상 사이의 관계성', minWordCount: 3, maxWordCount: 5, isDiagnostic: true, isPhrase: true },
+      DEIXIS_SEEN_SLOT,
+      // 완전형은 대상을 여럿 잇는 구라 어절 상한에서 자르면 마지막 대상이 잘린다. 허용치 안이면 통째로 받는다.
       {
-        key: 'sentence',
-        label: '위 세 요소(발화 모사 + 지시대상 + 설명)를 **모두 포함**하는 자연스러운 한 문장'
-          + ' (순서는 자연스럽게 바꿔도 된다)',
-        minWordCount: 6,
-        maxWordCount: 10,
-        // 문장은 어절 상한에서 자르면 "…도심 열의 약"처럼 값 앞에서 끊긴다. 허용치 안이면 통째로 받는다.
-        isWholeSentence: true,
+        key: 'caption', label: '청자에게 읽어 줄 해설 — 가리킨 대상 각각의 이름·내용을 가리킨 순서대로 쉼표로',
+        minWordCount: 2, maxWordCount: 10, isPhrase: true, isWholeSentence: true,
       },
     ],
   },
@@ -180,16 +184,10 @@ const NARRATION_SLOT_MAP = {
       // 무발화 묘사는 값·변화를 담아 "…그래프"로 끝맺는다. 5어절에서 자르면 자료 종류 꼬리가 빠져 묘사가 버려진다.
       { key: 'description', label: '이미지에 대한 묘사 (반응을 일으키는 요소 포함)', minWordCount: 3, maxWordCount: 8, isPhrase: true },
     ],
+    // "○○보다 N배 큰 ○○" 네 칸으로는 "○○만 한", "○○의 절반쯤 되는"을 말할 수 없고, 칸을 이으면 "보다보다"처럼 말이 겹친다.
+    // 크기 묘사를 구 하나로 받는다. 상한은 척도 어절 예산(4~8어절)의 상한과 같다.
     [VISUAL_DESCRIPTION_KIND_MAP.scale]: [
-      { key: 'comparison', label: '비교 대상 (화면 속 다른 객체, 예: 소나무)', minWordCount: 1, maxWordCount: 2 },
-      {
-        key: 'scale',
-        label: '비교 척도 — 숫자만 (예: 4). **숫자로 가늠할 수 없으면 빈 문자열**',
-        minWordCount: 0,
-        maxWordCount: 1,
-      },
-      { key: 'direction', label: '방향 — "큰" 또는 "작은" 중 하나', minWordCount: 1, maxWordCount: 1 },
-      { key: 'target', label: '그 대상 (예: 불상)', minWordCount: 1, maxWordCount: 1, isPhrase: true },
+      { key: 'caption', label: '청자에게 읽어 줄 크기 묘사 — 발표자가 말한 대상을 화면 속 비교 대상과 견준 크기 (예: 소나무보다 4배 정도 큰 불상)', minWordCount: 3, maxWordCount: 8, isPhrase: true },
     ],
   },
   [NARRATION_TYPE_MAP.speakerIdentity]: {
@@ -225,6 +223,7 @@ const CLAIM_SECOND_PAIR_SLOT_LIST = [
 ];
 
 // 영어 캡션의 칸 설명. 칸 이름·어절(단어) 수는 한국어 칸과 같고, 설명만 영어 구에 맞게 바꾼다.
+const ENGLISH_DEIXIS_SEEN_LABEL = 'what is actually visible where the speaker pointed — text as written, drawings/marks briefly';
 const ENGLISH_SLOT_LABEL_MAP = {
   [NARRATION_TYPE_MAP.pageTransition]: {
     [PAGE_TRANSITION_KIND_MAP.slide]: {
@@ -237,16 +236,13 @@ const ENGLISH_SLOT_LABEL_MAP = {
   },
   [NARRATION_TYPE_MAP.deixis]: {
     [DEIXIS_FORM_MAP.simple]: {
-      target: 'the referenced item and its content, including the material type (e.g. "the two-year sales trend table")',
-      situation: 'short lead-in action phrase that mimics the speaker\'s verb and is read right before the target'
-        + ' (e.g. "Looking at", "Focusing on", "Comparing")',
+      seen: ENGLISH_DEIXIS_SEEN_LABEL,
+      caption: 'the narration read to the listener — the name and content of the referenced item, including the material type'
+        + ' (e.g. "the two-year sales trend table")',
     },
     [DEIXIS_FORM_MAP.complete]: {
-      mimicry: 'speaker mimicry — wording taken from the utterance',
-      target: 'the referenced item — with a brief topic',
-      explanation: 'explanation — what it shows or how it relates to the item',
-      sentence: 'one natural sentence that **includes all three** of the above (mimicry + item + explanation)'
-        + ' (the order may change)',
+      seen: ENGLISH_DEIXIS_SEEN_LABEL,
+      caption: 'the narration read to the listener — the name and content of each referenced item, in the order pointed at, separated by commas',
     },
   },
   [NARRATION_TYPE_MAP.interpretation]: {
@@ -270,10 +266,8 @@ const ENGLISH_SLOT_LABEL_MAP = {
       description: 'description of the image (including what triggers the reaction)',
     },
     [VISUAL_DESCRIPTION_KIND_MAP.scale]: {
-      comparison: 'comparison object (another object on screen, e.g. the pine tree)',
-      scale: 'scale — number only (e.g. 4). **Empty string if it cannot be estimated as a number**',
-      direction: 'direction — exactly "larger" or "smaller"',
-      target: 'the item itself (e.g. the Buddha statue)',
+      caption: 'size description read to the listener — the item the speaker called big/small compared with a reference on screen'
+        + ' (e.g. "a Buddha statue about four times taller than the pine tree")',
     },
   },
   [NARRATION_TYPE_MAP.speakerIdentity]: {
@@ -321,22 +315,16 @@ function scaleWordBudget({ minWordCount, maxWordCount, language }) {
   return { minWordCount, maxWordCount: scaleMaxWordCount({ count: maxWordCount, language }) };
 }
 
-// 영어 칸 가운데 어절 수를 그대로 옮기면 안 되는 칸. 지시 대상의 상황 칸은 대상 앞에 붙는 짧은 동작구("Looking at")다.
-const ENGLISH_WORD_RANGE_OVERRIDE_MAP = {
-  [NARRATION_TYPE_MAP.deixis]: { [DEIXIS_FORM_MAP.simple]: { situation: { minWordCount: 1, maxWordCount: 3 } } },
-};
-
 function getSlotList({ narrationType, subKind, origin = null, hasSecondClaim = false, language = CAPTION_LANGUAGE_MAP.ko }) {
   const slotList = readSlotList({ narrationType, subKind, origin, hasSecondClaim });
   if (!slotList || language !== CAPTION_LANGUAGE_MAP.en) return slotList;
   const isSilenceDescription = slotList === SILENCE_DESCRIPTION_SLOT_LIST;
   const labelMap = isSilenceDescription
     ? ENGLISH_SILENCE_DESCRIPTION_LABEL_MAP : (ENGLISH_SLOT_LABEL_MAP[narrationType]?.[subKind] || {});
-  const overrideMap = isSilenceDescription ? {} : (ENGLISH_WORD_RANGE_OVERRIDE_MAP[narrationType]?.[subKind] || {});
   return slotList.map((slot) => ({
     ...slot,
     label: labelMap[slot.key] || slot.label,
-    ...(overrideMap[slot.key] || scaleWordBudget({ minWordCount: slot.minWordCount, maxWordCount: slot.maxWordCount, language })),
+    ...scaleWordBudget({ minWordCount: slot.minWordCount, maxWordCount: slot.maxWordCount, language }),
   }));
 }
 
@@ -443,7 +431,7 @@ function normalizeSlotMap({ slotList, rawSlotMap, language = CAPTION_LANGUAGE_MA
     const isTruncated = countWord({ text }) > slot.maxWordCount;
     if (isTruncated) {
       slotMap[slot.key] = trimToCompletePhrase({
-        text: slot.mustContainValue ? dropValuelessTailItem({ text: truncated }) : truncated,
+        text: slot.mustContainValue ? fitWholeItemList({ text, maxWordCount: slot.maxWordCount }) : truncated,
       });
     }
     else if (slot.isPhrase) slotMap[slot.key] = trimToCompletePhrase({ text: truncated, isConservative: true });
@@ -454,10 +442,85 @@ function normalizeSlotMap({ slotList, rawSlotMap, language = CAPTION_LANGUAGE_MA
 
 // 값 목록("A 9.2시간에서 3.1시간, 고객 만족도 72점…")이 어절 수에서 잘리면 마지막 항목이 "고객"처럼
 // 이름만 남는다. 쉼표 뒤 조각에 수치가 없으면 그 조각을 버린다.
+// 숫자 안의 쉼표("3,000개", "1,250명")에서 나누면 "3, 000개"처럼 값이 깨진다. 쉼표 뒤 띄어쓰기나 숫자 아닌 이웃이 있을 때만 항목 경계로 본다.
+const ITEM_SEPARATOR_PATTERN = /\s*,\s+|(?<!\d)\s*,\s*|\s*,\s*(?!\d)/;
+
+function splitItemList({ text }) {
+  return String(text || '').split(ITEM_SEPARATOR_PATTERN).map((item) => item.trim()).filter(Boolean);
+}
+
 function dropValuelessTailItem({ text }) {
-  const itemList = String(text || '').split(/\s*,\s*/);
+  const itemList = String(text || '').split(ITEM_SEPARATOR_PATTERN);
   while (itemList.length > 1 && !hasValueToken({ text: itemList[itemList.length - 1] })) itemList.pop();
   return itemList.join(', ');
+}
+
+// 값 목록을 어절 상한에 맞출 때는 쉼표로 나뉜 항목을 통째로 넣거나 뺀다. 항목 가운데에서 자르면
+// "…, 2분기 신규"처럼 이름만 남고, 그 이름에 숫자가 들어 있어 완결된 항목처럼 보이기 때문이다.
+// 첫 항목부터 상한을 넘으면 어절에서 자르는 예전 방식으로 둔다.
+function fitWholeItemList({ text, maxWordCount }) {
+  const rawItemList = splitItemList({ text });
+  const itemList = countWord({ text: rawItemList.join(', ') }) > maxWordCount ? dropRepeatedItemWord({ itemList: rawItemList }) : rawItemList;
+  const keptList = [];
+  for (const item of itemList) {
+    if (countWord({ text: [...keptList, item].join(', ') }) > maxWordCount) break;
+    keptList.push(item);
+  }
+  if (!keptList.length) return dropValuelessTailItem({ text: truncateSlot({ text, maxWordCount }) });
+  return dropValuelessTailItem({ text: keptList.join(', ') });
+}
+
+// 값 항목마다 되풀이된 낱말("1차 시험 82점, 2차 시험 88점"의 "시험")을 뺀다. 대개 대상 칸이 이미 말한 측정량 낱말이다.
+// 항목이 셋 이상이면 하나를 빼고 모두에 나온 낱말도 뺀다. 낱말을 빼서 항목에 숫자만 남으면 그 항목은 그대로 둔다
+// (조건 이름이 사라지면 어느 값이 어느 항목의 것인지 모른다).
+const BARE_NUMBER_WORD_PATTERN = /^[+\-−]?\d[\d.,]*$/;
+
+function dropRepeatedItemWord({ itemList }) {
+  if (itemList.length < 2) return itemList;
+  const wordListList = itemList.map((item) => item.split(/\s+/));
+  const needCount = itemList.length >= 3 ? itemList.length - 1 : itemList.length;
+  const countMap = new Map();
+  for (const wordList of wordListList) {
+    for (const word of new Set(wordList.filter((item) => !/\d/.test(item)))) countMap.set(word, (countMap.get(word) || 0) + 1);
+  }
+  const repeatedSet = new Set([...countMap].filter(([, count]) => count >= needCount).map(([word]) => word));
+  if (!repeatedSet.size) return itemList;
+  return wordListList.map((wordList) => {
+    const kept = wordList.filter((word) => !repeatedSet.has(word));
+    return kept.some((word) => !BARE_NUMBER_WORD_PATTERN.test(word)) ? kept.join(' ') : wordList.join(' ');
+  });
+}
+
+// 대상 칸에 조건 이름 목록("본관 방문객 수, 별관 방문객 수")을, 값 칸에 이름 없는 값 목록("320명, 140명")을 따로 쓰면
+// 대상 칸이 상한에서 잘려 둘째 조건이 빠지고 둘째 값이 첫 조건의 값처럼 읽힌다. 항목 수가 같으면 순서대로 짝지어 값 칸으로 옮기고,
+// 항목 이름의 같은 끝말("방문객 수")은 대상 칸에 한 번만 둔다. 칸 상한을 적용하기 전(원 답 칸)에 한다.
+const BARE_VALUE_ITEM_PATTERN = /^(?:약\s*|about\s+)?[+\-−]?\d[\d.,]*\s*(?:%|퍼센트|[A-Za-z/]+|원|명|건|개|번|회|배|분|초|시간|일|년|도|점|위|세|℃)?$/;
+// 끝말 바로 앞의 기능어("운동 후 맥박"의 "후")는 조건에 속하므로 끝말로 묶지 않는다.
+const PAIR_FUNCTION_WORD_SET = new Set(['후', '전', '때', '중', '뒤', '동안', '이후', '이전', '당시', '시', 'after', 'before', 'during']);
+
+function pairTargetItemListWithValueList({ target, value }) {
+  const targetItemList = splitItemList({ text: target });
+  const valueItemList = splitItemList({ text: value });
+  if (targetItemList.length < 2 || targetItemList.length !== valueItemList.length) return null;
+  if (!valueItemList.every((item) => BARE_VALUE_ITEM_PATTERN.test(item))) return null;
+  const wordListList = targetItemList.map((item) => item.split(/\s+/));
+  const readTailWord = (wordList, offset) => wordList[wordList.length - 1 - offset];
+  let commonCount = 0;
+  while (wordListList.every((wordList) => wordList.length > commonCount + 1
+    && readTailWord(wordList, commonCount) === readTailWord(wordListList[0], commonCount))
+    && !PAIR_FUNCTION_WORD_SET.has(readTailWord(wordListList[0], commonCount))) commonCount += 1;
+  // 같은 끝말(측정량 낱말)이 없으면 대상 칸이 비므로 짝짓지 않는다.
+  if (!commonCount) return null;
+  const commonTail = wordListList[0].slice(-commonCount).join(' ');
+  const pairList = wordListList.map((wordList, index) => `${wordList.slice(0, wordList.length - commonCount).join(' ')} ${valueItemList[index]}`);
+  return { target: commonTail, value: pairList.join(', ') };
+}
+
+// 주장→값은 대상 칸의 조건 목록과 값 칸의 이름 없는 값 목록을 짝지어 둔다.
+function pairClaimSlot({ narrationType, subKind, rawSlotMap }) {
+  const isClaim = narrationType === NARRATION_TYPE_MAP.interpretation && subKind === INTERPRETATION_KIND_MAP.claimToValue;
+  const paired = isClaim ? pairTargetItemListWithValueList({ target: rawSlotMap?.target, value: rawSlotMap?.value }) : null;
+  return paired ? { ...rawSlotMap, ...paired } : rawSlotMap;
 }
 
 // 끝 문장부호("…막대 그래프.")는 떼고 본다. 붙은 채 보면 받을 수 있는 길이의 묘사도 미완결로 버려진다.
@@ -480,25 +543,6 @@ function hasValueToken({ text }) {
 function hasValuelessSlot({ slotList, slotMap }) {
   return slotList.some((slot) => slot.mustContainValue
     && !hasValueToken({ text: slotMap[slot.key] }));
-}
-
-const CONNECTIVE_ENDING_LIST = ['며', '고', '서', '면서', '거나', '지만', '는데', '어서', '아서'];
-const SITUATION_FALLBACK_TAIL = '설명함';
-// 가리켰다는 사실은 청자에게 정보가 아니다(지시 프롬프트 규칙 5). 모사할 동사가 없을 때 쓰는 "확인 중"으로 둔다.
-const POINTING_SITUATION_PATTERN = /가리키|가리킴|가리켜/;
-const POINTING_SITUATION_REPLACEMENT = '확인 중';
-// "보시면"을 높임말 그대로("보시는 중")나 피동("보이는 중")으로 옮기거나 "보며 설명함"으로 쓰면 어색하다. 청자 쪽 동작 "보는 중"으로 맞춘다.
-const LOOKING_SITUATION_PATTERN = /^(?:보시는 중|보이는 중|보며 설명함|보시며 설명함)$/;
-const LOOKING_SITUATION_REPLACEMENT = '보는 중';
-
-function completeSituationSlot({ situation }) {
-  const text = String(situation || '').trim();
-  if (!text) return text;
-  if (POINTING_SITUATION_PATTERN.test(text)) return POINTING_SITUATION_REPLACEMENT;
-  if (LOOKING_SITUATION_PATTERN.test(text)) return LOOKING_SITUATION_REPLACEMENT;
-  const last = text.split(/\s+/).pop();
-  const isConnective = CONNECTIVE_ENDING_LIST.some((ending) => last.endsWith(ending));
-  return isConnective ? `${text} ${SITUATION_FALLBACK_TAIL}` : text;
 }
 
 function dropRepeatedWordAtSeam({ text }) {
@@ -526,9 +570,29 @@ function assembleClaimPair({ target, value, language = CAPTION_LANGUAGE_MAP.ko }
   return isTargetRepeatedInValue({ target, value, language }) ? value : `${target}, ${value}`;
 }
 
+// 칸마다 상한이 있어도 칸을 이은 해설은 전체 예산을 넘을 수 있다. 첫 쌍이 전체 어절·글자 예산을 넘으면
+// 정보가 적은 쪽부터 줄인다: ① 값 항목마다 되풀이된 낱말을 빼고 ② 대상 칸 앞쪽 꾸밈말을 빼되 끝의 측정량 낱말은 남기고(최소 2어절)
+// ③ 그래도 넘치면 값 목록 뒤 항목부터 통째로 뺀다.
+const MIN_TARGET_WORD_COUNT = 2;
+
+function fitClaimPairToBudget({ target, value, maxWordCount, maxChars, language = CAPTION_LANGUAGE_MAP.ko }) {
+  const isOver = (text) => (Number.isFinite(maxWordCount) && countWord({ text }) > maxWordCount)
+    || (Number.isFinite(maxChars) && text.length > maxChars);
+  let itemList = splitItemList({ text: value });
+  let targetWordList = String(target || '').split(/\s+/).filter(Boolean);
+  const build = () => assembleClaimPair({
+    target: targetWordList.join(' '), value: dropValuelessTailItem({ text: itemList.join(', ') }), language,
+  });
+  let fitted = build();
+  if (isOver(fitted)) { itemList = dropRepeatedItemWord({ itemList }); fitted = build(); }
+  while (isOver(fitted) && targetWordList.length > MIN_TARGET_WORD_COUNT) { targetWordList = targetWordList.slice(1); fitted = build(); }
+  while (isOver(fitted) && itemList.length > 1) { itemList.pop(); fitted = build(); }
+  return fitted;
+}
+
 // 둘째 쌍은 대상과 수치가 다 있을 때만 붙이고, 두 쌍이 어절 예산을 넘으면 첫 쌍만 읽는다.
-function assembleClaimToValue({ slotMap, maxWordCount, language = CAPTION_LANGUAGE_MAP.ko }) {
-  const first = assembleClaimPair({ target: slotMap.target, value: slotMap.value, language });
+function assembleClaimToValue({ slotMap, maxWordCount, maxChars, language = CAPTION_LANGUAGE_MAP.ko }) {
+  const first = fitClaimPairToBudget({ target: slotMap.target, value: slotMap.value, maxWordCount, maxChars, language });
   if (!slotMap.target2 || !hasValueToken({ text: slotMap.value2 })) return first;
   const both = `${first}. ${assembleClaimPair({ target: slotMap.target2, value: slotMap.value2, language })}`;
   return Number.isFinite(maxWordCount) && countWord({ text: both }) > maxWordCount ? first : both;
@@ -550,10 +614,8 @@ const NARRATION_ASSEMBLE_MAP = {
     [PAGE_TRANSITION_KIND_MAP.document]: ({ slotMap }) => `페이지: ${slotMap.description}`,
   },
   [NARRATION_TYPE_MAP.deixis]: {
-    [DEIXIS_FORM_MAP.simple]: ({ slotMap }) => (
-      `${slotMap.target} ${slotMap.situation}`
-    ),
-    [DEIXIS_FORM_MAP.complete]: ({ slotMap }) => slotMap.sentence,
+    [DEIXIS_FORM_MAP.simple]: ({ slotMap }) => slotMap.caption,
+    [DEIXIS_FORM_MAP.complete]: ({ slotMap }) => slotMap.caption,
   },
   [NARRATION_TYPE_MAP.interpretation]: {
     [INTERPRETATION_KIND_MAP.valueToMeaning]: ({ slotMap }) => (
@@ -566,9 +628,7 @@ const NARRATION_ASSEMBLE_MAP = {
     [VISUAL_DESCRIPTION_KIND_MAP.reaction]: ({ slotMap }) => (
       `이미지 제시, ${String(slotMap.description || '').replace(/^\s*이미지 제시\s*,?\s*/, '')}`
     ),
-    [VISUAL_DESCRIPTION_KIND_MAP.scale]: ({ slotMap }) => (slotMap.scale
-      ? `${slotMap.comparison}보다 ${slotMap.scale}배 ${slotMap.direction} ${slotMap.target}`
-      : `${slotMap.comparison}보다 ${slotMap.direction} ${slotMap.target}`),
+    [VISUAL_DESCRIPTION_KIND_MAP.scale]: ({ slotMap }) => slotMap.caption,
   },
   [NARRATION_TYPE_MAP.speakerIdentity]: {
     [SPEAKER_IDENTITY_KIND_MAP.named]: ({ slotMap }) => `${slotMap.speakerName}님이 말합니다`,
@@ -579,7 +639,6 @@ const NARRATION_ASSEMBLE_MAP = {
 // 영어 캡션의 조립 틀. 고정 문구(머리말·연결어)는 시스템이 붙이고, 칸에는 화면에서 읽은 구만 들어간다.
 // 모델이 형식 예시를 흉내 내 머리말("Image:")을 직접 쓰면 떼고 붙인다.
 const ENGLISH_IMAGE_PREFIX_PATTERN = /^\s*image\s*(?:presented|shown)?\s*[:,]\s*/i;
-const ENGLISH_SCALE_SUFFIX_PATTERN = /\s*(?:x|times)$/i;
 const ENGLISH_LEADING_ARTICLE_PATTERN = /^the\s+/i;
 
 const ENGLISH_NARRATION_ASSEMBLE_MAP = {
@@ -588,25 +647,20 @@ const ENGLISH_NARRATION_ASSEMBLE_MAP = {
     [PAGE_TRANSITION_KIND_MAP.document]: ({ slotMap }) => `Page: ${slotMap.description}`,
   },
   [NARRATION_TYPE_MAP.deixis]: {
-    [DEIXIS_FORM_MAP.simple]: ({ slotMap }) => `${slotMap.situation} ${slotMap.target}`,
-    [DEIXIS_FORM_MAP.complete]: ({ slotMap }) => slotMap.sentence,
+    [DEIXIS_FORM_MAP.simple]: ({ slotMap }) => slotMap.caption,
+    [DEIXIS_FORM_MAP.complete]: ({ slotMap }) => slotMap.caption,
   },
   [NARRATION_TYPE_MAP.interpretation]: {
     [INTERPRETATION_KIND_MAP.valueToMeaning]: ({ slotMap }) => `${slotMap.value} means ${slotMap.frame}`,
-    [INTERPRETATION_KIND_MAP.claimToValue]: ({ slotMap, maxWordCount }) => assembleClaimToValue({
-      slotMap, maxWordCount, language: CAPTION_LANGUAGE_MAP.en,
+    [INTERPRETATION_KIND_MAP.claimToValue]: ({ slotMap, maxWordCount, maxChars }) => assembleClaimToValue({
+      slotMap, maxWordCount, maxChars, language: CAPTION_LANGUAGE_MAP.en,
     }),
   },
   [NARRATION_TYPE_MAP.visualDescription]: {
     [VISUAL_DESCRIPTION_KIND_MAP.reaction]: ({ slotMap }) => (
       `Image: ${String(slotMap.description || '').replace(ENGLISH_IMAGE_PREFIX_PATTERN, '')}`
     ),
-    [VISUAL_DESCRIPTION_KIND_MAP.scale]: ({ slotMap }) => {
-      const scale = String(slotMap.scale || '').replace(ENGLISH_SCALE_SUFFIX_PATTERN, '');
-      return scale
-        ? `${slotMap.target}, ${scale} times ${slotMap.direction} than ${slotMap.comparison}`
-        : `${slotMap.target}, ${slotMap.direction} than ${slotMap.comparison}`;
-    },
+    [VISUAL_DESCRIPTION_KIND_MAP.scale]: ({ slotMap }) => slotMap.caption,
   },
   [NARRATION_TYPE_MAP.speakerIdentity]: {
     [SPEAKER_IDENTITY_KIND_MAP.named]: ({ slotMap }) => `${slotMap.speakerName} is speaking`,
@@ -620,41 +674,41 @@ function capitalizeFirst(text) {
   return text ? `${text[0].toUpperCase()}${text.slice(1)}` : text;
 }
 
-// 한국어 끝맺음 검사(자료 명사·조사·관형형)와 상황 칸 보정은 영어에 맞지 않아 쓰지 않는다. 빈 칸·수치 검사는 같다.
-function assembleEnglishNarration({ narrationType, subKind, rawSlotMap, index, origin, hasSecondClaim, maxWordCount }) {
+// 한국어 끝맺음 검사(자료 명사·조사·관형형)는 영어에 맞지 않아 쓰지 않는다. 빈 칸·수치 검사는 같다.
+function assembleEnglishNarration({ narrationType, subKind, rawSlotMap, index, origin, hasSecondClaim, maxWordCount, maxChars }) {
   const slotList = getSlotList({ narrationType, subKind, origin, hasSecondClaim, language: CAPTION_LANGUAGE_MAP.en });
   const assemble = ENGLISH_NARRATION_ASSEMBLE_MAP[narrationType]?.[subKind];
   if (!slotList || !assemble) return null;
-  const slotMap = normalizeEnglishSlotMap({ slotList, rawSlotMap });
+  const slotMap = normalizeEnglishSlotMap({ slotList, rawSlotMap: pairClaimSlot({ narrationType, subKind, rawSlotMap }) });
   if (hasEmptyRequiredSlot({ slotList, slotMap })) return null;
   if (hasValuelessSlot({ slotList, slotMap })) return null;
-  const joined = assemble({ slotMap, index, maxWordCount }).replace(/\s+/g, ' ').trim();
+  const joined = assemble({ slotMap, index, maxWordCount, maxChars }).replace(/\s+/g, ' ').trim();
   return { text: capitalizeFirst(dropRepeatedWordAtSeam({ text: joined })), slotMap };
 }
 
 function assembleNarration({ narrationType, subKind, rawSlotMap, index = '', origin = null,
-  hasSecondClaim = false, maxWordCount = null, language = CAPTION_LANGUAGE_MAP.ko }) {
+  hasSecondClaim = false, maxWordCount = null, maxChars = null, language = CAPTION_LANGUAGE_MAP.ko }) {
   if (language === CAPTION_LANGUAGE_MAP.en) {
     return assembleEnglishNarration({
-      narrationType, subKind, rawSlotMap, index, origin, hasSecondClaim, maxWordCount,
+      narrationType, subKind, rawSlotMap, index, origin, hasSecondClaim, maxWordCount, maxChars,
     });
   }
   const slotList = getSlotList({ narrationType, subKind, origin, hasSecondClaim });
   const assemble = NARRATION_ASSEMBLE_MAP[narrationType]?.[subKind];
   if (!slotList || !assemble) return null;
-  const slotMap = normalizeSlotMap({ slotList, rawSlotMap });
-  if (slotMap.situation) slotMap.situation = completeSituationSlot({ situation: slotMap.situation });
+  const slotMap = normalizeSlotMap({ slotList, rawSlotMap: pairClaimSlot({ narrationType, subKind, rawSlotMap }) });
   if (hasEmptyRequiredSlot({ slotList, slotMap })) return null;
   if (hasValuelessSlot({ slotList, slotMap })) return null;
   if (hasInvalidTailSlot({ slotList, slotMap })) return null;
-  const joined = assemble({ slotMap, index, maxWordCount }).replace(/\s+/g, ' ').trim();
+  const joined = assemble({ slotMap, index, maxWordCount, maxChars }).replace(/\s+/g, ' ').trim();
   return { text: dropRepeatedWordAtSeam({ text: joined }), slotMap };
 }
 
 module.exports = {
   NARRATION_SLOT_MAP, getSlotList, computeSlotTotal, buildSlotInstruction, DESCRIPTION_TAIL_NOUN_LIST, hasCompleteTailNoun,
   cutAtTailNoun,
-  normalizeSlotMap, hasEmptyRequiredSlot, hasValuelessSlot, hasValueToken, assembleNarration, countWord, truncateSlot,
+  normalizeSlotMap, pairTargetItemListWithValueList, hasEmptyRequiredSlot, hasValuelessSlot, hasValueToken, assembleNarration,
+  countWord, truncateSlot,
   trimToCompletePhrase, hasFinalConsonant, attachJosa, isWithinEnglishSlotLimit, SLOT_OVERAGE_TOLERANCE_WORD_COUNT,
   scaleWordBudget, ENGLISH_WORD_SCALE, trimEnglishDanglingTail,
 };

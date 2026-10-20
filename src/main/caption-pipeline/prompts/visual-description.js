@@ -5,6 +5,7 @@ const {
 } = require('../agents/shared/caption-parser');
 const { DEFAULT_CAPTION_LANGUAGE } = require('../contracts/caption-language');
 const { buildOutputLanguageRuleList } = require('./output-language-rule');
+const { buildScreenTextBlock, SCREEN_TEXT_USAGE_MAP } = require('./screen-text-block');
 
 const DEFAULT_VISUAL_WORD_RANGE_MAP = {
   [VISUAL_DESCRIPTION_KIND_MAP.reaction]: { minWordCount: 5, maxWordCount: 12 },
@@ -14,9 +15,18 @@ const DEFAULT_VISUAL_WORD_RANGE_MAP = {
 const ENGLISH_IMAGE_PREFIX_RULE = '머리말 "Image:"(이미지 제시)는 시스템이 붙이므로 description 에 넣지 마라.';
 const ENGLISH_MATERIAL_TAIL_RULE = 'description 은 자료 종류를 나타내는 영어 낱말(photo·chart·table·diagram·flowchart 등)로 끝맺는다.';
 
+// 척도 해설에 넣을 같은 화면 OCR 덩어리. 줄 고르기는 발화와 지시 구의 낱말을 본다. 줄이 없으면 빈 덩어리다.
+function buildScaleScreenTextBlock({ screenLineList = [], utterance = '', mergedAnchorList = [] }) {
+  return buildScreenTextBlock({
+    lineList: screenLineList,
+    keywordSourceList: [utterance || '', ...mergedAnchorList],
+    usage: SCREEN_TEXT_USAGE_MAP.scale,
+  });
+}
+
 function buildVisualDescriptionPrompt({ subKind = VISUAL_DESCRIPTION_KIND_MAP.reaction,
   utterance = '', recentTranscript = '', minWordCount, maxWordCount, maxChars = null,
-  describedElementList = [], mergedAnchorList = [], origin = null, language = DEFAULT_CAPTION_LANGUAGE }) {
+  describedElementList = [], mergedAnchorList = [], origin = null, screenLineList = [], language = DEFAULT_CAPTION_LANGUAGE }) {
   const defaultRange = DEFAULT_VISUAL_WORD_RANGE_MAP[subKind]
     || DEFAULT_VISUAL_WORD_RANGE_MAP[VISUAL_DESCRIPTION_KIND_MAP.reaction];
   const effectiveMinWordCount = Number.isFinite(minWordCount) ? minWordCount : defaultRange.minWordCount;
@@ -42,6 +52,7 @@ function buildVisualDescriptionPrompt({ subKind = VISUAL_DESCRIPTION_KIND_MAP.re
   ].filter(Boolean);
 
   if (isScale) {
+    const screenTextBlock = buildScaleScreenTextBlock({ screenLineList, utterance, mergedAnchorList });
     return [
       '이 이미지는 회의에서 공유 중인 화면이다.',
       `발표자가 방금 이렇게 말했다: "${(utterance || '').trim()}"`,
@@ -49,6 +60,8 @@ function buildVisualDescriptionPrompt({ subKind = VISUAL_DESCRIPTION_KIND_MAP.re
       mergedAnchorList.length
         ? `발표자가 지시한 표현: ${mergedAnchorList.join(', ')}. 이 대상이 무엇인지도 함께 밝혀라.`
         : '',
+      // 화면 글자 덩어리는 청자 줄 바로 앞에 빈 줄 하나를 두고 넣는다. 덩어리가 없으면 프롬프트는 글자 하나까지 그대로다.
+      screenTextBlock.text ? `${screenTextBlock.text}\n` : '',
       '',
       '청자는 화면을 볼 수 없다. 발표자는 크기·길이 등의 정도를 "크다·짧다" 같은 추상적 표현으로만 말했다.',
       '화면에서 **비교 대상**을 찾아 그 정도를 가늠할 수 있게 묘사하라.',
@@ -56,13 +69,15 @@ function buildVisualDescriptionPrompt({ subKind = VISUAL_DESCRIPTION_KIND_MAP.re
       '  · 좋은 비교 대상 = 듣기만 해도 크기·길이가 가늠되는 것.',
       '  예) "이 불상 보시면 정말 크죠?" + 사진에 소나무가 함께 있음 → "소나무보다 4배 정도 큰 불상"',
       '',
-      '형식(참고): (적절한 비교 대상으로 묘사하는 표현) + (그 대상).',
+      '형식(참고): caption 한 구에 (비교 대상과 견준 크기) + (그 대상)을 담는다.',
+      '  "○○보다 N배 큰 △△", "○○만 한 △△", "○○의 절반쯤 되는 △△"처럼 자연스럽게 견준다.',
       ...commonTailList,
       '· 화면에 실제로 보이는 것만 쓴다. 크기를 지어내지 않는다.',
-      `· **비교 대상을 찾을 수 없으면 "${GROUNDING_NONE_TOKEN}"만 출력한다.** 배수를 모르면 scale을 빈 문자열로 둔다.`,
+      `· **비교 대상을 찾을 수 없으면 "${GROUNDING_NONE_TOKEN}"만 출력한다.** 배수를 모르면 "○○보다 큰 △△"처럼 배수 없이 쓴다.`,
       ...buildOutputLanguageRuleList({
         language,
-        detailLineList: ['시스템이 "(target), 4 times larger than (comparison)" 꼴로 조립한다. direction 은 "larger" 또는 "smaller" 다.'],
+        detailLineList: ['caption 은 대상과 비교 대상을 견준 크기를 담은 자연스러운 영어 명사구로 쓴다'
+          + '(예: "a Buddha statue about four times taller than the pine tree"). 시스템은 caption 만 읽는다.'],
       }),
     ].filter(Boolean).join('\n');
   }
@@ -123,4 +138,4 @@ function buildVisualDescriptionPrompt({ subKind = VISUAL_DESCRIPTION_KIND_MAP.re
   ].filter(Boolean).join('\n');
 }
 
-module.exports = { buildVisualDescriptionPrompt, DEFAULT_VISUAL_WORD_RANGE_MAP };
+module.exports = { buildVisualDescriptionPrompt, buildScaleScreenTextBlock, DEFAULT_VISUAL_WORD_RANGE_MAP };

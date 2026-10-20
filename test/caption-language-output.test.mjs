@@ -107,10 +107,10 @@ test('칸 출력 형식: 영어는 영어 칸 설명·단어 수·NONE 꼴, 한�
   const korean = buildSlotOutputInstruction(option);
   assert.equal(buildSlotOutputInstruction({ ...option, language: 'ko' }), korean);
   const english = buildSlotOutputInstruction({ ...option, language: 'en' });
-  assert.match(english, /"target": the referenced item/);
-  assert.match(english, /"situation": short lead-in action phrase/);
-  assert.match(english, /"target": .* — 2–10 words/);
-  assert.match(english, /"situation": .* — 1–3 words/);
+  assert.match(english, /"seen": what is actually visible/);
+  assert.match(english, /"caption": the narration read to the listener/);
+  assert.match(english, /"seen": .* — 0–38 words/);
+  assert.match(english, /"caption": .* — 2–14 words/);
   assert.match(english, /NONE: \(reason\)/);
   assert.match(english, /Chinese characters/);
   assert.doesNotMatch(english, /조사|관형형|어절/);
@@ -137,13 +137,11 @@ test('칸 목록: 영어는 같은 칸 이름에 영어 설명, 단어 상한은
     const korean = getSlotList({ narrationType, subKind, ...extra });
     const english = getSlotList({ narrationType, subKind, ...extra, language: 'en' });
     assert.deepEqual(english.map(({ key, minWordCount, maxWordCount }) => ({ key, minWordCount, maxWordCount })),
-      korean.map(({ key, minWordCount, maxWordCount }) => (narrationType === NARRATION_TYPE_MAP.deixis && subKind === DEIXIS_FORM_MAP.simple && key === 'situation'
-        ? { key, minWordCount: 1, maxWordCount: 3 }
-        : { key, minWordCount, maxWordCount: Math.ceil(maxWordCount * ENGLISH_WORD_SCALE) })));
+      korean.map(({ key, minWordCount, maxWordCount }) => ({ key, minWordCount, maxWordCount: Math.ceil(maxWordCount * ENGLISH_WORD_SCALE) })));
     for (const slot of english) assert.ok(!HANGUL_PATTERN.test(slot.label), `${narrationType}/${subKind}/${slot.key} 영어 설명`);
   }
   const instruction = buildSlotInstruction({ slotList: getSlotList({ narrationType: NARRATION_TYPE_MAP.deixis, subKind: DEIXIS_FORM_MAP.complete, language: 'en' }), language: 'en' });
-  assert.match(instruction, /"sentence": .* — 6–19 words$/m);
+  assert.match(instruction, /"caption": .* — 2–19 words$/m);
   assert.match(instruction, /for the record/);
 });
 
@@ -172,33 +170,25 @@ test('영어 조립: 전환 슬라이드·페이지', () => {
   }), null);
 });
 
-test('영어 조립: 지시 단순형은 상황(머리 동작구) 뒤에 대상, 첫 글자는 대문자 / 완전형은 문장', () => {
+test('영어 조립: 지시는 단순형·완전형 모두 caption 만 읽고 첫 글자는 대문자다(seen 은 읽지 않는 근거 칸)', () => {
   assert.equal(assembleNarration({
     narrationType: NARRATION_TYPE_MAP.deixis, subKind: DEIXIS_FORM_MAP.simple,
-    rawSlotMap: { target: 'the two-year sales trend table', situation: 'looking at' }, ...en,
-  }).text, 'Looking at the two-year sales trend table');
-  // 한국어 상황 칸 보정("가리키" → "확인 중")은 영어에 쓰지 않는다.
-  assert.equal(assembleNarration({
-    narrationType: NARRATION_TYPE_MAP.deixis, subKind: DEIXIS_FORM_MAP.simple,
-    rawSlotMap: { target: 'Daejeon-Sejong expressway and 878km of national roads', situation: 'Pointing to' }, ...en,
-  }).text, 'Pointing to Daejeon-Sejong expressway and 878km of national roads');
+    rawSlotMap: { seen: 'two-year sales trend table', caption: 'the two-year sales trend table' }, ...en,
+  }).text, 'The two-year sales trend table');
   assert.equal(assembleNarration({
     narrationType: NARRATION_TYPE_MAP.deixis, subKind: DEIXIS_FORM_MAP.complete,
-    rawSlotMap: {
-      mimicry: 'the best', target: 'method E', explanation: 'one of five methods',
-      sentence: 'Method E is the best of the five methods',
-    }, ...en,
-  }).text, 'Method E is the best of the five methods');
+    rawSlotMap: { seen: 'method E, method B', caption: 'method E and method B' }, ...en,
+  }).text, 'Method E and method B');
 });
 
 test('영어 조립: 상한을 크게 넘긴 칸은 잘라 끝에 남은 관사·전치사를 뗀다', () => {
-  const slotList = getSlotList({ narrationType: NARRATION_TYPE_MAP.deixis, subKind: DEIXIS_FORM_MAP.simple, ...en });
+  const slotList = getSlotList({ narrationType: NARRATION_TYPE_MAP.interpretation, subKind: INTERPRETATION_KIND_MAP.claimToValue, ...en });
   const slotMap = normalizeSlotMap({
-    slotList, rawSlotMap: { target: 'the big chart of quarterly sales figures broken down by region and by the year', situation: 'Looking at' }, ...en,
+    slotList, rawSlotMap: { target: 'the big chart of quarterly sales figures broken down by region and by the year', value: '9.2 hours' }, ...en,
   });
-  // 상한 10단어 + 여유 2단어에서 잘라 "… region and" 이 되고, 끝에 남은 접속사 and 를 뗀다.
-  assert.equal(slotMap.target, 'the big chart of quarterly sales figures broken down by region');
-  assert.equal(slotMap.situation, 'Looking at');
+  // 상한 8단어 + 여유 2단어에서 잘라 "… broken down by" 가 되고, 끝에 남은 전치사 by 를 뗀다.
+  assert.equal(slotMap.target, 'the big chart of quarterly sales figures broken down');
+  assert.equal(slotMap.value, '9.2 hours');
 });
 
 test('영어 조립: 해석 값→의미는 "… means …", 주장→값은 "대상, 값" 쌍', () => {
@@ -225,7 +215,7 @@ test('영어 조립: 해석 값→의미는 "… means …", 주장→값은 "�
   }), null);
 });
 
-test('영어 조립: 시각 반응은 "Image:" 머리말(모델이 붙인 머리말은 떼고), 척도는 "…, N times larger than …"', () => {
+test('영어 조립: 시각 반응은 "Image:" 머리말(모델이 붙인 머리말은 떼고), 척도는 caption 한 구 그대로', () => {
   assert.equal(assembleNarration({
     narrationType: NARRATION_TYPE_MAP.visualDescription, subKind: VISUAL_DESCRIPTION_KIND_MAP.reaction,
     rawSlotMap: { description: 'Image: a starving child collapsed from exhaustion' }, ...en,
@@ -236,12 +226,8 @@ test('영어 조립: 시각 반응은 "Image:" 머리말(모델이 붙인 머리
   }).text, 'Image: a cat wearing a tiny crown');
   assert.equal(assembleNarration({
     narrationType: NARRATION_TYPE_MAP.visualDescription, subKind: VISUAL_DESCRIPTION_KIND_MAP.scale,
-    rawSlotMap: { comparison: 'the pine tree', scale: '4', direction: 'larger', target: 'the Buddha statue' }, ...en,
-  }).text, 'The Buddha statue, 4 times larger than the pine tree');
-  assert.equal(assembleNarration({
-    narrationType: NARRATION_TYPE_MAP.visualDescription, subKind: VISUAL_DESCRIPTION_KIND_MAP.scale,
-    rawSlotMap: { comparison: 'the pine tree', scale: '', direction: 'smaller', target: 'the Buddha statue' }, ...en,
-  }).text, 'The Buddha statue, smaller than the pine tree');
+    rawSlotMap: { caption: 'a Buddha statue about four times taller than the pine tree' }, ...en,
+  }).text, 'A Buddha statue about four times taller than the pine tree');
 });
 
 test('영어 조립: 발화자 이름·위치', () => {
@@ -259,9 +245,9 @@ test('영어 칸 해설 파싱: JSON 은 영어로 조립하고 NONE 은 거절�
   const option = {
     narrationType: NARRATION_TYPE_MAP.deixis, subKind: DEIXIS_FORM_MAP.simple, maxChars: 56, maxWordCount: 8, ...en,
   };
-  const parsed = parseSlotCaption({ ...option, content: '{"target":"the regional revenue bar chart","situation":"Comparing"}' });
+  const parsed = parseSlotCaption({ ...option, content: '{"seen":"regional revenue bars","caption":"the regional revenue bar chart"}' });
   assert.equal(parsed.isGrounded, true);
-  assert.equal(parsed.text, 'Comparing the regional revenue bar chart');
+  assert.equal(parsed.text, 'The regional revenue bar chart');
   const rejected = parseSlotCaption({ ...option, content: 'NONE: nothing readable where the pointer is' });
   assert.equal(rejected.isGrounded, false);
   assert.equal(rejected.rejectKind, 'none');
@@ -338,11 +324,11 @@ test('에이전트: 캡션 언어를 읽어 프롬프트·조립에 넘긴다(�
   const agentFieldMap = createAgentFieldMap({ config: vlmConfig, getCaptionLanguage: () => languageRef.value });
   const jpegBuffer = Buffer.from('x');
 
-  let promptList = mockVlm(['{"target":"the two-year sales trend table","situation":"Looking at"}']);
+  let promptList = mockVlm(['{"seen":"two-year sales trend table","caption":"the two-year sales trend table"}']);
   const deixis = await agentFieldMap[NARRATION_TYPE_MAP.deixis].generate({ jpegBuffer, utterance: '여기 보시면', subKind: DEIXIS_FORM_MAP.simple });
   assert.ok(promptList[0].includes(RULE_MARK));
-  assert.match(promptList[0], /2–10 words/);
-  assert.equal(deixis.text, 'Looking at the two-year sales trend table');
+  assert.match(promptList[0], /2–14 words/);
+  assert.equal(deixis.text, 'The two-year sales trend table');
 
   promptList = mockVlm(['{"value":"73%","frame":"year-over-year valuation growth rate"}']);
   const interpretation = await agentFieldMap[NARRATION_TYPE_MAP.interpretation].generate({
@@ -351,12 +337,12 @@ test('에이전트: 캡션 언어를 읽어 프롬프트·조립에 넘긴다(�
   assert.ok(promptList[0].includes(RULE_MARK));
   assert.equal(interpretation.text, '73% means year-over-year valuation growth rate');
 
-  promptList = mockVlm(['{"comparison":"the pine tree","scale":"4","direction":"larger","target":"the Buddha statue"}']);
+  promptList = mockVlm(['{"caption":"a Buddha statue about four times taller than the pine tree"}']);
   const scale = await agentFieldMap[NARRATION_TYPE_MAP.visualDescription].generate({
     jpegBuffer, subKind: VISUAL_DESCRIPTION_KIND_MAP.scale, utterance: '정말 크죠',
   });
   assert.ok(promptList[0].includes(RULE_MARK));
-  assert.equal(scale.text, 'The Buddha statue, 4 times larger than the pine tree');
+  assert.equal(scale.text, 'A Buddha statue about four times taller than the pine tree');
 
   promptList = mockVlm(['The horizontal axis is the year and the vertical axis is revenue in billions of won.']);
   const command = await agentFieldMap[NARRATION_TYPE_MAP.userCommand].generate({ jpegBuffer, command: USER_COMMAND_MAP.graphAxis });
@@ -369,12 +355,12 @@ test('에이전트: 캡션 언어를 읽어 프롬프트·조립에 넘긴다(�
   assert.equal(speaker.text, 'The participant at the top left is speaking');
 
   languageRef.value = 'ko';
-  promptList = mockVlm(['{"target":"2년간 매출 추이 표를","situation":"보는 중"}']);
+  promptList = mockVlm(['{"seen":"2년간 매출 추이 표","caption":"2년간 매출 추이 표"}']);
   const korean = await agentFieldMap[NARRATION_TYPE_MAP.deixis].generate({ jpegBuffer, utterance: '여기 보시면', subKind: DEIXIS_FORM_MAP.simple });
   assert.ok(!promptList[0].includes(RULE_MARK));
-  assert.equal(korean.text, '2년간 매출 추이 표를 보는 중');
+  assert.equal(korean.text, '2년간 매출 추이 표');
 
-  promptList = mockVlm(['{"target":"2년간 매출 추이 표를","situation":"보는 중"}']);
+  promptList = mockVlm(['{"seen":"2년간 매출 추이 표","caption":"2년간 매출 추이 표"}']);
   await createAgentFieldMap({ config: vlmConfig })[NARRATION_TYPE_MAP.deixis].generate({ jpegBuffer, utterance: '여기 보시면' });
   assert.ok(!promptList[0].includes(RULE_MARK));
 });
