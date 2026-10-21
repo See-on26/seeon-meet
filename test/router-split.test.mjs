@@ -95,7 +95,12 @@ test('단순 수치는 발표자가 고른 항목이나 뒤 발화가 댄 항목
   const speechList = ROUTER_PROMPT_MAP[JUDGE_GROUP_MAP.speech].fewShotList;
   assert.ok(findContrastPair({ exampleList: speechList, type: 'number', isNamed: (after) => /와셔 쪽/.test(after) }), '뒤 발화 항목 이름 짝');
   assert.ok(speechList.some((example) => example.input.candidateList[0].type === 'number' && example.output.judgeList[0].gap === 'X'
-    && /Linwood is the one/.test(example.input.before) && example.input.before.includes(example.output.judgeList[0].evidence)), '발표자가 고른 항목 X 예시');
+    && /last meeting/.test(example.input.before) && example.input.before.includes(example.output.judgeList[0].evidence)
+    && !/board asked/.test(example.input.before) && !/^Um\b/.test(example.input.utterance)), '지난 회의에서 정한 범위로 고른 항목 X 예시');
+  const numberOList = speechList.filter((example) => example.input.candidateList[0].type === 'number' && example.output.judgeList[0].gap === 'O'
+    && /와셔/.test(example.input.before));
+  assert.equal(numberOList.length, 1);
+  assert.equal(numberOList[0].input.after.includes(','), false, '세는 방법만 말하는 뒤 발화는 한 절이다');
 });
 
 // 척도 유형 이름의 "추상적"을 "추상적인 대상이면 O"로 읽어, 생각·가능성·기간처럼 사진에 찍히지 않는 주어에도 O 를 주는 오탐을 줄인다.
@@ -111,12 +116,13 @@ test('추상적 척도는 주어가 눈으로 볼 수 있는 것인지 먼저 �
   assert.ok(scaleXList.some((example) => /deadlines/.test(example.input.utterance)), '영어 기간 주어 X 예시');
 });
 
-// "범위"를 생각 쪽 주어로 한정한다. 사진·지도 속 대상이 퍼진 범위는 보이는 대상이라 O 가 남아야 한다.
-test('추상적 척도의 "범위"는 선호·의견·이론의 범위만 X 로 보고, 사진·지도 속 대상이 퍼진 범위는 보이는 대상으로 둔다', () => {
+// 범위·폭·다양성은 낱말이 아니라 그 범위를 가진 것이 눈에 보이는지로 가린다. 생각·선택·권한의 폭은 X, 사진·지도에 보이는 것이 퍼진 넓이는 O 가 될 수 있다.
+test('추상적 척도의 범위·폭·다양성은 그 범위를 가진 것이 눈에 보이는지로 가린다', () => {
   const speechPrompt = ROUTER_PROMPT_MAP[JUDGE_GROUP_MAP.speech].systemPrompt;
-  assert.match(speechPrompt, /선호·의견·이론의 범위·다양성/);
-  assert.match(speechPrompt, /사진·지도 속 대상이 퍼진 범위·넓이는 보이는 대상이다\(O\)/);
-  assert.doesNotMatch(speechPrompt, /가능성·위험, 범위·다양성/);
+  assert.match(speechPrompt, /범위·폭·다양성은 그 범위를 가진 것이 눈에 보이는지로 가린다/);
+  assert.match(speechPrompt, /생각·선택·권한처럼 보이지 않으면 X/);
+  assert.match(speechPrompt, /사진·지도에 보이는 것이 퍼진 넓이면 O 가 될 수 있다/);
+  for (const phrase of ['선호·의견·이론', '대상이 퍼진 범위', '보이는 대상이다(O)']) assert.equal(speechPrompt.includes(phrase), false, phrase);
 });
 
 // 같은 앞 문맥·뒤 문맥에서 트리거 문장의 대상만 다른 변화 예시 쌍. 앞 문맥에 값이 있는 대상이면 X, 이름만 있고 값이 없는 대상이면 O 다.
@@ -140,6 +146,8 @@ test('변화·비교·결론은 그 대상의 앞뒤 값이 앞 문맥에 이미
   const pairLeft = findSubjectContrastPair(ROUTER_PROMPT_MAP[JUDGE_GROUP_MAP.speech].fewShotList);
   assert.ok(pairLeft, '트리거 대상만 다른 X/O 변화 예시 짝');
   assert.ok(pairLeft.input.before.includes(pairLeft.input.utterance.split(' ')[0]), 'X 예시의 트리거 대상 낱말이 앞 문맥 이름과 같다');
+  assert.match(pairLeft.input.before, /아직 정리 전/, 'O 짝 대상은 값이 없다는 뜻만 남긴다');
+  assert.doesNotMatch(pairLeft.input.before, /다음 주에 끝나요/);
 });
 
 // 근거를 옮길 때 순서를 바꾸거나 두 곳을 합쳐 써서 코드 확인(not_in_context)에 걸려 O 로 뒤집히는 일을 줄인다.
