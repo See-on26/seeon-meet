@@ -127,7 +127,7 @@ async function runVisualAgent({ content, ...generateOption }) {
 
 test('척도 에이전트: OCR 줄을 프롬프트에 넣고, 실제로 들어간 양을 기록용으로 돌려준다', async () => {
   const { result, promptList } = await runVisualAgent({
-    content: '{"comparison":"옆 30층 건물","scale":"","direction":"큰","target":"전망대"}',
+    content: '{"caption":"옆 30층 건물보다 높은 120m 전망대"}',
     subKind: SCALE, utterance: '저 전망대 정말 높죠', screenLineList,
   });
   assert.equal(promptList.length, 1);
