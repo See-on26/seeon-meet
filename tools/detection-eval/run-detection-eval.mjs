@@ -5,7 +5,7 @@
 //   --lang ko|en · --type <유형> · --limit N · --concurrency N · --out <결과 JSON 경로> · --show-miss N
 //   --outside-labels <JSON> : 트리거 문장 안 정답 밖 후보의 라벨([{ key: "<id>@<시작>-<끝>", label: "O"|"X" }]).
 //     주면 판단기가 그 위치에 낸 O/X 도 혼동표에 더한다("정답 밖" 줄과 전체). 없으면 정답 후보만 센다.
-// 판단 LLM 은 앱과 같은 설정(.env 의 SEEON_JUDGE_*)을 쓴다. 평가 계획상 판단 LLM 은 평가 데이터를 만든 모델과 다른 계열(GPU Qwen)이어야 한다.
+// 판단 LLM 은 앱과 같은 설정(.env 의 SEEON_JUDGE_*)을 쓴다. 평가 계획상 판단 LLM 은 평가 데이터를 만든 모델(Claude·GPT)과 다른 계열(GPU Gemma)이어야 한다.
 import fs from 'node:fs';
 import path from 'node:path';
 import { createRequire } from 'node:module';

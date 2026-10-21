@@ -12,7 +12,7 @@ test('한자(중국어 글자)가 섞였는지 가린다', () => {
   assert.equal(containsHanCharacter('Q4 sales, 182 million won'), false);
 });
 
-test('VLM 해설에 한자가 섞이면 내보내지 않는다(Qwen 이 "중식"을 "中式"으로 바꿔 쓴 실제 사례)', () => {
+test('VLM 해설에 한자가 섞이면 내보내지 않는다(옛 VLM(Qwen)이 "중식"을 "中式"으로 바꿔 쓴 실제 사례)', () => {
   const content = '{"description": "한식 5명 양식 10명 일식 5명中式 10명 막대그래프"}';
   const result = parseSlotCaption({ content, narrationType: 'visual_description', subKind: 'reaction', maxChars: 80, maxWordCount: 12 });
   assert.equal(result.isGrounded, false);

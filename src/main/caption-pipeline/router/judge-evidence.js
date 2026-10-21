@@ -1,7 +1,7 @@
 const { TRIGGER_TYPE_MAP } = require('../trigger/speech-trigger');
 
 // 판단 LLM 이 단순 수치·변화·형용사 + 지시 명사 후보를 X(공백 아님)로 볼 때 옮겨 적은 근거 구절을 코드로 확인한다.
-// 9B 판단기는 비교 대상·후보 목록만 있거나 트리거 문장 자체를 근거로 들며 X 를 주는 일이 많아(재현율 50~70%대),
+// 판단기가 비교 대상·후보 목록만 있거나 트리거 문장 자체를 근거로 들며 X 를 주는 일이 있어(옛 판단기 Qwen3.5-9B 는 재현율 50~70%대),
 // 근거가 실제 발화에 있고 그 유형에 맞는 내용(변화는 수량, 수치는 무엇의 수치인지)을 담을 때만 X 를 믿는다.
 const EVIDENCE_TYPE_LIST = [TRIGGER_TYPE_MAP.number, TRIGGER_TYPE_MAP.change, TRIGGER_TYPE_MAP.adjectiveNoun];
 
