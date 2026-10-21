@@ -1027,7 +1027,7 @@ function registerPipeline({ getViewerView, meetingArchive = null }) {
       const agent = agentFieldMap[narrationType] || agentFieldMap[NARRATION_TYPE_MAP.deixis];
       const {
         text: generatedText, isGrounded, slotMap, rejectKind = null, rejectReason = '', rawContent = '',
-        screenTextBlock = null,
+        screenTextBlock = null, appliedBudget = null,
       } = await agent.generate({
         ...generatorArgs, ...(extraArgByTypeMap[narrationType] || {}),
       });
@@ -1083,12 +1083,13 @@ function registerPipeline({ getViewerView, meetingArchive = null }) {
           });
           return { isOk: true, isGrounded: false };
         }
-        // 둘째 변화의 값이 화면에 없으면 둘째 쌍만 빼고 첫 쌍으로 읽는다.
+        // 둘째 변화의 값이 화면에 없으면 둘째 쌍만 빼고 첫 쌍으로 읽는다. 첫 쌍은 에이전트가 쓴 전체 예산에 다시 맞춘다.
         if (slotMap.value2 && text.includes(slotMap.value2)) {
           const secondVerdict = await verifyValueOnSlide(slotMap.value2);
           if (secondVerdict.verdict === VALUE_PRESENCE_VERDICT_MAP.absent) {
             const firstPair = assembleNarration({
               narrationType, subKind: selectedCandidate?.subKind, rawSlotMap: { ...slotMap, target2: '', value2: '' },
+              maxWordCount: appliedBudget?.maxWordCount, maxChars: appliedBudget?.maxChars,
               language: getCaptionLanguage(),
             });
             markDebug({
