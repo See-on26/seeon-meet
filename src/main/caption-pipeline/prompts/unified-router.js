@@ -55,24 +55,32 @@ const CRITERIA_LINE_MAP = {
     `· ${TRIGGER_TYPE_LABEL_MAP[TRIGGER_TYPE_MAP.adjectiveNoun]}(빨간 쪽, 싼 거, 어두운 부분, the red one):`,
     '  어느 것을 말하는지 앞뒤 발화로 알 수 없다.',
     '  후보마다 그 성질의 값(폭·무게·건수·온도·금액 등)을 짝지어 모두 말했으면 값을 비교해 고를 수 있으므로 X 다.',
+    '  값 대신 그 성질을 드러내는 말(밝기를 알 수 있는 색 이름 등)을 후보마다 짝지었어도 비교해 고를 수 있으면 X 다.',
     '  값이 일부 후보에만 있거나 어느 후보의 값인지 짝이 없으면("B와 C 중 하나는 90") O 다.',
+    '  "두 후보의 크기는 서로 다르다", "색깔을 나눠 칠해 두었다"처럼 다르다는 것·표시 방식만 말하면 어느 것인지 정해지지 않았다. 뒤 발화도 이름을 대지 않으면 O 다.',
     '  뒤 발화에서 그것의 이름·표시를 대면("2번 시안이요", "I mean model K") 그 성질을 다시 말하지 않았어도 X 다.',
+    '  앞에서 "두 후보의 그 성질이 서로 다르다"고만 했어도 마찬가지다. 이름이 다른 안내 뒤에 짧게 붙거나, 적어 달라·요청한다는 말에 이름이 붙어 있어도 그것이 발표자가 고른 것이다.',
+    '  이름을 댔는데 "그 이름이 그 성질을 가졌다고 말하지 않았다"며 O 로 하지 마라. 다만 "이름을 적어 두세요"처럼 실제 이름 없이 안내만 있으면 근거가 아니다.',
   ],
   [TRIGGER_TYPE_MAP.number]: [
     `· ${TRIGGER_TYPE_LABEL_MAP[TRIGGER_TYPE_MAP.number]}(30%, 12.5톤, 64 people): 무엇의 수치인지 밝히지 않았다.`,
-    '  앞에서 항목을 여럿 말했는데 그중 어느 것의 값인지 말하지 않았으면 O 다.',
-    '  "기록·결과·단가·숫자 하나"처럼 값의 종류만 있고 무엇을 세거나 잰 값인지 없으면 O 다.',
+    '  앞에서 항목을 여럿 말했는데 앞에서도 뒤에서도 그중 어느 것의 값인지 말하지 않았으면 O 다.',
+    '  "기록·결과·단가·숫자 하나"처럼 값의 종류만 있고 무엇을 세거나 잰 값인지 없으면 O 다. 앞뒤 발화가 항목을 정하지 않았다면 값이 적힌 곳(장부·기록표·칸)만 말한 것도 O 다.',
   ],
   [TRIGGER_TYPE_MAP.change]: [
     `· ${TRIGGER_TYPE_LABEL_MAP[TRIGGER_TYPE_MAP.change]}(올랐다, 더 높다, ~보다 낫다, 결국 감소했다, went down):`,
     '  무엇이 얼마에서 얼마로 바뀌었는지(비교면 양쪽 값이) 발화에 없다. 대상의 이름만 있고 값이 없으면 O 다.',
     '  값이 나와야 X 다.',
+    '  그 대상의 바뀌기 전·후 값(비교면 양쪽 값)이 앞 문맥에 이미 나왔으면 트리거 문장이 값을 다시 말하지 않아도 X 다. 값이 다른 대상의 것이거나 한쪽만 있으면 O 다.',
   ],
   [TRIGGER_TYPE_MAP.scale]: [
     `· ${TRIGGER_TYPE_LABEL_MAP[TRIGGER_TYPE_MAP.scale]}(꽤 넓죠, 정말 크죠, really big): 화면에 보이는 대상(사진 속 물체, 지도 위 지역,`,
     '  그래프의 막대, 사람 수)의 정도를 "크다·넓다"로만 말했고 실제 정도가 발화에 없다.',
+    '  먼저 "크다·많다·짧다"의 주어(무엇이 큰가·많은가)를 찾는다. 주어가 눈으로 볼 수 있는 사물·구역·사람·막대일 때만 O 가 될 수 있다.',
     '  시간·부담·느낌·소리·난이도처럼 화면으로 볼 수 없는 성질이 주어면 정도가 없어도 X 다.',
-    '  실제 정도가 앞뒤 발화에 숫자로 나오면("4.8km", "26개") "크다·많다"라고 말했어도 X 다.',
+    '  기간·남은 시간, 생각·감정(의견·걱정·불만), 가능성·위험, 선호·의견·이론의 범위·다양성, 일의 양·영향처럼 사진에 찍히지 않는 것도 같다. 다만 사진·지도 속 대상이 퍼진 범위·넓이는 보이는 대상이다(O).',
+    '  유형 이름의 "추상적"은 정도를 말로만 했다는 뜻이다. "추상적인 표현이라 수치가 없다"는 O 의 이유가 아니다.',
+    '  실제 정도가 앞뒤 발화에 숫자로 나오면("4.8km", "26개") "크다·많다"라고 말했어도 X 다. 앞 문맥 앞쪽에 나온 숫자도 그 대상의 값이면 된다.',
   ],
 };
 
@@ -86,6 +94,7 @@ const EVIDENCE_LINE_MAP = {
   [TRIGGER_TYPE_MAP.number]: [
     `· ${TRIGGER_TYPE_LABEL_MAP[TRIGGER_TYPE_MAP.number]}: 그 수치가 무엇을 세거나 잰 값인지 밝힌 구절. 여럿 가운데 어느 것인지 모르면("세 지점 중 하나") 근거가 아니다.`,
     '  "요청하신 숫자", "맨 위 숫자", "the number I want to flag"처럼 숫자를 가리키기만 하고 무엇을 센 값인지 말하지 않으면 근거가 아니다.',
+    '  발표자가 다룰 항목을 이름으로 고른 구절("오늘은 B만 볼게요")이나 뒤 발화에서 항목 이름을 댄 구절도 근거다.',
   ],
   [TRIGGER_TYPE_MAP.change]: [
     `· ${TRIGGER_TYPE_LABEL_MAP[TRIGGER_TYPE_MAP.change]}: 바뀐 값이나 비교한 양쪽 값을 밝힌 구절(숫자·수량이 들어 있다). 비교 대상의 이름만 있으면 근거가 아니다.`,
@@ -101,6 +110,8 @@ function buildEvidenceLineList(typeList) {
     '',
     `── ${evidenceTypeList.map((type) => TRIGGER_TYPE_LABEL_MAP[type]).join('·')}의 근거 인용 ──`,
     `이 ${COUNT_WORD_LIST[evidenceTypeList.length]}유형을 X 로 판단하려면 근거 구절을 "evidence" 에 발화에서 글자 그대로 옮겨 적는다. 옮길 구절이 없으면 O 다.`,
+    // 코드는 근거가 발화에 글자 그대로 있는지 확인한다(judge-evidence.js). 순서를 바꾸거나 두 곳을 합쳐 쓰면 확인에 걸려 O 로 뒤집힌다.
+    '근거는 발화의 한 구절을 순서·낱말을 바꾸지 않고 그대로 옮긴다. 떨어진 두 곳이 필요하면 각 구절을 그대로 옮겨 "…"로 잇는다.',
     ...evidenceTypeList.flatMap((type) => EVIDENCE_LINE_MAP[type]),
     '후보 구 자체는 근거가 아니다. 다른 유형이나 O 판단은 evidence 를 빈 문자열로 둔다.',
   ];
@@ -113,7 +124,8 @@ const REFERENCE_LINE_MAP = {
     '── 지시 대상 원칙 (가장 자주 틀린다) ──',
     '지시 표현이 앞뒤 발화에 언급된 것 **하나**와 이어지면, 그것의 이름·내용을 밝히지 않았어도 X 다.',
     '  예) "워크숍 장소는 어제 정했다고 들었어요. … 거기가 주차가 안 돼서" → X (워크숍 장소)',
-    '앞에서 여럿을 말했어도 그중 **하나에만** 붙은 말이 있고("B만 ~다", "B로 정했다", "B는 이미 승인됐다", "only B has …") 지시 문장이 그 말과 맞으면 지시는 그 하나다 → X. 짚은 것이 둘 이상이면 O 다.',
+    '앞에서 여럿을 말했어도 그중 **하나에만** 붙은 말이 있고("B만 ~다", "B로 정했다", "B는 이미 승인됐다", "오늘은 B를 다룬다", "only B has …", "we will focus on B") 지시 문장이 그 말과 맞으면 지시는 그 하나다 → X. 짚은 것이 둘 이상이면 O 다.',
+    '  "만·뿐·only"가 없어도 여럿 중 하나만 결과·상태가 달랐다고 말했으면(하나만 목표를 넘겼다, 하나만 효과가 없었다) 같다. 여럿을 나란히 말하기만 했으면 O 다.',
     '뒤 발화가 대상을 밝히면 앞에 후보가 여럿이었어도 X 다. 머뭇거림·다른 말 뒤에 나오거나 문장 끝에 덧붙여도 된다("…, 어, 평택 공장이요", "…, um, the north lot").',
     'O 는 이을 만한 언급이 전혀 없거나, 후보가 여럿인데 앞에서도 뒤에서도 어느 것인지 말하지 않을 때만이다.',
     '  예) 세 지역을 나란히 말한 뒤 "그 지역만큼은" → O',
@@ -130,6 +142,10 @@ const REFERENCE_LINE_MAP = {
     '  예) "지난달 실적은 … 총 12.5톤입니다" → X (지난달 실적의 값)',
     'O 는 이을 만한 언급이 전혀 없거나, 후보가 여럿인데 어느 것인지 말하지 않을 때만이다.',
     '  예) 세 지역을 나란히 말한 뒤 "거기 매출이 4,200만 원" → O',
+    '앞에서 항목을 여럿 나열했어도 아래 둘 중 하나면 그 항목의 값이다 → X.',
+    '  · 발표자가 지금 다룰 항목 하나를 이름으로 골랐다("오늘은 B만 볼게요", "B부터 말씀드리겠습니다", "B가 논의 대상입니다").',
+    '  · 뒤 발화가 다른 말 뒤에라도 그 수치가 어느 항목의 값인지 이름을 댔다("…, B 건수입니다", "…, it\'s the B figure").',
+    '  이름 없이 "셋 중 하나만 보겠다"고 하거나, 뒤 발화가 어떻게 셌는지·어디서 뽑았는지·어느 범위의 값인지만 말하면 어느 항목인지 정해지지 않았다 → O.',
     '"보시는 것처럼", "화면에" 같은 말이 있다는 것만으로 O 로 판단하지 마라. 발화로 대상·값을 알 수 있는지만 본다.',
   ],
 };
@@ -236,6 +252,17 @@ const ALL_FEW_SHOT_LIST = [
   },
   {
     input: {
+      before: '어제 포장 라인 기계 점검 결과가 나왔는데, 1호기랑 3호기는 기준 안이었고 2호기는 소음이 기준을 넘었어요.',
+      utterance: '수리 기사님께는 그 기계부터 봐 달라고 했습니다.',
+      after: '부품은 이번 주 안에 들어온대요.',
+      candidateList: [
+        { id: 1, type: TRIGGER_TYPE_MAP.demonstrative, phrase: '그 기계' },
+      ],
+    },
+    output: { judgeList: [{ id: 1, gap: 'X', evidence: '', reason: '세 대 중 혼자 기준을 넘었다고 짚은 2호기를 가리킨다' }] },
+  },
+  {
+    input: {
       before: '두 업체 견적을 받았는데요, 동양물산은 840만 원, 한빛은 1,020만 원입니다.',
       utterance: '저는 싼 쪽으로 가고 싶어요.',
       after: '납기는 둘 다 같거든요.',
@@ -319,6 +346,28 @@ const ALL_FEW_SHOT_LIST = [
   },
   {
     input: {
+      before: '조별 불량률은 주간조 4.6%, 야간조 2.1%까지만 나왔고 주말조 집계는 다음 주에 끝나요.',
+      utterance: '야간조 불량률이 주간조보다 낮았네요.',
+      after: '라인 배치는 그대로 갑니다.',
+      candidateList: [
+        { id: 1, type: TRIGGER_TYPE_MAP.change, phrase: '주간조보다 낮았네요' },
+      ],
+    },
+    output: { judgeList: [{ id: 1, gap: 'X', evidence: '주간조 4.6%, 야간조 2.1%까지만 나왔고', reason: '앞 문맥에서 야간조 2.1%, 주간조 4.6%로 양쪽 값을 밝혔다' }] },
+  },
+  {
+    input: {
+      before: '조별 불량률은 주간조 4.6%, 야간조 2.1%까지만 나왔고 주말조 집계는 다음 주에 끝나요.',
+      utterance: '주말조 불량률이 주간조보다 낮았네요.',
+      after: '라인 배치는 그대로 갑니다.',
+      candidateList: [
+        { id: 1, type: TRIGGER_TYPE_MAP.change, phrase: '주간조보다 낮았네요' },
+      ],
+    },
+    output: { judgeList: [{ id: 1, gap: 'O', evidence: '', reason: '앞 문맥의 값은 주간조·야간조 것이고 주말조 불량률은 발화에 없다' }] },
+  },
+  {
+    input: {
       before: 'We track three wait times at the clinic: check-in, triage, and the doctor visit.',
       utterance: 'This month it averaged 14 minutes.',
       after: "Let's see if we can bring that down next month.",
@@ -374,6 +423,39 @@ const ALL_FEW_SHOT_LIST = [
   },
   {
     input: {
+      before: '창고 점검표에 볼트, 너트, 와셔 수량이 다 들어 있는데요.',
+      utterance: '모자라는 게 340개예요.',
+      after: '와셔 쪽 부족분이고, 나머지 둘은 넉넉합니다.',
+      candidateList: [
+        { id: 1, type: TRIGGER_TYPE_MAP.number, phrase: '340개' },
+      ],
+    },
+    output: { judgeList: [{ id: 1, gap: 'X', evidence: '와셔 쪽 부족분이고', reason: '세 부품 중 와셔의 부족분이라고 뒤 발화에서 밝혔다' }] },
+  },
+  {
+    input: {
+      before: '창고 점검표에 볼트, 너트, 와셔 수량이 다 들어 있는데요.',
+      utterance: '모자라는 게 340개예요.',
+      after: '어제 오후에 두 사람이 나눠서 센 거고, 다시 세 봐도 같았습니다.',
+      candidateList: [
+        { id: 1, type: TRIGGER_TYPE_MAP.number, phrase: '340개' },
+      ],
+    },
+    output: { judgeList: [{ id: 1, gap: 'O', evidence: '', reason: '세 부품 중 어느 것의 부족분인지 말하지 않았고 뒤 발화는 센 방법만 말했다' }] },
+  },
+  {
+    input: {
+      before: 'Of our three pilot schools, Linwood is the one the board asked about, so that is where I will start.',
+      utterance: 'Um, 91 percent of their students passed the reading check.',
+      after: 'The full table is in the appendix.',
+      candidateList: [
+        { id: 1, type: TRIGGER_TYPE_MAP.number, phrase: '91 percent' },
+      ],
+    },
+    output: { judgeList: [{ id: 1, gap: 'X', evidence: 'Linwood is the one the board asked about, so that is where I will start', reason: '세 학교 중 다룰 곳으로 Linwood 를 골랐다' }] },
+  },
+  {
+    input: {
       before: '로고 시안을 두 개 만들었어요.',
       utterance: '저는 파란 쪽이 마음에 들어요.',
       after: '다들 어떠세요?',
@@ -407,6 +489,50 @@ const ALL_FEW_SHOT_LIST = [
   },
   {
     input: {
+      before: '이번 전시 때 동관하고 서관 중에 한 곳을 신제품 자리로 쓰기로 했어요.',
+      utterance: '조명이 밝은 쪽에 신제품을 놓으면 눈에 잘 띌 것 같아요.',
+      after: '아, 서관 말이에요, 천장 조명을 지난달에 새로 갈았거든요.',
+      candidateList: [
+        { id: 1, type: TRIGGER_TYPE_MAP.adjectiveNoun, phrase: '밝은 쪽' },
+      ],
+    },
+    output: { judgeList: [{ id: 1, gap: 'X', evidence: '서관 말이에요', reason: '어느 곳이 밝은지 앞에서 말하지 않았지만 뒤 발화에서 서관이라고 이름을 댔다' }] },
+  },
+  {
+    input: {
+      before: '이번 전시 때 동관하고 서관 중에 한 곳을 신제품 자리로 쓰기로 했어요.',
+      utterance: '조명이 밝은 쪽에 신제품을 놓으면 눈에 잘 띌 것 같아요.',
+      after: '아, 천장 조명을 지난달에 새로 갈았다고 들었거든요.',
+      candidateList: [
+        { id: 1, type: TRIGGER_TYPE_MAP.adjectiveNoun, phrase: '밝은 쪽' },
+      ],
+    },
+    output: { judgeList: [{ id: 1, gap: 'O', evidence: '', reason: '두 곳 중 어느 곳이 밝은지 앞뒤 발화에 없다' }] },
+  },
+  {
+    input: {
+      before: 'Two desk lamps showed up at the studio this morning, an Arlo and a Bexa.',
+      utterance: 'The lighter one should go up on the wall bracket.',
+      after: "Bexa's the one I mean, and the other can stay on the desk.",
+      candidateList: [
+        { id: 1, type: TRIGGER_TYPE_MAP.adjectiveNoun, phrase: 'The lighter one' },
+      ],
+    },
+    output: { judgeList: [{ id: 1, gap: 'X', evidence: "Bexa's the one I mean", reason: '뒤 발화에서 Bexa 라고 이름을 댔다' }] },
+  },
+  {
+    input: {
+      before: 'Two desk lamps showed up at the studio this morning, an Arlo and a Bexa.',
+      utterance: 'The lighter one should go up on the wall bracket.',
+      after: 'The other can stay on the desk for now.',
+      candidateList: [
+        { id: 1, type: TRIGGER_TYPE_MAP.adjectiveNoun, phrase: 'The lighter one' },
+      ],
+    },
+    output: { judgeList: [{ id: 1, gap: 'O', evidence: '', reason: '두 램프 중 어느 것이 가벼운지 앞뒤 발화에 없다' }] },
+  },
+  {
+    input: {
       before: '현장 사진 한 장 띄워 두었습니다.',
       utterance: '음, 침수된 구역이 꽤 넓죠.',
       after: '복구에만 몇 달이 걸릴 것 같습니다.',
@@ -437,6 +563,28 @@ const ALL_FEW_SHOT_LIST = [
       ],
     },
     output: { judgeList: [{ id: 1, gap: 'X', evidence: '', reason: '대기 시간은 화면으로 볼 수 있는 대상이 아니다' }] },
+  },
+  {
+    input: {
+      before: '새 근무 제도 설명회를 지난주에 열었습니다.',
+      utterance: '설명회 끝나고 나서 호응이 정말 컸어요.',
+      after: '세부 지침은 다음 달에 나옵니다.',
+      candidateList: [
+        { id: 1, type: TRIGGER_TYPE_MAP.scale, phrase: '정말 컸어요' },
+      ],
+    },
+    output: { judgeList: [{ id: 1, gap: 'X', evidence: '', reason: '호응은 반응·감정이라 화면으로 볼 수 있는 대상이 아니다' }] },
+  },
+  {
+    input: {
+      before: 'We just got the schedule for both grant reports.',
+      utterance: 'And honestly, there is a really short gap between the two deadlines.',
+      after: 'I would start drafting the first one this week.',
+      candidateList: [
+        { id: 1, type: TRIGGER_TYPE_MAP.scale, phrase: 'really short' },
+      ],
+    },
+    output: { judgeList: [{ id: 1, gap: 'X', evidence: '', reason: '두 마감 사이의 기간은 시간이라 화면으로 볼 수 있는 대상이 아니다' }] },
   },
   {
     input: {
