@@ -64,8 +64,7 @@ function buildVisualDescriptionPrompt({ subKind = VISUAL_DESCRIPTION_KIND_MAP.re
         : null,
       '',
       // 화면 글자 덩어리는 청자 줄 바로 앞에 빈 줄 하나를 두고 넣는다. 덩어리가 없으면 프롬프트는 글자 하나까지 그대로다.
-      screenTextBlock.text ? `${screenTextBlock.text}
-` : null,
+      screenTextBlock.text ? `${screenTextBlock.text}\n` : null,
       '청자는 화면을 볼 수 없다. 발표자는 크기·양을 "크다·엄청 많다" 같은 말로만 했다. 정보 공백 판단은 끝났다.',
       '할 일: 그 대상의 크기를 화면 속 기준과 견주거나, 측정값이면 값으로 한 구에 담는다.',
       '· 대상은 지금 발화가 크다고 한 것이다. 앞 발화에 마지막으로 나온 다른 이름을 새 대상으로 바꾸지 않는다.',
