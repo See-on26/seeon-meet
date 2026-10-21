@@ -1,14 +1,17 @@
-// 수치 해설 프롬프트에 넣는 "같은 화면을 OCR 로 읽은 글자" 덩어리. 값·항목 이름의 철자를 확인하는 보조이고,
-// 어느 값이 어느 항목의 것인지는 이미지에서 정하게 한다(OCR 줄은 같은 높이의 다른 칸을 한 줄로 이을 수 있다).
+// 수치·척도 해설 프롬프트에 넣는 "같은 화면을 OCR 로 읽은 글자" 덩어리. 이름·값의 철자를 확인하는 보조이고,
+// 어느 글자가 어느 대상의 것인지는 이미지에서 정하게 한다(OCR 줄은 같은 높이의 다른 칸을 한 줄로 이을 수 있다).
 const { GROUNDING_NONE_TOKEN } = require('../agents/shared/caption-parser');
 
 // 글자 많은 화면도 약 450~500토큰 안에 묶이는 상한. OCR 글자는 글자당 0.65~0.84토큰이다.
 const SCREEN_TEXT_MAX_CHARS = 600;
 
-const SCREEN_TEXT_HEADER_LINE_LIST = [
-  '참고: 아래는 같은 화면을 글자 인식기(OCR)로 읽은 글자다. 위에서 아래 순서이고, 같은 높이에 있는 다른 칸의 글자가 한 줄로 이어졌을 수 있다.',
-  '  값·항목 이름의 철자는 여기서 확인하되, 어느 값이 어느 항목의 것인지는 반드시 이미지에서 확인한다. 이미지와 다르면 이미지를 따른다.',
-];
+// 덩어리를 받는 해설. 둘째 안내 줄만 다르다 — 수치는 값·항목 이름을, 척도는 대상·비교 대상 이름과 적힌 크기 값을 확인한다.
+const SCREEN_TEXT_USAGE_MAP = { value: 'value', scale: 'scale' };
+const SCREEN_TEXT_INTRO_LINE = '참고: 아래는 같은 화면을 글자 인식기(OCR)로 읽은 글자다. 위에서 아래 순서이고, 같은 높이에 있는 다른 칸의 글자가 한 줄로 이어졌을 수 있다.';
+const SCREEN_TEXT_USAGE_LINE_MAP = {
+  [SCREEN_TEXT_USAGE_MAP.value]: '  값·항목 이름의 철자는 여기서 확인하되, 어느 값이 어느 항목의 것인지는 반드시 이미지에서 확인한다. 이미지와 다르면 이미지를 따른다.',
+  [SCREEN_TEXT_USAGE_MAP.scale]: '  대상·비교 대상의 이름과 화면에 적힌 크기·길이 값은 여기서 확인하되, 어느 글자가 어느 대상의 것인지는 반드시 이미지에서 확인한다. 이미지와 다르면 이미지를 따른다.',
+};
 const QUOTE_FENCE = '"""';
 
 const HANGUL_PATTERN = /[가-힣]/;
@@ -115,13 +118,15 @@ function selectScreenTextLineList({ lineList, keywordSourceList = [], maxChars =
 }
 
 // isClaimToValue: 변화·비교(claim_to_value)이면 숫자 줄이 있을 때 "수치 없음" 거절을 막는 문장을 붙인다.
-// 값→의미에는 붙이지 않고, 말한 수가 적힌 줄을 짚어 주지도 않는다(줄이 섞이면 엉뚱한 줄을 짚는다).
-function buildScreenTextBlock({ lineList, keywordSourceList = [], isClaimToValue = false, maxChars = SCREEN_TEXT_MAX_CHARS }) {
+// 값→의미·척도에는 붙이지 않고, 말한 수가 적힌 줄을 짚어 주지도 않는다(줄이 섞이면 엉뚱한 줄을 짚는다).
+function buildScreenTextBlock({ lineList, keywordSourceList = [], isClaimToValue = false,
+  usage = SCREEN_TEXT_USAGE_MAP.value, maxChars = SCREEN_TEXT_MAX_CHARS }) {
   const selectedList = selectScreenTextLineList({ lineList, keywordSourceList, maxChars });
   if (!selectedList.length) return { text: '', lineCount: 0, charCount: 0, numberLineCount: 0 };
   const numberLineCount = selectedList.filter((text) => DIGIT_PATTERN.test(text)).length;
   const blockLineList = [
-    ...SCREEN_TEXT_HEADER_LINE_LIST,
+    SCREEN_TEXT_INTRO_LINE,
+    SCREEN_TEXT_USAGE_LINE_MAP[usage] || SCREEN_TEXT_USAGE_LINE_MAP[SCREEN_TEXT_USAGE_MAP.value],
     QUOTE_FENCE, ...selectedList, QUOTE_FENCE,
     isClaimToValue && numberLineCount
       ? `화면 글자에 숫자가 있는 줄이 ${numberLineCount}개 있다. 그 숫자가 발표자가 말한 대상과 관련 있으면 "화면에 수치가 없다"는 이유로 ${GROUNDING_NONE_TOKEN} 을 내지 않는다.`
@@ -136,5 +141,5 @@ function buildScreenTextBlock({ lineList, keywordSourceList = [], isClaimToValue
 }
 
 module.exports = {
-  buildScreenTextBlock, selectScreenTextLineList, extractKeywordList, SCREEN_TEXT_MAX_CHARS,
+  buildScreenTextBlock, selectScreenTextLineList, extractKeywordList, SCREEN_TEXT_MAX_CHARS, SCREEN_TEXT_USAGE_MAP,
 };

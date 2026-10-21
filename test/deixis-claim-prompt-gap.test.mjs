@@ -15,16 +15,17 @@ test('지시 대상 프롬프트는 발화를 다시 판단하지 않고 화면 
     const prompt = buildGroundingPrompt({ utterance: '', maxChars: 60, subKind });
     assert.match(prompt, /발화가 무엇을 말했는지 다시 따지지 말고/, subKind);
     assert.match(prompt, /가리킨 대상을 화면에서 특정할 수 없다/, subKind);
-    assert.match(prompt, /"이미 안내된" 목록에 같은 대상/, subKind);
+    assert.doesNotMatch(prompt, /이미 안내/, subKind);
     assert.match(prompt, /대상의 이름.*화면에서 읽어 반드시 밝힌다/, subKind);
-    assert.match(prompt, /발화 모사.*화면에 없어도 된다/, subKind);
+    assert.doesNotMatch(prompt, /발화 모사/, subKind);
     assert.doesNotMatch(prompt, /발화가 대상의 내용까지|이름 글자가 발화에|진행 발화|문장이 끊겼|\(다\)/, subKind);
   }
 });
 
-test('지시 대상 프롬프트는 슬라이드 주제만 안내된 것을 대상과 겹친다고 보지 않는다', () => {
+// 앞선 해설 목록을 주면 그 해설의 이름·연도를 이번 화면 해설에 옮겨 적는다. 겹친 해설은 재생 전 중복 거르기가 맡는다.
+test('지시 대상 프롬프트는 이미 안내된 해설 목록을 모델에 보이지 않는다', () => {
   const prompt = buildGroundingPrompt({ utterance: '', maxChars: 60, subKind: 'simple', describedElementList: ['슬라이드 1: 지점 현황'] });
-  assert.match(prompt, /목록이 슬라이드 주제만 말했다면 그 안의 대상은 아직 안내되지 않은 것이다/);
+  assert.doesNotMatch(prompt, /지점 현황/);
 });
 
 test('수치 프롬프트는 발표자가 이미 말했다는 이유로 거절하지 않는다', () => {
@@ -145,7 +146,7 @@ test('지시 프롬프트·에이전트는 OCR 줄을 받지 않는다', async (
   const promptList = [];
   globalThis.fetch = async (_url, option) => {
     promptList.push(JSON.stringify(JSON.parse(option.body)));
-    return { ok: true, status: 200, json: async () => ({ choices: [{ message: { content: '{"target":"제주 지역","situation":"가리키며"}' } }] }) };
+    return { ok: true, status: 200, json: async () => ({ choices: [{ message: { content: '{"seen":"제주 지역","caption":"제주 지역"}' } }] }) };
   };
   try {
     await createDeixisResolutionAgent({ config: { vlmUrl: 'http://x', vlmModel: 'm', bedrockApiKey: '' } }).generate({

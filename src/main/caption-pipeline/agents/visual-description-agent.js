@@ -5,7 +5,7 @@ const {
 const { requestVlmContent } = require('./shared/vlm-gateway');
 const { scaleWordBudget } = require('./shared/narration-format');
 const {
-  buildVisualDescriptionPrompt, DEFAULT_VISUAL_WORD_RANGE_MAP,
+  buildVisualDescriptionPrompt, buildScaleScreenTextBlock, DEFAULT_VISUAL_WORD_RANGE_MAP,
 } = require('../prompts/visual-description');
 const { DEFAULT_CAPTION_LANGUAGE } = require('../contracts/caption-language');
 const { NARRATION_ORIGIN_MAP } = require('../contracts/narration-class');
@@ -28,7 +28,7 @@ const VISUAL_DESCRIPTION_TEMPERATURE = 0.3;
 function createVisualDescriptionAgent({ config, getCaptionLanguage = () => DEFAULT_CAPTION_LANGUAGE }) {
   async function generate({ jpegBuffer, subKind = VISUAL_DESCRIPTION_KIND_MAP.reaction,
     utterance = '', recentTranscript = '', minWordCount, maxWordCount,
-    describedElementList = [], mergedAnchorList = [], origin = null, language = getCaptionLanguage() }) {
+    describedElementList = [], mergedAnchorList = [], origin = null, screenLineList = [], language = getCaptionLanguage() }) {
     const defaultRange = DEFAULT_VISUAL_WORD_RANGE_MAP[subKind]
       || DEFAULT_VISUAL_WORD_RANGE_MAP[VISUAL_DESCRIPTION_KIND_MAP.reaction];
     // 렌더러의 어절 예산을 캡션 언어의 단어 수로 바꾼다(영어는 상한을 ENGLISH_WORD_SCALE 배로, 한국어는 그대로). 받지 못한 값은 기본 범위를 바꾼다.
@@ -43,14 +43,18 @@ function createVisualDescriptionAgent({ config, getCaptionLanguage = () => DEFAU
       config, jpegBuffer, label: AGENT_LABEL, temperature: VISUAL_DESCRIPTION_TEMPERATURE, maxTokens: SLOT_AGENT_MAX_TOKENS,
       prompt: buildVisualDescriptionPrompt({
         subKind, utterance, recentTranscript, minWordCount, maxWordCount,
-        maxChars: effectiveMaxChars, describedElementList, mergedAnchorList, origin, language,
+        maxChars: effectiveMaxChars, describedElementList, mergedAnchorList, origin, screenLineList, language,
       }),
     });
-    return parseSlotCaption({
+    const parsed = parseSlotCaption({
       content: wrapPlainSilenceContent({ content, origin }),
       narrationType: NARRATION_TYPE_MAP.visualDescription, subKind, origin,
       maxChars: effectiveMaxChars, maxWordCount: effectiveMaxWordCount, language,
     });
+    if (subKind !== VISUAL_DESCRIPTION_KIND_MAP.scale) return parsed;
+    // 척도는 프롬프트에 실제로 들어간 화면 글자 양을 기록용으로 함께 돌려준다.
+    const { lineCount, charCount, numberLineCount } = buildScaleScreenTextBlock({ screenLineList, utterance, mergedAnchorList });
+    return { ...parsed, screenTextBlock: { lineCount, charCount, numberLineCount } };
   }
 
   return { generate };

@@ -48,8 +48,10 @@ const { createOcrClient } = require('./agents/shared/ocr-client');
 const { createSlideTextStore } = require('./orchestrator/slide-text-store');
 const { verifyValuePresence, VALUE_PRESENCE_VERDICT_MAP, VALUE_CHECK_SOURCE_MAP } = require('./orchestrator/value-presence');
 const {
-  createScreenTextGrounding, shouldStartScreenTextGrounding, finalizeScreenTextRecord, formatScreenTextSummary,
+  createScreenTextGrounding, shouldStartScreenTextGrounding, isScreenTextNarrationType, finalizeScreenTextRecord,
+  formatScreenTextSummary,
 } = require('./orchestrator/screen-text-grounding');
+const { resolveDeixisFrameSet } = require('./orchestrator/deixis-frame-set');
 const { createContextStore, toSlideMajor, LABEL_STATUS_MAP } = require('./context/context-store');
 const { createSlideLabeler } = require('./context/slide-labeler');
 const { createContextFileWriter } = require('./context/context-file');
@@ -232,7 +234,7 @@ function registerPipeline({ getViewerView, meetingArchive = null }) {
   const slideTextAgent = createSlideTextAgent({
     config, ocrClient, getBackend: () => sessionSlideTextBackend,
   });
-  // 수치 해설 근거 OCR 은 「화면 글자 읽기」 설정과 상관없이 돈다(그 설정은 슬라이드 전사 엔진만 고른다).
+  // 수치·척도 해설 근거 OCR 은 「화면 글자 읽기」 설정과 상관없이 돈다(그 설정은 슬라이드 전사 엔진만 고른다).
   const screenTextGrounding = createScreenTextGrounding({
     ocrClient, isEnabled: () => config.isScreenTextGroundingEnabled,
   });
@@ -880,7 +882,7 @@ function registerPipeline({ getViewerView, meetingArchive = null }) {
     }
   });
 
-  ipcMain.handle('pipeline-deixis', async (_event, { ts, buffer, utterance, recentTranscript, beforeTranscript, afterTranscript, hasPointingRegion, pointingOrderHint, slideLabel, wordBudgetMap, eventVideoTimeMs = null, triggerCandidateList = [] }) => {
+  ipcMain.handle('pipeline-deixis', async (_event, { ts, buffer, fullBuffer = null, utterance, recentTranscript, beforeTranscript, afterTranscript, hasPointingRegion, pointingOrderHint, slideLabel, wordBudgetMap, eventVideoTimeMs = null, triggerCandidateList = [] }) => {
     let stage = PIPELINE_STAGE_MAP.judge;
     const startedAt = Date.now();
     const hasAnySpeech = [utterance, beforeTranscript, afterTranscript, recentTranscript]
@@ -920,9 +922,10 @@ function registerPipeline({ getViewerView, meetingArchive = null }) {
     const beforeText = typeof beforeTranscript === 'string' ? beforeTranscript : (recentTranscript || '');
     const afterText = typeof afterTranscript === 'string' ? afterTranscript : '';
     try {
-      // 수치 해설이 될 수 있는 요청이면 판단 LLM 과 함께 같은 프레임의 OCR 을 시작한다. 수치 해설이 아니면 결과를 버린다.
-      const screenTextTask = isRouterMode && shouldStartScreenTextGrounding({ triggerCandidateList })
-        ? screenTextGrounding.start({ jpegBuffer: Buffer.from(buffer) })
+      const frameSet = resolveDeixisFrameSet({ buffer, fullBuffer });
+      // 수치·척도 해설이 될 수 있는 요청이면 판단 LLM 과 함께 같은 프레임의 OCR 을 시작한다. 수치·척도 해설이 아니면 결과를 버린다.
+      const screenTextTask = isRouterMode && shouldStartScreenTextGrounding({ triggerCandidateList, isScaleEnabled: config.isScaleEnabled })
+        ? screenTextGrounding.start({ jpegBuffer: frameSet.screenFrame })
         : null;
       let judgeReason = null;
       let selectedCandidate = null;
@@ -999,14 +1002,14 @@ function registerPipeline({ getViewerView, meetingArchive = null }) {
       stage = PIPELINE_STAGE_MAP.vlm;
 
       const narrationType = selectedCandidate?.type || NARRATION_TYPE_MAP.deixis;
-      // 수치 해설이면 판단 뒤 상한까지만 OCR 을 기다려 그 줄을 근거로 넘긴다. 늦거나 없으면 덩어리 없이(지금 프롬프트로) 만든다.
-      const screenText = narrationType === NARRATION_TYPE_MAP.interpretation && screenTextTask
+      // 수치·척도 해설이면 판단 뒤 상한까지만 OCR 을 기다려 그 줄을 근거로 넘긴다. 늦거나 없으면 덩어리 없이(지금 프롬프트로) 만든다.
+      const screenText = isScreenTextNarrationType(narrationType) && screenTextTask
         ? await screenTextTask.waitForPrompt()
         : null;
 
       const wordBudget = wordBudgetMap?.[narrationType] || null;
       const generatorArgs = {
-        jpegBuffer: Buffer.from(buffer), utterance, recentTranscript, describedElementList,
+        jpegBuffer: frameSet.selectAgentFrame(narrationType), utterance, recentTranscript, describedElementList,
         minWordCount: wordBudget?.minWordCount, maxWordCount: wordBudget?.maxWordCount,
         subKind: selectedCandidate?.subKind || null,
         mergedAnchorList: selectedCandidate?.mergedAnchorList || [],
@@ -1016,6 +1019,7 @@ function registerPipeline({ getViewerView, meetingArchive = null }) {
       const extraArgByTypeMap = {
         [NARRATION_TYPE_MAP.visualDescription]: {
           subKind: selectedCandidate?.subKind || VISUAL_DESCRIPTION_KIND_MAP.scale,
+          screenLineList: screenText?.lineList || [],
         },
         [NARRATION_TYPE_MAP.deixis]: { hasPointingRegion, pointingOrderHint },
         [NARRATION_TYPE_MAP.interpretation]: { screenLineList: screenText?.lineList || [] },
@@ -1023,7 +1027,7 @@ function registerPipeline({ getViewerView, meetingArchive = null }) {
       const agent = agentFieldMap[narrationType] || agentFieldMap[NARRATION_TYPE_MAP.deixis];
       const {
         text: generatedText, isGrounded, slotMap, rejectKind = null, rejectReason = '', rawContent = '',
-        screenTextBlock = null,
+        screenTextBlock = null, appliedBudget = null,
       } = await agent.generate({
         ...generatorArgs, ...(extraArgByTypeMap[narrationType] || {}),
       });
@@ -1056,7 +1060,7 @@ function registerPipeline({ getViewerView, meetingArchive = null }) {
           utterance, contextText: [beforeText, afterText].filter(Boolean).join(' '),
           subKind: selectedCandidate?.subKind || INTERPRETATION_KIND_MAP.valueToMeaning,
           // 값이 없다고 나오면 지금 화면을 OCR 과 다른 엔진(VLM)으로 다시 읽어, 클릭으로 나타난 값과 OCR 오독을 함께 거른다.
-          retranscribe: () => slideTextAgent.transcribeWithVlm({ jpegBuffer: Buffer.from(buffer) }),
+          retranscribe: () => slideTextAgent.transcribeWithVlm({ jpegBuffer: frameSet.screenFrame }),
         });
         const valueVerdict = await verifyValueOnSlide(slotMap.value);
         const verdictByValueMap = {
@@ -1079,12 +1083,13 @@ function registerPipeline({ getViewerView, meetingArchive = null }) {
           });
           return { isOk: true, isGrounded: false };
         }
-        // 둘째 변화의 값이 화면에 없으면 둘째 쌍만 빼고 첫 쌍으로 읽는다.
+        // 둘째 변화의 값이 화면에 없으면 둘째 쌍만 빼고 첫 쌍으로 읽는다. 첫 쌍은 에이전트가 쓴 전체 예산에 다시 맞춘다.
         if (slotMap.value2 && text.includes(slotMap.value2)) {
           const secondVerdict = await verifyValueOnSlide(slotMap.value2);
           if (secondVerdict.verdict === VALUE_PRESENCE_VERDICT_MAP.absent) {
             const firstPair = assembleNarration({
               narrationType, subKind: selectedCandidate?.subKind, rawSlotMap: { ...slotMap, target2: '', value2: '' },
+              maxWordCount: appliedBudget?.maxWordCount, maxChars: appliedBudget?.maxChars,
               language: getCaptionLanguage(),
             });
             markDebug({

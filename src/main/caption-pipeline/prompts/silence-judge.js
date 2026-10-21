@@ -13,8 +13,11 @@ const SILENCE_JUDGE_SYSTEM_PROMPT = [
   `cue=true (${SILENCE_REASON_MAP.presenting}): 침묵 바로 앞 마지막 문장이 화면의 사진·영상·그래프·표·자료를 보라고 명시적으로 이끈 경우만.`,
   '  예: "이 사진을 한번 보시죠", "화면을 보세요", "잠시 이 영상 같이 보시겠습니다", "표를 잠깐 읽어 보시죠",',
   '      "Take a look at the chart", "Have a look at this photo", "Let\'s watch this clip".',
+  '  보라는 대상이 눈으로 볼 자료(화면·슬라이드·사진·영상·그래프·표·지도·도면)여야 한다. 카메라에 비춘 실물을 보라는 말은 화면 자료와 같다. 바로 앞 문장에서 화면에 띄웠다고 한 것을 "한번 보시죠"로 받아도 된다.',
   '  "보다·look"이 들어가도 화면을 보라는 뜻이 아니면 단서가 아니다(아래 no_cue):',
   '      "들어 보시죠", "생각해 보시죠", "잠깐 기다려 보세요", "한번 해 보죠", "look into", "let\'s hear", "think it over", "look forward to".',
+  '  "보다·see·look"이 생각·이해·관점을 뜻하면 단서가 아니다: 알아보자·두고 보자("see if …", "we\'ll see"), 알겠다·이해했는지 묻기("I see", "you see", "see what I mean"), 여기다·생각해 보자("look at A as B", "look at it this way"), 관점("~의 입장에서 보다", "from where I stand"), 뜻이 맞다("see eye to eye").',
+  '  귀·손·몸으로 하는 활동도 단서가 아니다: 녹음·음성·소리를 틀어 주며 들어 보라고 해도 듣는 것이다. 손으로 하는 활동(만지기·쥐어 보기·접어 보기)이나 몸으로 따라 하는 활동도 화면을 보라는 말이 아니다.',
   'cue=false — 아래는 모두 차단한다:',
   `  · ${SILENCE_REASON_MAP.ending}: 발표·발언을 끝맺는 말 뒤의 침묵 ("이상입니다", "감사합니다", "That's all for today").`,
   `  · ${SILENCE_REASON_MAP.hesitation}: 문장이 끊기거나 "음·어"처럼 말을 고르는 중인 침묵.`,
@@ -47,6 +50,14 @@ const SILENCE_FEW_SHOT_LIST = [
     output: { cue: false, reason: SILENCE_REASON_MAP.noCue } },
   { input: { transcript: "Okay, so the next item is, um, uh...", silenceMs: 6000 },
     output: { cue: false, reason: SILENCE_REASON_MAP.hesitation } },
+  { input: { transcript: '지난주에 받은 항의 전화 녹음인데요, 바로 틀 테니까 말투를 잘 들어 보세요.', silenceMs: 9000 },
+    output: { cue: false, reason: SILENCE_REASON_MAP.noCue } },
+  { input: { transcript: 'The client left a voicemail on Friday, and I\'m putting it on the speakers now, so just listen to her tone.', silenceMs: 10000 },
+    output: { cue: false, reason: SILENCE_REASON_MAP.noCue } },
+  { input: { transcript: 'Honestly, I\'m not sure the new onboarding steps will stick, but we can see if anyone complains.', silenceMs: 7000 },
+    output: { cue: false, reason: SILENCE_REASON_MAP.noCue } },
+  { input: { transcript: '두 원단 중 어느 쪽이 더 부드러운지 손으로 직접 만져 보면서 골라 주세요.', silenceMs: 8000 },
+    output: { cue: false, reason: SILENCE_REASON_MAP.noCue } },
 ];
 
 function buildSilenceJudgeInput({ transcript, silenceMs }) {

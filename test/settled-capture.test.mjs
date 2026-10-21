@@ -65,9 +65,10 @@ test('질문·명령·지시 해설·전환 고지 캡처는 자리 잡기를 �
     assert.ok(start >= 0, name);
     return source.slice(start, source.indexOf('\n}\n', start));
   };
-  assert.match(source, /captureWhenSettled\(\{\s*isSettling: \(\) => roiStore\.isLayoutSettling\(\),\s*capture: \(\) => captureFrameJpeg\(subRegion\),\s*\}\)/);
+  assert.match(source, /captureWhenSettled\(\{\s*isSettling: \(\) => roiStore\.isLayoutSettling\(\),\s*capture: \(\) => captureFrameJpeg\(\),\s*\}\)/);
+  assert.match(source, /captureWhenSettled\(\{\s*isSettling: \(\) => roiStore\.isLayoutSettling\(\),\s*capture: \(\) => captureDeixisFrameSet\(/);
   assert.match(readBody('requestAnswer'), /await captureFrameJpegWhenSettled\(\);/);
-  assert.match(readBody('runDeixisDecision'), /captureFrameJpegWhenSettled\(firedDecision\.region\)/);
+  assert.match(readBody('runDeixisDecision'), /captureDeixisFrameSetWhenSettled\(firedDecision\.region\)/);
   assert.match(readBody('requestPageTransitionNarration'), /await captureFrameJpegWhenSettled\(\);/);
   assert.doesNotMatch(readBody('handleSilenceTrigger'), /WhenSettled/);
 });
