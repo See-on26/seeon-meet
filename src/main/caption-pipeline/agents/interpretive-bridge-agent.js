@@ -40,6 +40,8 @@ function createInterpretiveBridgeAgent({ config, getCaptionLanguage = () => DEFA
         maxChars: effectiveMaxChars, maxWordCount, hasSecondClaim: mergedClaimList.length > 0, language,
       }),
       screenTextBlock: { lineCount, charCount, numberLineCount },
+      // 둘째 값이 화면에 없어 첫 쌍만 다시 조립할 때도 같은 전체 예산으로 줄이도록, 실제로 쓴 예산(언어 배율 적용값)을 돌려준다.
+      appliedBudget: { maxWordCount, maxChars: effectiveMaxChars },
     };
   }
 

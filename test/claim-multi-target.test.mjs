@@ -1,5 +1,6 @@
 import { test, afterEach } from 'node:test';
 import assert from 'node:assert/strict';
+import fs from 'node:fs';
 import { createRequire } from 'node:module';
 
 const require = createRequire(import.meta.url);
@@ -82,6 +83,41 @@ test('수치 에이전트는 둘째 변화를 프롬프트·칸에 싣고 두 �
   assert.equal(result.text, '첫 응답 시간, 9.2시간에서 3.1시간. 고객 만족도, 72점에서 88점');
   assert.equal(result.slotMap.value2, '72점에서 88점');
   assert.match(JSON.stringify(requestBodyList[0]), /target2/);
+});
+
+// 둘째 값이 화면에 없으면 main 이 둘째 쌍을 비우고 첫 쌍만 다시 조립한다. 예산 없이 다시 조립하면
+// 에이전트가 줄였던 첫 쌍("신규 가입자, 서울 1,200명, 부산 800명")이 칸 그대로 길게 되살아난다.
+test('수치 에이전트는 실제로 쓴 전체 예산(언어 배율 적용값)을 돌려주고, 첫 쌍만 다시 조립할 때 그 예산으로 줄인다', async () => {
+  globalThis.fetch = async () => {
+    const content = JSON.stringify({
+      target: '올해 상반기 신규 가입자', value: '서울 1,200명, 부산 800명, 대구 500명', target2: '탈퇴 회원', value2: '90명에서 40명',
+    });
+    return { ok: true, status: 200, json: async () => ({ choices: [{ message: { content } }] }) };
+  };
+  const generateArgs = {
+    jpegBuffer: Buffer.from('x'), utterance: '가입자가 늘었습니다. 탈퇴는 줄었습니다.', subKind: 'claim_to_value',
+    minWordCount: 2, maxWordCount: 6, mergedClaimList: ['탈퇴는 줄었습니다'],
+  };
+  const korean = await createInterpretiveBridgeAgent({ config: vlmConfig }).generate(generateArgs);
+  assert.deepEqual(korean.appliedBudget, { maxWordCount: 6, maxChars: 30 });
+  const english = await createInterpretiveBridgeAgent({ config: vlmConfig, getCaptionLanguage: () => 'en' }).generate(generateArgs);
+  assert.deepEqual(english.appliedBudget, { maxWordCount: 12, maxChars: 84 });
+
+  const reassemble = (budget) => assembleNarration({
+    narrationType: 'interpretation', subKind: 'claim_to_value', rawSlotMap: { ...korean.slotMap, target2: '', value2: '' }, ...budget,
+  }).text;
+  assert.equal(reassemble({}), '올해 상반기 신규 가입자, 서울 1,200명, 부산 800명, 대구 500명', '예산 없이 다시 조립하면 길게 되살아난다');
+  assert.equal(reassemble(korean.appliedBudget), '신규 가입자, 서울 1,200명, 부산 800명');
+});
+
+test('main 은 둘째 값이 화면에 없어 첫 쌍만 다시 조립할 때 에이전트가 쓴 전체 예산을 넘긴다', () => {
+  const source = fs.readFileSync(new URL('../src/main/caption-pipeline/index.js', import.meta.url), 'utf8');
+  const start = source.indexOf('const firstPair = assembleNarration({');
+  assert.ok(start >= 0);
+  const call = source.slice(start, source.indexOf('});', start));
+  assert.match(call, /maxWordCount: appliedBudget\?\.maxWordCount/);
+  assert.match(call, /maxChars: appliedBudget\?\.maxChars/);
+  assert.match(source, /appliedBudget = null,?\s*\} = await agent\.generate\(/);
 });
 
 // 실험실 A-2: 모델이 둘째 변화를 첫 값 칸에 몰아넣어("첫 응답 시간 9.2시간에서 3.1시간, 고객 만족도 72점에서 88점")
