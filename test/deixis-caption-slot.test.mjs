@@ -32,6 +32,16 @@ test('지시 해설은 caption 만 읽고 동작 말을 붙이지 않으며, cap
   assert.equal(result.slotMap.situation, undefined);
 });
 
+// 상황 칸("보는 중")이 빠진 뒤 caption 끝에 목적격 조사가 남으면 "…추이 표를"처럼 말이 끊겨 들린다.
+test('지시 caption 끝 어절의 목적격 조사(을/를)는 떼고, 낱말의 일부인 "을"은 남긴다', () => {
+  assert.equal(deixis('simple', { seen: '2년간 매출 추이 표', caption: '2년간 매출 추이 표를' }).text, '2년간 매출 추이 표');
+  assert.equal(deixis('simple', { seen: '본관 앞 석탑', caption: '본관 앞 삼층 석탑을' }).text, '본관 앞 삼층 석탑');
+  assert.equal(deixis('complete', { seen: '매출 표, 인원 그래프', caption: '매출 표, 인원 그래프를' }).text, '매출 표, 인원 그래프');
+  for (const caption of ['바닷가 작은 마을', '붉게 물든 저녁노을', '지난해 가을']) {
+    assert.equal(deixis('simple', { seen: caption, caption }).text, caption, caption);
+  }
+});
+
 test('지시 caption 이 상한을 넘으면 끝을 맺을 수 있는 데서 자른다', () => {
   const caption = '본관 1층 안내 데스크, 2층 회의실, 3층 강당과 4층 식당이 표시된 층별 안내도';
   const text = deixis('simple', { seen: '층별 안내도', caption }).text;

@@ -29,6 +29,17 @@ test('척도 해설은 caption 을 그대로 읽는다(배수·"만 한"·"절�
   assert.equal(scale({ comparison: '소나무', scale: '4', direction: '큰', target: '불상' }), null, '옛 네 칸 답은 만들지 않는다');
 });
 
+// 크기 묘사 caption 도 홀로 읽히므로 끝 어절의 목적격 조사가 남으면 "…큰 불상을"처럼 말이 끊겨 들린다.
+test('척도 caption 끝 어절의 목적격 조사(을/를)는 떼고, 다른 유형의 칸은 그대로 둔다', () => {
+  assert.equal(scale({ caption: '소나무보다 4배 정도 큰 불상을' }).text, '소나무보다 4배 정도 큰 불상');
+  assert.equal(scale({ caption: '버스 두 대만 한 고래를' }).text, '버스 두 대만 한 고래');
+  assert.equal(scale({ caption: '축구장 절반쯤 되는 마을' }).text, '축구장 절반쯤 되는 마을');
+  const reaction = assembleNarration({
+    narrationType: 'visual_description', subKind: 'reaction', rawSlotMap: { description: '웃으며 손을 흔드는 아이를' },
+  });
+  assert.equal(reaction.text, '이미지 제시, 웃으며 손을 흔드는 아이를');
+});
+
 test('척도 caption 이 상한을 넘으면 끝을 맺을 수 있는 데서 자른다', () => {
   const caption = '오른쪽에 함께 찍힌 3층짜리 학교 건물보다 두 배쯤 높은 시계탑';
   const text = scale({ caption }).text;

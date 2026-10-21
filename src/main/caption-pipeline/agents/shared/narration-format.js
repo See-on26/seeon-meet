@@ -137,6 +137,17 @@ function trimToCompletePhrase({ text, isConservative = false }) {
   return wordList.join(' ').replace(TRAILING_MARK_PATTERN, '');
 }
 
+// 뒤에 동작 말 없이 홀로 읽는 칸(지시·척도 caption)이 목적격 조사로 끝나면 "…추이 표를"처럼 말이 끊겨 들린다.
+// 끝 어절의 을/를을 떼되, 앞 글자의 받침과 맞는 조사만 뗀다("마을"·"노을"의 '을'은 낱말의 일부라 남긴다).
+const TAIL_OBJECT_PARTICLE_PATTERN = /^(.*\S)(을|를)$/;
+
+function dropTailObjectParticle(text) {
+  const match = String(text || '').match(TAIL_OBJECT_PARTICLE_PATTERN);
+  if (!match) return text;
+  const [, stem, particle] = match;
+  return hasFinalConsonant({ text: stem }) === (particle === '을') ? stem : text;
+}
+
 // 지시 해설은 가리킨 대상의 이름·내용(caption)만 읽는다. "보는 중" 같은 상황 말은 청자에게 정보가 아니라 두지 않는다.
 // seen 은 가리킨 곳에 보이는 것을 먼저 옮겨 적게 해 지어내기를 줄이는 근거 칸이다(읽히지 않는다).
 // caption 상한은 상황 칸을 둘 때의 칸 합과 같다(단순형: 대상 5 + 상황 2, 완전형: 문장 10).
@@ -157,14 +168,14 @@ const NARRATION_SLOT_MAP = {
   [NARRATION_TYPE_MAP.deixis]: {
     [DEIXIS_FORM_MAP.simple]: [
       DEIXIS_SEEN_SLOT,
-      { key: 'caption', label: '청자에게 읽어 줄 해설 — 가리킨 대상의 이름·내용, 자료 종류(표·사진 등)까지 (예: 2년간 매출 추이 표)', minWordCount: 2, maxWordCount: 7, isPhrase: true },
+      { key: 'caption', label: '청자에게 읽어 줄 해설 — 가리킨 대상의 이름·내용, 자료 종류(표·사진 등)까지 (예: 2년간 매출 추이 표)', minWordCount: 2, maxWordCount: 7, isPhrase: true, dropsTailObjectParticle: true },
     ],
     [DEIXIS_FORM_MAP.complete]: [
       DEIXIS_SEEN_SLOT,
       // 완전형은 대상을 여럿 잇는 구라 어절 상한에서 자르면 마지막 대상이 잘린다. 허용치 안이면 통째로 받는다.
       {
         key: 'caption', label: '청자에게 읽어 줄 해설 — 가리킨 대상 각각의 이름·내용을 가리킨 순서대로 쉼표로',
-        minWordCount: 2, maxWordCount: 10, isPhrase: true, isWholeSentence: true,
+        minWordCount: 2, maxWordCount: 10, isPhrase: true, isWholeSentence: true, dropsTailObjectParticle: true,
       },
     ],
   },
@@ -187,7 +198,7 @@ const NARRATION_SLOT_MAP = {
     // "○○보다 N배 큰 ○○" 네 칸으로는 "○○만 한", "○○의 절반쯤 되는"을 말할 수 없고, 칸을 이으면 "보다보다"처럼 말이 겹친다.
     // 크기 묘사를 구 하나로 받는다. 상한은 척도 어절 예산(4~8어절)의 상한과 같다.
     [VISUAL_DESCRIPTION_KIND_MAP.scale]: [
-      { key: 'caption', label: '청자에게 읽어 줄 크기 묘사 — 발표자가 말한 대상을 화면 속 비교 대상과 견준 크기 (예: 소나무보다 4배 정도 큰 불상)', minWordCount: 3, maxWordCount: 8, isPhrase: true },
+      { key: 'caption', label: '청자에게 읽어 줄 크기 묘사 — 발표자가 말한 대상을 화면 속 비교 대상과 견준 크기 (예: 소나무보다 4배 정도 큰 불상)', minWordCount: 3, maxWordCount: 8, isPhrase: true, dropsTailObjectParticle: true },
     ],
   },
   [NARRATION_TYPE_MAP.speakerIdentity]: {
@@ -437,6 +448,9 @@ function normalizeSlotMap({ slotList, rawSlotMap, language = CAPTION_LANGUAGE_MA
     }
     else if (slot.isPhrase) slotMap[slot.key] = trimToCompletePhrase({ text: truncated, isConservative: true });
     else slotMap[slot.key] = truncated;
+  }
+  for (const slot of slotList) {
+    if (slot.dropsTailObjectParticle) slotMap[slot.key] = dropTailObjectParticle(slotMap[slot.key]);
   }
   return slotMap;
 }
