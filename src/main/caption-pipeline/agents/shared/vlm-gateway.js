@@ -11,15 +11,18 @@ function toBufferList({ jpegBuffer, jpegBufferList }) {
   return jpegBufferList?.length ? jpegBufferList : [jpegBuffer].filter(Boolean);
 }
 
+// maxSoftTokens 는 그림 한 장의 이미지 토큰 수 상한이다. 값이 없거나 그림이 없는 글 요청이면 칸을 넣지 않아 서버에 띄운 값을 쓴다.
 function buildVlmRequestBody({ jpegBuffer = null, jpegBufferList = null, vlmModel, prompt,
-  temperature = DEFAULT_TEMPERATURE, maxTokens = DEFAULT_MAX_TOKENS, extraBodyMap = null }) {
+  temperature = DEFAULT_TEMPERATURE, maxTokens = DEFAULT_MAX_TOKENS, extraBodyMap = null, maxSoftTokens = null }) {
   const bufferList = toBufferList({ jpegBuffer, jpegBufferList });
+  const hasMaxSoftTokens = Boolean(maxSoftTokens) && bufferList.length > 0;
   return {
     model: vlmModel,
     temperature,
     max_tokens: maxTokens,
     ...(extraBodyMap || {}),
     chat_template_kwargs: { enable_thinking: false },
+    ...(hasMaxSoftTokens ? { mm_processor_kwargs: { max_soft_tokens: maxSoftTokens } } : {}),
     messages: [{
       role: 'user',
       content: [
@@ -38,7 +41,7 @@ async function requestVlmContent({ config, jpegBuffer, jpegBufferList, prompt, l
     headers: { 'content-type': 'application/json' },
     body: JSON.stringify(buildVlmRequestBody({
       jpegBuffer, jpegBufferList, vlmModel: config.vlmModel, prompt, temperature, maxTokens,
-      extraBodyMap,
+      extraBodyMap, maxSoftTokens: config.vlmMaxSoftTokens,
     })),
     signal: AbortSignal.timeout(timeoutMs),
   });

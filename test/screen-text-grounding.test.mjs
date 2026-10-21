@@ -42,10 +42,11 @@ test('기준값: 판단 뒤 기다리는 상한 1초, 값 검사에 믿는 줄 �
   assert.equal(SCREEN_TEXT_CONFIDENT_SCORE, 0.85);
 });
 
-test('수치 트리거(단순 수치·변화)가 있을 때만 근거 OCR 을 시작한다', () => {
+test('수치(단순 수치·변화)·척도 트리거가 있을 때만 근거 OCR 을 시작한다', () => {
   assert.equal(shouldStartScreenTextGrounding({ triggerCandidateList: [{ type: 'number', phrase: '79개' }] }), true);
   assert.equal(shouldStartScreenTextGrounding({ triggerCandidateList: [{ type: 'demonstrative', phrase: '여기' }, { type: 'change', phrase: '크게 늘었습니다' }] }), true);
-  assert.equal(shouldStartScreenTextGrounding({ triggerCandidateList: [{ type: 'demonstrative', phrase: '여기' }, { type: 'scale', phrase: '정말 크죠' }] }), false);
+  assert.equal(shouldStartScreenTextGrounding({ triggerCandidateList: [{ type: 'demonstrative', phrase: '여기' }, { type: 'scale', phrase: '정말 크죠' }] }), true);
+  assert.equal(shouldStartScreenTextGrounding({ triggerCandidateList: [{ type: 'demonstrative', phrase: '여기' }, { type: 'adjective_noun', phrase: '이런 모양' }] }), false);
   assert.equal(shouldStartScreenTextGrounding({ triggerCandidateList: [{ type: 'number', phrase: '' }] }), false);
   assert.equal(shouldStartScreenTextGrounding({ triggerCandidateList: [] }), false);
   assert.equal(shouldStartScreenTextGrounding({}), false);

@@ -88,6 +88,7 @@ import {
 import { MeetCaptureSession } from '../core/capture/meet-capture-session.js';
 import { fitWithinLongEdge } from '../core/capture/frame-scale.js';
 import { captureWhenSettled } from '../core/capture/settled-capture.js';
+import { captureDeixisFrameSet } from '../core/capture/deixis-frame-set.js';
 import { wallToVideoTimeMs, resolveSpeechEndWallTs, attachCandidateEventVideoTime } from '../core/capture/video-time.js';
 import { LAB_PLAYER_URL_PATTERN } from '../lab/lab-constants.js';
 import { createLogoTapCounter } from '../core/dev/logo-tap-counter.js';
@@ -683,17 +684,27 @@ function narrowToPointingRegion(frame, sub) {
   return { x: frame.x + x0 * frame.w, y: frame.y + y0 * frame.h, w: (x1 - x0) * frame.w, h: (y1 - y0) * frame.h };
 }
 
-async function captureFrameJpeg(subRegion = null) {
+async function captureFrameJpeg() {
   const frame = getFrameRegionPx();
   if (!frame) return null;
-  return captureRegionJpeg(subRegion ? narrowToPointingRegion(frame, subRegion) : frame);
+  return captureRegionJpeg(frame);
 }
 
 // 질문·명령·지시 해설·전환 고지는 그 순간의 화면이 있어야 한다. Meet 화면 크기가 바뀐 직후면 좌표가 자리 잡을 때까지 기다렸다가 찍는다.
-function captureFrameJpegWhenSettled(subRegion = null) {
+function captureFrameJpegWhenSettled() {
   return captureWhenSettled({
     isSettling: () => roiStore.isLayoutSettling(),
-    capture: () => captureFrameJpeg(subRegion),
+    capture: () => captureFrameJpeg(),
+  });
+}
+
+// 지시 판정 화면은 가리킨 영역이 있으면 잘린 그림(지시 해설용)과 같은 순간의 전체 화면(수치·척도 해설용)을 함께 찍는다.
+function captureDeixisFrameSetWhenSettled(subRegion) {
+  return captureWhenSettled({
+    isSettling: () => roiStore.isLayoutSettling(),
+    capture: () => captureDeixisFrameSet({
+      frame: getFrameRegionPx(), subRegion, narrowRegion: narrowToPointingRegion, captureRegion: captureRegionJpeg,
+    }),
   });
 }
 
@@ -806,6 +817,7 @@ async function confirmSlideCandidate({ isFirst, imageData }) {
     return;
   }
   if (!decision.isNew && !decision.isRevisit) return;
+  pointingLocator.resetChangeHistory();
   const isRevisit = Boolean(decision.isRevisit);
   if (decision.isNew && buffer) {
     window.seeon.requestSlideText({ slideLabel: decision.label, buffer }).catch(() => {});
@@ -1117,8 +1129,8 @@ async function runDeixisDecision(firedDecision) {
   lastDeixisDecidedAt = performance.now();
   const mode = getCurrentMode();
   const sessionSeq = experimentSeq;
-  const [buffer, decision] = await Promise.all([
-    captureFrameJpegWhenSettled(firedDecision.region), firedDecision.whenSealed ?? firedDecision,
+  const [{ buffer, fullBuffer }, decision] = await Promise.all([
+    captureDeixisFrameSetWhenSettled(firedDecision.region), firedDecision.whenSealed ?? firedDecision,
   ]);
   if (!buffer || !decision) return;
   if (!captureSource.isActive || sessionSeq !== experimentSeq) return;
@@ -1188,7 +1200,7 @@ async function runDeixisDecision(firedDecision) {
     detail: `트리거="${label}" 발화="${utterance || '(없음)'}" 영역=${region ? '포인팅' : '프레임 전체'} 슬라이드=${slideRegistry.currentLabel() || '-'}`,
   });
   const result = await window.seeon.sendPipelineDeixis({
-    ts, buffer, utterance, recentTranscript, beforeTranscript: before, afterTranscript: after,
+    ts, buffer, fullBuffer, utterance, recentTranscript, beforeTranscript: before, afterTranscript: after,
     hasPointingRegion: Boolean(region), pointingOrderHint, slideLabel: slideRegistry.currentLabel(),
     wordBudgetMap, eventVideoTimeMs, triggerCandidateList: candidateList,
   }).catch(() => null);

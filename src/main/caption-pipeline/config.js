@@ -9,7 +9,7 @@ const DEFAULT_EMBED_URL = 'http://127.0.0.1:8804/embed';
 // 슬라이드 전사 백엔드. ocr 은 임베딩 서비스(같은 GPU 서버 프로세스)의 /ocr 로 화면 글자를 읽어 VLM 호출을 줄인다.
 const SLIDE_TEXT_BACKEND_LIST = ['vlm', 'ocr'];
 const DEFAULT_SLIDE_TEXT_BACKEND = 'vlm';
-// 수치 해설(변화·비교, 값→의미)에 그 요청 프레임의 OCR 글자를 근거로 넣는다. 「화면 글자 읽기」(전사 백엔드)와 따로 켠다.
+// 수치 해설(변화·비교, 값→의미)과 척도 해설에 그 요청 프레임의 OCR 글자를 근거로 넣는다. 「화면 글자 읽기」(전사 백엔드)와 따로 켠다.
 const SCREEN_TEXT_GROUNDING_LIST = ['on', 'off'];
 const DEFAULT_SCREEN_TEXT_GROUNDING = 'on';
 // 교차 모드 틈 후보 위치: asr = ASR 조각 끝 시각(지금 동작), audio = 앱이 잰 회의 소리의 무음 구간.
@@ -85,6 +85,16 @@ function readGapSource({ env }) {
   return DEFAULT_GAP_SOURCE;
 }
 
+// VLM 이 그림 한 장을 나눌 이미지 토큰 수 상한(해상도). 비우면 요청에 넣지 않아 서버에 띄운 값(--mm-processor-kwargs)을 쓴다.
+// 요청마다 바꾸려면 서버가 --trust-request-mm-kwargs 로 떠 있어야 한다.
+function readVlmMaxSoftTokens({ env }) {
+  const value = env.SEEON_VLM_MAX_SOFT_TOKENS;
+  if (value === undefined || value === '') return null;
+  if (/^[1-9]\d*$/.test(value)) return Number(value);
+  console.warn(`[pipeline] SEEON_VLM_MAX_SOFT_TOKENS="${value}" 은 양의 정수가 아닙니다 — 요청에 넣지 않고 서버 기본값을 씁니다`);
+  return null;
+}
+
 // OCR 은 임베딩 서비스에 붙어 있어 기본 주소를 임베딩 주소에서 만든다. 포트를 나누면 SEEON_OCR_URL 로 준다.
 function resolveOcrUrl({ env, embedUrl }) {
   if (env.SEEON_OCR_URL) return env.SEEON_OCR_URL;
@@ -104,6 +114,7 @@ function readPipelineConfig(env = process.env) {
   return {
     vlmUrl,
     vlmModel,
+    vlmMaxSoftTokens: readVlmMaxSoftTokens({ env }),
     asrUrl: env.SEEON_ASR_URL || DEFAULT_ASR_URL,
     // 회의 음성과 마이크 질문은 말하는 사람이 달라 언어를 따로 둔다(둘 다 기본 자동).
     asrLanguage: readAsrLanguage({ env, envName: 'SEEON_ASR_LANGUAGE' }),

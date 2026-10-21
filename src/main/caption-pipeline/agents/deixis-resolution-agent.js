@@ -13,8 +13,7 @@ const AGENT_LABEL = '그라운딩';
 
 function createDeixisResolutionAgent({ config, getCaptionLanguage = () => DEFAULT_CAPTION_LANGUAGE }) {
   async function generate({ jpegBuffer, utterance, recentTranscript = '',
-    maxChars = null, hasPointingRegion = false, pointingOrderHint = '',
-    describedElementList = [], minWordCount = DEFAULT_DEIXIS_MIN_WORD_COUNT,
+    maxChars = null, hasPointingRegion = false, pointingOrderHint = '', minWordCount = DEFAULT_DEIXIS_MIN_WORD_COUNT,
     maxWordCount = DEFAULT_DEIXIS_MAX_WORD_COUNT, subKind = null, mergedAnchorList = [], language = getCaptionLanguage() }) {
     // 렌더러의 어절 예산을 캡션 언어의 단어 수로 바꾼다(영어는 상한을 ENGLISH_WORD_SCALE 배로, 한국어는 그대로).
     ({ minWordCount, maxWordCount } = scaleWordBudget({ minWordCount, maxWordCount, language }));
@@ -23,7 +22,7 @@ function createDeixisResolutionAgent({ config, getCaptionLanguage = () => DEFAUL
       config, jpegBuffer, label: AGENT_LABEL, maxTokens: SLOT_AGENT_MAX_TOKENS,
       prompt: buildGroundingPrompt({
         utterance, recentTranscript, maxChars: effectiveMaxChars, hasPointingRegion,
-        pointingOrderHint, describedElementList, minWordCount, maxWordCount, subKind, mergedAnchorList, language,
+        pointingOrderHint, minWordCount, maxWordCount, subKind, mergedAnchorList, language,
       }),
     });
     return parseSlotCaption({
