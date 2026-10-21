@@ -1,5 +1,6 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
+import fs from 'node:fs';
 import { createRequire } from 'node:module';
 import { buildSlideTransitionNotice } from '../src/renderer/core/ui/slide-transition-notice.js';
 
@@ -23,4 +24,16 @@ test('복귀 해설: 슬라이드면 "이전 슬라이드 N", 슬라이드가 �
 test('패널 안내: 전환 순간에는 슬라이드인지 모르므로 내부 순번을 보이지 않는다', () => {
   assert.equal(buildSlideTransitionNotice({ isRevisit: false }), '화면 전환 — 화면 고지 생성 중…');
   assert.equal(buildSlideTransitionNotice({ isRevisit: true }), '이전 화면으로 복귀 — 고지 생성 중…');
+});
+
+test('패널 안내: 페이지 전환 안내를 꺼 두면 전환·복귀 안내를 띄우지 않는다', () => {
+  assert.equal(buildSlideTransitionNotice({ isRevisit: false, isPageTransitionOn: false }), null);
+  assert.equal(buildSlideTransitionNotice({ isRevisit: true, isPageTransitionOn: false }), null);
+  assert.equal(buildSlideTransitionNotice({ isRevisit: false, isPageTransitionOn: true }), '화면 전환 — 화면 고지 생성 중…');
+});
+
+test('패널 안내: 렌더러는 페이지 전환 토글 상태를 넘기고, 안내가 없으면 띄우지 않는다', () => {
+  const mainSource = fs.readFileSync(new URL('../src/renderer/app/main.js', import.meta.url), 'utf8');
+  assert.match(mainSource, /buildSlideTransitionNotice\(\{[^}]*isPageTransitionOn: featureToggleStore\.isOn\(FEATURE_KEY_MAP\.pageTransition\)/);
+  assert.match(mainSource, /if \(transitionNotice\) showNotice\(transitionNotice\)/);
 });
