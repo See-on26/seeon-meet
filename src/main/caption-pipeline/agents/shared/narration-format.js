@@ -431,7 +431,8 @@ function normalizeSlotMap({ slotList, rawSlotMap, language = CAPTION_LANGUAGE_MA
     const isTruncated = countWord({ text }) > slot.maxWordCount;
     if (isTruncated) {
       slotMap[slot.key] = trimToCompletePhrase({
-        text: slot.mustContainValue ? fitWholeItemList({ text, maxWordCount: slot.maxWordCount, target: rawSlotMap?.target }) : truncated,
+        // 대상 칸은 값 칸보다 먼저 다듬어지므로, 상한에서 자른 뒤 실제로 읽히는 대상 칸 낱말만 값에서 뺀다.
+        text: slot.mustContainValue ? fitWholeItemList({ text, maxWordCount: slot.maxWordCount, target: slotMap.target }) : truncated,
       });
     }
     else if (slot.isPhrase) slotMap[slot.key] = trimToCompletePhrase({ text: truncated, isConservative: true });
