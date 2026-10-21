@@ -45,7 +45,7 @@ test('few-shot 은 자기 묶음 유형의 예시만 담고, 두 묶음을 합�
   const speechList = ROUTER_PROMPT_MAP[JUDGE_GROUP_MAP.speech].fewShotList;
   for (const example of deixisList) assert.ok(example.input.candidateList.every((c) => DEIXIS_TYPE_LIST.includes(c.type)));
   for (const example of speechList) assert.ok(example.input.candidateList.every((c) => SPEECH_TYPE_LIST.includes(c.type)));
-  assert.equal(deixisList.length + speechList.length, 38);
+  assert.equal(deixisList.length + speechList.length, 39);
   assert.ok(deixisList.length >= 4 && speechList.length >= 8);
 });
 
@@ -66,8 +66,9 @@ test('형용사 + 지시 명사는 다르다는 말만으로 고르지 않고, �
   assert.match(deixisPrompt, /"그 이름이 그 성질을 가졌다고 말하지 않았다"며 O 로 하지 마라/);
   assert.match(deixisPrompt, /실제 이름 없이 안내만 있으면 근거가 아니다/);
   const deixisList = ROUTER_PROMPT_MAP[JUDGE_GROUP_MAP.deixis].fewShotList;
-  assert.ok(findContrastPair({ exampleList: deixisList, type: 'adjective_noun', isNamed: (after) => /서관이에요/.test(after) }), '한국어 이름 짝');
-  assert.ok(findContrastPair({ exampleList: deixisList, type: 'adjective_noun', isNamed: (after) => /: Bexa/.test(after) }), '영어 이름 짝');
+  assert.ok(findContrastPair({ exampleList: deixisList, type: 'adjective_noun', isNamed: (after) => /서관 말이에요/.test(after) }), '한국어 이름 짝');
+  assert.ok(findContrastPair({ exampleList: deixisList, type: 'adjective_noun', isNamed: (after) => /Bexa's the one/.test(after) }), '영어 이름 짝');
+  assert.equal(deixisPrompt.includes('write B'), false);
 });
 
 // 여럿 가운데 하나만 결과가 달랐다고 짚은 뒤의 지시를, "만·only" 가 없다는 이유로 O 로 넘기는 오탐을 줄인다.
@@ -77,7 +78,7 @@ test('지시 대상은 "만·only" 가 없어도 하나만 결과가 달랐다�
   assert.match(deixisPrompt, /여럿을 나란히 말하기만 했으면 O 다/);
   const deixisList = ROUTER_PROMPT_MAP[JUDGE_GROUP_MAP.deixis].fewShotList;
   const resultExample = deixisList.find((example) => example.input.candidateList[0].type === 'demonstrative'
-    && example.output.judgeList[0].gap === 'X' && !/만|뿐|only/i.test(example.input.before) && /세 매장/.test(example.input.before));
+    && example.output.judgeList[0].gap === 'X' && !/만|뿐|only/i.test(example.input.before) && /2호기/.test(example.input.before));
   assert.ok(resultExample, '만·only 없이 결과로 하나를 짚은 X 예시');
 });
 
@@ -88,13 +89,13 @@ test('단순 수치는 발표자가 고른 항목이나 뒤 발화가 댄 항목
   assert.match(speechPrompt, /앞에서도 뒤에서도 그중 어느 것의 값인지 말하지 않았으면 O 다/);
   assert.match(speechPrompt, /발표자가 지금 다룰 항목 하나를 이름으로 골랐다/);
   assert.match(speechPrompt, /뒤 발화가 다른 말 뒤에라도 그 수치가 어느 항목의 값인지 이름을 댔다/);
-  assert.match(speechPrompt, /세는 방법·출처·범위\([^)]*\)만 말하면 어느 항목인지 정해지지 않았다 → O/);
+  assert.match(speechPrompt, /어떻게 셌는지·어디서 뽑았는지·어느 범위의 값인지만 말하면 어느 항목인지 정해지지 않았다 → O/);
   assert.match(speechPrompt, /항목 이름을 댄 구절도 근거다/);
-  assert.match(speechPrompt, /값이 적힌 곳\(장부·기록표·칸·대장\)만 말한 것도 같다/);
+  assert.match(speechPrompt, /앞뒤 발화가 항목을 정하지 않았다면 값이 적힌 곳\(장부·기록표·칸\)만 말한 것도 O 다/);
   const speechList = ROUTER_PROMPT_MAP[JUDGE_GROUP_MAP.speech].fewShotList;
-  assert.ok(findContrastPair({ exampleList: speechList, type: 'number', isNamed: (after) => /출입문 고장 건수/.test(after) }), '뒤 발화 항목 이름 짝');
+  assert.ok(findContrastPair({ exampleList: speechList, type: 'number', isNamed: (after) => /와셔 쪽/.test(after) }), '뒤 발화 항목 이름 짝');
   assert.ok(speechList.some((example) => example.input.candidateList[0].type === 'number' && example.output.judgeList[0].gap === 'X'
-    && /only cover/.test(example.input.before) && example.output.judgeList[0].evidence === "I'll only cover signage today"), '발표자가 고른 항목 X 예시');
+    && /Linwood is the one/.test(example.input.before) && example.input.before.includes(example.output.judgeList[0].evidence)), '발표자가 고른 항목 X 예시');
 });
 
 // 척도 유형 이름의 "추상적"을 "추상적인 대상이면 O"로 읽어, 생각·가능성·기간처럼 사진에 찍히지 않는 주어에도 O 를 주는 오탐을 줄인다.
@@ -106,9 +107,28 @@ test('추상적 척도는 주어가 눈으로 볼 수 있는 것인지 먼저 �
   assert.match(speechPrompt, /앞 문맥 앞쪽에 나온 숫자도 그 대상의 값이면 된다/);
   const scaleXList = ROUTER_PROMPT_MAP[JUDGE_GROUP_MAP.speech].fewShotList
     .filter((example) => example.input.candidateList[0].type === 'scale' && example.output.judgeList[0].gap === 'X');
-  assert.ok(scaleXList.some((example) => /기대/.test(example.input.utterance)), '생각·감정 주어 X 예시');
-  assert.ok(scaleXList.some((example) => /review window/.test(example.input.utterance)), '영어 기간 주어 X 예시');
+  assert.ok(scaleXList.some((example) => /호응/.test(example.input.utterance)), '생각·감정 주어 X 예시');
+  assert.ok(scaleXList.some((example) => /deadlines/.test(example.input.utterance)), '영어 기간 주어 X 예시');
 });
+
+// "범위"를 생각 쪽 주어로 한정한다. 사진·지도 속 대상이 퍼진 범위는 보이는 대상이라 O 가 남아야 한다.
+test('추상적 척도의 "범위"는 선호·의견·이론의 범위만 X 로 보고, 사진·지도 속 대상이 퍼진 범위는 보이는 대상으로 둔다', () => {
+  const speechPrompt = ROUTER_PROMPT_MAP[JUDGE_GROUP_MAP.speech].systemPrompt;
+  assert.match(speechPrompt, /선호·의견·이론의 범위·다양성/);
+  assert.match(speechPrompt, /사진·지도 속 대상이 퍼진 범위·넓이는 보이는 대상이다\(O\)/);
+  assert.doesNotMatch(speechPrompt, /가능성·위험, 범위·다양성/);
+});
+
+// 같은 앞 문맥·뒤 문맥에서 트리거 문장의 대상만 다른 변화 예시 쌍. 앞 문맥에 값이 있는 대상이면 X, 이름만 있고 값이 없는 대상이면 O 다.
+function findSubjectContrastPair(exampleList) {
+  const changeList = exampleList.filter((example) => example.input.candidateList[0].type === 'change');
+  return changeList.find((left) => changeList.some((right) => right !== left
+    && right.input.before === left.input.before && right.input.after === left.input.after
+    && right.input.utterance !== left.input.utterance
+    && left.output.judgeList[0].gap === 'X' && right.output.judgeList[0].gap === 'O'
+    && right.input.utterance.split(' ')[0] !== left.input.utterance.split(' ')[0]
+    && left.input.before.includes(right.input.utterance.split(' ')[0])));
+}
 
 test('변화·비교·결론은 그 대상의 앞뒤 값이 앞 문맥에 이미 있으면 X, 다른 대상 값이거나 한쪽뿐이면 O 다', () => {
   const speechPrompt = ROUTER_PROMPT_MAP[JUDGE_GROUP_MAP.speech].systemPrompt;
@@ -117,6 +137,9 @@ test('변화·비교·결론은 그 대상의 앞뒤 값이 앞 문맥에 이미
   const changeExample = ROUTER_PROMPT_MAP[JUDGE_GROUP_MAP.speech].fewShotList.find((example) => example.input.candidateList[0].type === 'change'
     && example.output.judgeList[0].gap === 'X' && !example.input.after.match(/\d/) && /\d/.test(example.input.before));
   assert.ok(changeExample, '앞 문맥 값으로 X 를 주는 변화 예시');
+  const pairLeft = findSubjectContrastPair(ROUTER_PROMPT_MAP[JUDGE_GROUP_MAP.speech].fewShotList);
+  assert.ok(pairLeft, '트리거 대상만 다른 X/O 변화 예시 짝');
+  assert.ok(pairLeft.input.before.includes(pairLeft.input.utterance.split(' ')[0]), 'X 예시의 트리거 대상 낱말이 앞 문맥 이름과 같다');
 });
 
 // 근거를 옮길 때 순서를 바꾸거나 두 곳을 합쳐 써서 코드 확인(not_in_context)에 걸려 O 로 뒤집히는 일을 줄인다.

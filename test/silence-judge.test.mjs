@@ -73,9 +73,11 @@ const { SILENCE_JUDGE_SYSTEM_PROMPT, SILENCE_FEW_SHOT_LIST } = require('../src/m
 test('무발화 판정기는 보라는 대상이 화면 자료일 때만 통과시키고, 듣기·손 활동·생각을 뜻하는 see·look 은 차단한다', () => {
   assert.match(SILENCE_JUDGE_SYSTEM_PROMPT, /보라는 대상이 눈으로 볼 자료\([^)]*\)여야 한다/);
   assert.match(SILENCE_JUDGE_SYSTEM_PROMPT, /"한번 보시죠"로 받아도 된다/);
+  assert.match(SILENCE_JUDGE_SYSTEM_PROMPT, /카메라에 비춘 실물을 보라는 말은 화면 자료와 같다/);
   assert.match(SILENCE_JUDGE_SYSTEM_PROMPT, /"보다·see·look"이 생각·이해·관점을 뜻하면 단서가 아니다/);
-  assert.match(SILENCE_JUDGE_SYSTEM_PROMPT, /녹음·음성·소리를 틀어 주며 "들어 보세요"라고 해도 듣는 것이다/);
-  assert.match(SILENCE_JUDGE_SYSTEM_PROMPT, /만져 보기/);
+  for (const idiom of ['see if', 'see what I mean', 'look at it this way', 'see eye to eye']) assert.ok(SILENCE_JUDGE_SYSTEM_PROMPT.includes(idiom), idiom);
+  assert.match(SILENCE_JUDGE_SYSTEM_PROMPT, /녹음·음성·소리를 틀어 주며 들어 보라고 해도 듣는 것이다/);
+  assert.match(SILENCE_JUDGE_SYSTEM_PROMPT, /손으로 하는 활동\(만지기/);
   const blockedList = SILENCE_FEW_SHOT_LIST.filter((example) => !example.output.cue);
   assert.ok(blockedList.some((example) => /녹음/.test(example.input.transcript) && /들어 보/.test(example.input.transcript)), '녹음을 틀며 들어 보라는 차단 예시');
   assert.ok(blockedList.some((example) => /see if/.test(example.input.transcript)), '생각을 뜻하는 see 차단 예시');
