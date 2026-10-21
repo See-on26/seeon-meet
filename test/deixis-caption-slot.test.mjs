@@ -62,6 +62,19 @@ test('지시 프롬프트에는 상황 칸·발화 모사·문장 칸이 없고 
   assert.match(buildGroundingPrompt({ utterance: '여기 보시면', maxChars: 60, subKind: 'simple' }), /보는 중.*같은 동작 말을 붙이지 않는다/);
 });
 
+// 규칙 (4)는 화면 문구를 그대로 쓰고 새 낱말을 만들지 말라고 한다. 형식 예시의 caption 도 seen 에 있는 낱말로만 쓴다.
+test('지시 형식 예시의 caption 은 seen 에 있는 낱말로만 쓴다', () => {
+  const { DEIXIS_FORM_RULE_MAP } = require('../src/main/caption-pipeline/prompts/deixis-resolution.js');
+  const exampleList = Object.values(DEIXIS_FORM_RULE_MAP).flat()
+    .map((line) => line.match(/seen="([^"]*)", caption="([^"]*)"/)).filter(Boolean);
+  assert.ok(exampleList.length >= 3);
+  const toWordList = (text) => text.split(/[\s,·]+/).filter(Boolean);
+  for (const [, seen, caption] of exampleList) {
+    const seenWordSet = new Set(toWordList(seen));
+    for (const word of toWordList(caption)) assert.ok(seenWordSet.has(word), `caption 낱말 "${word}" 이 seen("${seen}")에 없다`);
+  }
+});
+
 test('지시 에이전트는 이미 안내된 해설 목록을 받아도 요청 프롬프트에 넣지 않는다', async () => {
   const originalFetch = globalThis.fetch;
   const promptList = [];
