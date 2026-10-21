@@ -165,10 +165,60 @@ function parseGroundingText(content, maxChars = DEFAULT_GROUNDING_MAX_CHARS, max
   return { text, isGrounded: true };
 }
 
+// Gemma 가 거절을 JSON 칸 값으로 내는 일이 있다({"seen": "…", "caption": "NONE"}, 2026-10-22 v5.4g S 에서 지시 3건).
+// 읽어 줄 칸(진단 칸 seen 은 빼고)이 거절 표시면 해설로 읽지 않고 모델이 거절한 것으로 본다.
+const SLOT_NONE_VALUE_PATTERN = new RegExp(`^["'“‘(]*${GROUNDING_NONE_TOKEN}\\b\\s*[:：\\-—]?\\s*([\\s\\S]*)$`, 'i');
+
+function findNoneSlotValue({ slotMap, narrationType, subKind, origin, hasSecondClaim, language }) {
+  if (!slotMap) return null;
+  const slotList = getSlotList({ narrationType, subKind, origin, hasSecondClaim, language }) || [];
+  const spokenKeyList = slotList.filter((slot) => !slot.isDiagnostic).map((slot) => slot.key);
+  const keyList = spokenKeyList.length ? spokenKeyList : Object.keys(slotMap);
+  return keyList.map((key) => String(slotMap[key] ?? '').trim()).find((value) => SLOT_NONE_VALUE_PATTERN.test(value)) ?? null;
+}
+
+// Gemma 가 수식을 LaTeX 로 쓴다("$w_{2,1}^3$"). TTS 가 기호를 읽지 못하고 자막에도 그대로 보이므로 읽는 글로 바꾼다.
+// 달러 수식 표시나 중괄호 첨자(^{…}·_{…})가 있을 때만 손댄다 — "a1_diff" 같은 변수 이름의 밑줄은 그대로 둔다.
+const SUPERSCRIPT_CHAR_MAP = {
+  0: '⁰', 1: '¹', 2: '²', 3: '³', 4: '⁴', 5: '⁵', 6: '⁶', 7: '⁷', 8: '⁸', 9: '⁹', '+': '⁺', '-': '⁻', '−': '⁻',
+};
+const SUBSCRIPT_CHAR_MAP = {
+  0: '₀', 1: '₁', 2: '₂', 3: '₃', 4: '₄', 5: '₅', 6: '₆', 7: '₇', 8: '₈', 9: '₉', '+': '₊', '-': '₋', '−': '₋',
+};
+const MATH_MARKUP_PATTERN = /\$|[_^]\{|\\[A-Za-z]+/;
+const LATEX_WORD_MAP = { times: '×', cdot: '·', le: '≤', leq: '≤', ge: '≥', geq: '≥', pm: '±', approx: '≈', ne: '≠', neq: '≠' };
+
+function convertScript({ text, charMap }) {
+  const chars = [...text];
+  // 숫자·부호·쉼표만이면 위·아래 첨자 글자로, 아니면 기호만 걷고 글자를 그대로 둔다.
+  return chars.every((char) => charMap[char] || char === ',') ? chars.map((char) => charMap[char] || char).join('') : text;
+}
+
+function stripMathMarkup(text) {
+  const source = String(text || '');
+  if (!MATH_MARKUP_PATTERN.test(source)) return source;
+  return source
+    .replace(/\\frac\{([^{}]*)\}\{([^{}]*)\}/g, '$1/$2')
+    .replace(/\\([A-Za-z]+)/g, (_match, word) => LATEX_WORD_MAP[word] ?? word)
+    .replace(/\^\{([^{}]*)\}|\^([0-9+\-−])/g, (_match, braced, single) => convertScript({ text: braced ?? single, charMap: SUPERSCRIPT_CHAR_MAP }))
+    .replace(/_\{([^{}]*)\}/g, (_match, braced) => convertScript({ text: braced, charMap: SUBSCRIPT_CHAR_MAP }))
+    .replace(/[${}]/g, '')
+    .replace(/\s{2,}/g, ' ')
+    .trim();
+}
+
 function parseSlotCaption(option) {
   const result = parseSlotCaptionContent(option);
-  return result.isGrounded && containsHanCharacter(result.text)
-    ? buildRejection({ rejectKind: REJECT_KIND_MAP.han, content: option.content }) : result;
+  if (!result.isGrounded) return result;
+  const noneValue = findNoneSlotValue({ ...option, slotMap: result.slotMap });
+  if (noneValue !== null || SLOT_NONE_VALUE_PATTERN.test(result.text.trim())) {
+    return buildRejection({
+      rejectKind: REJECT_KIND_MAP.none, rejectReason: readNoneReason(noneValue ?? result.text.trim()), content: option.content,
+    });
+  }
+  const text = stripMathMarkup(result.text);
+  return containsHanCharacter(text)
+    ? buildRejection({ rejectKind: REJECT_KIND_MAP.han, content: option.content }) : { ...result, text };
 }
 
 function parseSlotCaptionContent({ content, narrationType, subKind, origin = null, index = '', maxChars, maxWordCount,
@@ -207,5 +257,5 @@ module.exports = {
   GROUNDING_NONE_TOKEN, DEFAULT_GROUNDING_MAX_CHARS, CHARS_PER_WORD_ESTIMATE, ENGLISH_CHARS_PER_WORD_ESTIMATE,
   computeMaxChars, buildSlotOutputInstruction, truncateToWordCount, containsHanCharacter,
   REJECT_KIND_MAP, SLOT_AGENT_MAX_TOKENS, describeAgentRejection, SPEECH_GAP_DECIDED_RULE, NO_HAN_RULE, ENGLISH_NO_HAN_RULE,
-  salvageSlotMap, isSlotJsonAttempt, parseGroundingText, parseSlotCaption,
+  salvageSlotMap, isSlotJsonAttempt, parseGroundingText, parseSlotCaption, stripMathMarkup,
 };
