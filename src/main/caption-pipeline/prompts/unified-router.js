@@ -78,7 +78,8 @@ const CRITERIA_LINE_MAP = {
     '  그래프의 막대, 사람 수)의 정도를 "크다·넓다"로만 말했고 실제 정도가 발화에 없다.',
     '  먼저 "크다·많다·짧다"의 주어(무엇이 큰가·많은가)를 찾는다. 주어가 눈으로 볼 수 있는 사물·구역·사람·막대일 때만 O 가 될 수 있다.',
     '  시간·부담·느낌·소리·난이도처럼 화면으로 볼 수 없는 성질이 주어면 정도가 없어도 X 다.',
-    '  기간·남은 시간, 생각·감정(의견·걱정·불만), 가능성·위험, 선호·의견·이론의 범위·다양성, 일의 양·영향처럼 사진에 찍히지 않는 것도 같다. 다만 사진·지도 속 대상이 퍼진 범위·넓이는 보이는 대상이다(O).',
+    '  기간·남은 시간, 생각·감정(의견·걱정·불만), 가능성·위험, 일의 양·영향처럼 사진에 찍히지 않는 것도 같다.',
+    '  범위·폭·다양성은 그 범위를 가진 것이 눈에 보이는지로 가린다. 생각·선택·권한처럼 보이지 않으면 X, 사진·지도에 보이는 것이 퍼진 넓이면 O 가 될 수 있다.',
     '  유형 이름의 "추상적"은 정도를 말로만 했다는 뜻이다. "추상적인 표현이라 수치가 없다"는 O 의 이유가 아니다.',
     '  실제 정도가 앞뒤 발화에 숫자로 나오면("4.8km", "26개") "크다·많다"라고 말했어도 X 다. 앞 문맥 앞쪽에 나온 숫자도 그 대상의 값이면 된다.',
   ],
@@ -346,18 +347,18 @@ const ALL_FEW_SHOT_LIST = [
   },
   {
     input: {
-      before: '조별 불량률은 주간조 4.6%, 야간조 2.1%까지만 나왔고 주말조 집계는 다음 주에 끝나요.',
+      before: '조별 불량률은 주간조 4.6%, 야간조 2.1%로 나왔고 주말조는 아직 정리 전이에요.',
       utterance: '야간조 불량률이 주간조보다 낮았네요.',
       after: '라인 배치는 그대로 갑니다.',
       candidateList: [
         { id: 1, type: TRIGGER_TYPE_MAP.change, phrase: '주간조보다 낮았네요' },
       ],
     },
-    output: { judgeList: [{ id: 1, gap: 'X', evidence: '주간조 4.6%, 야간조 2.1%까지만 나왔고', reason: '앞 문맥에서 야간조 2.1%, 주간조 4.6%로 양쪽 값을 밝혔다' }] },
+    output: { judgeList: [{ id: 1, gap: 'X', evidence: '주간조 4.6%, 야간조 2.1%로 나왔고', reason: '앞 문맥에서 야간조 2.1%, 주간조 4.6%로 양쪽 값을 밝혔다' }] },
   },
   {
     input: {
-      before: '조별 불량률은 주간조 4.6%, 야간조 2.1%까지만 나왔고 주말조 집계는 다음 주에 끝나요.',
+      before: '조별 불량률은 주간조 4.6%, 야간조 2.1%로 나왔고 주말조는 아직 정리 전이에요.',
       utterance: '주말조 불량률이 주간조보다 낮았네요.',
       after: '라인 배치는 그대로 갑니다.',
       candidateList: [
@@ -436,7 +437,7 @@ const ALL_FEW_SHOT_LIST = [
     input: {
       before: '창고 점검표에 볼트, 너트, 와셔 수량이 다 들어 있는데요.',
       utterance: '모자라는 게 340개예요.',
-      after: '어제 오후에 두 사람이 나눠서 센 거고, 다시 세 봐도 같았습니다.',
+      after: '두 번 세어서 맞춘 숫자입니다.',
       candidateList: [
         { id: 1, type: TRIGGER_TYPE_MAP.number, phrase: '340개' },
       ],
@@ -445,14 +446,14 @@ const ALL_FEW_SHOT_LIST = [
   },
   {
     input: {
-      before: 'Of our three pilot schools, Linwood is the one the board asked about, so that is where I will start.',
-      utterance: 'Um, 91 percent of their students passed the reading check.',
+      before: 'We agreed at the last meeting to cover just one of the three pilot schools today, Linwood.',
+      utterance: 'So, 91 percent of their students passed the reading check.',
       after: 'The full table is in the appendix.',
       candidateList: [
         { id: 1, type: TRIGGER_TYPE_MAP.number, phrase: '91 percent' },
       ],
     },
-    output: { judgeList: [{ id: 1, gap: 'X', evidence: 'Linwood is the one the board asked about, so that is where I will start', reason: '세 학교 중 다룰 곳으로 Linwood 를 골랐다' }] },
+    output: { judgeList: [{ id: 1, gap: 'X', evidence: 'We agreed at the last meeting to cover just one of the three pilot schools today, Linwood', reason: '지난 회의에서 정한 대로 세 학교 중 오늘 다룰 곳은 Linwood 다' }] },
   },
   {
     input: {
