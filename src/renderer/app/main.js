@@ -837,7 +837,10 @@ async function requestPageTransitionNarration(decision) {
   }
   const ts = Date.now();
   slideTransitionRequestTsMap.set(decision.label, ts);
-  showNotice(buildSlideTransitionNotice({ isRevisit: decision.isRevisit, t }));
+  const transitionNotice = buildSlideTransitionNotice({
+    isRevisit: decision.isRevisit, isPageTransitionOn: featureToggleStore.isOn(FEATURE_KEY_MAP.pageTransition), t,
+  });
+  if (transitionNotice) showNotice(transitionNotice);
 
   saveSlideFrameWithMark({
     slideLabel: decision.label, frameKind: 'base', buffer,
