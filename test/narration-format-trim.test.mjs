@@ -24,7 +24,7 @@ test('기한: 숫자에 붙은 "까지·부터"는 덜 끝난 말이 아니라 �
 test('쉼표: 숫자 안의 쉼표("1,250명")에서는 항목을 나누지 않는다', () => {
   assert.equal(
     claim({ target: '지점별 방문객', value: '서울 지점 1,250명, 부산 지점 980명, 대구 지점' }),
-    '지점별 방문객, 서울 1,250명, 부산 980명',
+    '지점별 방문객, 서울 지점 1,250명, 부산 지점 980명',
   );
   assert.equal(claim({ target: '주말 방문객', value: '1,250명에서 1,830명' }), '주말 방문객, 1,250명에서 1,830명');
 });
@@ -38,6 +38,27 @@ test('목록: 값 칸 상한을 넘으면 쉼표로 나뉜 항목을 통째로 �
   assert.equal(
     claim({ target: '시험 점수', value: '1차 시험 82점, 2차 시험 88점, 3차 시험 91점, 4차 시험 95점' }),
     '시험 점수, 1차 82점, 2차 88점, 3차 91점',
+  );
+});
+
+// 되풀이 낱말은 대상 칸이 이미 말한 측정량 낱말일 때만 뺀다. 대상 칸에 없는 값 수식어("이상"·"반")는 값의 일부다.
+test('목록·전체 예산: 대상 칸에 없는 되풀이 낱말("10% 이상", "9시 반")은 빼지 않는다', () => {
+  assert.equal(
+    claim({ target: '할인 조건', value: 'A등급 10% 이상, B등급 20% 이상, C등급 30% 이상' }),
+    '할인 조건, A등급 10% 이상, B등급 20% 이상',
+  );
+  assert.equal(
+    claim({ target: '출발 시각', value: '1회차 9시 반, 2회차 10시 반, 3회차 11시 반' }),
+    '출발 시각, 1회차 9시 반, 2회차 10시 반',
+  );
+  assert.equal(
+    claim({ target: '할인 조건', value: 'A등급 10% 이상, B등급 20% 이상', maxWordCount: 5 }),
+    '할인 조건, A등급 10% 이상',
+  );
+  assert.equal(
+    claim({ target: '신규 고객', value: '서울 고객 120명, 부산 고객 150명', maxWordCount: 6 }),
+    '신규 고객, 서울 120명, 부산 150명',
+    '대상 칸에 있는 낱말은 전체 예산을 맞출 때도 뺀다',
   );
 });
 
@@ -56,15 +77,15 @@ test('짝짓기: 대상 칸의 조건 목록과 값 칸의 이름 없는 값 목
   assert.equal(claim({ target: '본관 방문객 수, 별관 방문객 수', value: '320명, 140명' }), '방문객 수, 본관 320명, 별관 140명');
   // 끝말 앞의 기능어("후")는 끝말로 묶지 않는다.
   assert.deepEqual(
-    pairTargetItemListWithValueList({ target: '운동 후 맥박, 휴식 후 맥박', value: '120, 72' }),
-    { target: '맥박', value: '운동 후 120, 휴식 후 72' },
+    pairTargetItemListWithValueList({ target: '입고 후 재고, 출고 후 재고', value: '120, 72' }),
+    { target: '재고', value: '입고 후 120, 출고 후 72' },
   );
 });
 
 test('짝짓기: 항목 수가 다르거나, 값에 이름이 붙어 있거나, 같은 끝말이 없으면 그대로 둔다', () => {
   assert.equal(pairTargetItemListWithValueList({ target: '본관 방문객 수, 별관 방문객 수', value: '320명' }), null);
   assert.equal(pairTargetItemListWithValueList({ target: '본관 방문객 수, 별관 방문객 수', value: '본관 320명, 별관 140명' }), null);
-  assert.equal(pairTargetItemListWithValueList({ target: '식사 전, 식사 후', value: '90, 140' }), null);
+  assert.equal(pairTargetItemListWithValueList({ target: '배송 전, 배송 후', value: '90, 140' }), null);
   assert.equal(pairTargetItemListWithValueList({ target: '방문객 수', value: '320명' }), null);
 });
 

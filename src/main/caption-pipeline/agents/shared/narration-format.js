@@ -431,7 +431,7 @@ function normalizeSlotMap({ slotList, rawSlotMap, language = CAPTION_LANGUAGE_MA
     const isTruncated = countWord({ text }) > slot.maxWordCount;
     if (isTruncated) {
       slotMap[slot.key] = trimToCompletePhrase({
-        text: slot.mustContainValue ? fitWholeItemList({ text, maxWordCount: slot.maxWordCount }) : truncated,
+        text: slot.mustContainValue ? fitWholeItemList({ text, maxWordCount: slot.maxWordCount, target: rawSlotMap?.target }) : truncated,
       });
     }
     else if (slot.isPhrase) slotMap[slot.key] = trimToCompletePhrase({ text: truncated, isConservative: true });
@@ -458,9 +458,10 @@ function dropValuelessTailItem({ text }) {
 // 값 목록을 어절 상한에 맞출 때는 쉼표로 나뉜 항목을 통째로 넣거나 뺀다. 항목 가운데에서 자르면
 // "…, 2분기 신규"처럼 이름만 남고, 그 이름에 숫자가 들어 있어 완결된 항목처럼 보이기 때문이다.
 // 첫 항목부터 상한을 넘으면 어절에서 자르는 예전 방식으로 둔다.
-function fitWholeItemList({ text, maxWordCount }) {
+function fitWholeItemList({ text, maxWordCount, target = '' }) {
   const rawItemList = splitItemList({ text });
-  const itemList = countWord({ text: rawItemList.join(', ') }) > maxWordCount ? dropRepeatedItemWord({ itemList: rawItemList }) : rawItemList;
+  const itemList = countWord({ text: rawItemList.join(', ') }) > maxWordCount
+    ? dropRepeatedItemWord({ itemList: rawItemList, target }) : rawItemList;
   const keptList = [];
   for (const item of itemList) {
     if (countWord({ text: [...keptList, item].join(', ') }) > maxWordCount) break;
@@ -470,20 +471,23 @@ function fitWholeItemList({ text, maxWordCount }) {
   return dropValuelessTailItem({ text: keptList.join(', ') });
 }
 
-// 값 항목마다 되풀이된 낱말("1차 시험 82점, 2차 시험 88점"의 "시험")을 뺀다. 대개 대상 칸이 이미 말한 측정량 낱말이다.
+// 값 항목마다 되풀이된 낱말 가운데 대상 칸에도 나온 것("시험 점수" + "1차 시험 82점, 2차 시험 88점"의 "시험")만 뺀다.
+// 대상 칸이 이미 말한 측정량 낱말이라 빼도 뜻이 같다. 대상 칸에 없는 되풀이 낱말("10% 이상", "9시 반")은 값의 일부라 남긴다.
 // 항목이 셋 이상이면 하나를 빼고 모두에 나온 낱말도 뺀다. 낱말을 빼서 항목에 숫자만 남으면 그 항목은 그대로 둔다
 // (조건 이름이 사라지면 어느 값이 어느 항목의 것인지 모른다).
 const BARE_NUMBER_WORD_PATTERN = /^[+\-−]?\d[\d.,]*$/;
 
-function dropRepeatedItemWord({ itemList }) {
-  if (itemList.length < 2) return itemList;
+function dropRepeatedItemWord({ itemList, target = '' }) {
+  const targetWordSet = new Set(String(target || '').split(/[\s,·]+/).filter(Boolean));
+  if (itemList.length < 2 || !targetWordSet.size) return itemList;
   const wordListList = itemList.map((item) => item.split(/\s+/));
   const needCount = itemList.length >= 3 ? itemList.length - 1 : itemList.length;
   const countMap = new Map();
   for (const wordList of wordListList) {
     for (const word of new Set(wordList.filter((item) => !/\d/.test(item)))) countMap.set(word, (countMap.get(word) || 0) + 1);
   }
-  const repeatedSet = new Set([...countMap].filter(([, count]) => count >= needCount).map(([word]) => word));
+  const repeatedSet = new Set([...countMap]
+    .filter(([word, count]) => count >= needCount && targetWordSet.has(word)).map(([word]) => word));
   if (!repeatedSet.size) return itemList;
   return wordListList.map((wordList) => {
     const kept = wordList.filter((word) => !repeatedSet.has(word));
@@ -495,7 +499,7 @@ function dropRepeatedItemWord({ itemList }) {
 // 대상 칸이 상한에서 잘려 둘째 조건이 빠지고 둘째 값이 첫 조건의 값처럼 읽힌다. 항목 수가 같으면 순서대로 짝지어 값 칸으로 옮기고,
 // 항목 이름의 같은 끝말("방문객 수")은 대상 칸에 한 번만 둔다. 칸 상한을 적용하기 전(원 답 칸)에 한다.
 const BARE_VALUE_ITEM_PATTERN = /^(?:약\s*|about\s+)?[+\-−]?\d[\d.,]*\s*(?:%|퍼센트|[A-Za-z/]+|원|명|건|개|번|회|배|분|초|시간|일|년|도|점|위|세|℃)?$/;
-// 끝말 바로 앞의 기능어("운동 후 맥박"의 "후")는 조건에 속하므로 끝말로 묶지 않는다.
+// 끝말 바로 앞의 기능어("입고 후 재고"의 "후")는 조건에 속하므로 끝말로 묶지 않는다.
 const PAIR_FUNCTION_WORD_SET = new Set(['후', '전', '때', '중', '뒤', '동안', '이후', '이전', '당시', '시', 'after', 'before', 'during']);
 
 function pairTargetItemListWithValueList({ target, value }) {
@@ -584,7 +588,7 @@ function fitClaimPairToBudget({ target, value, maxWordCount, maxChars, language 
     target: targetWordList.join(' '), value: dropValuelessTailItem({ text: itemList.join(', ') }), language,
   });
   let fitted = build();
-  if (isOver(fitted)) { itemList = dropRepeatedItemWord({ itemList }); fitted = build(); }
+  if (isOver(fitted)) { itemList = dropRepeatedItemWord({ itemList, target }); fitted = build(); }
   while (isOver(fitted) && targetWordList.length > MIN_TARGET_WORD_COUNT) { targetWordList = targetWordList.slice(1); fitted = build(); }
   while (isOver(fitted) && itemList.length > 1) { itemList.pop(); fitted = build(); }
   return fitted;
