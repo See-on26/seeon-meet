@@ -66,7 +66,7 @@ test('형용사 + 지시 명사는 다르다는 말만으로 고르지 않고, �
   assert.match(deixisPrompt, /"그 이름이 그 성질을 가졌다고 말하지 않았다"며 O 로 하지 마라/);
   assert.match(deixisPrompt, /실제 이름 없이 안내만 있으면 근거가 아니다/);
   const deixisList = ROUTER_PROMPT_MAP[JUDGE_GROUP_MAP.deixis].fewShotList;
-  assert.ok(findContrastPair({ exampleList: deixisList, type: 'adjective_noun', isNamed: (after) => /서관 말이에요/.test(after) }), '한국어 이름 짝');
+  assert.ok(findContrastPair({ exampleList: deixisList, type: 'adjective_noun', isNamed: (after) => /고무나무 말이에요/.test(after) }), '한국어 이름 짝');
   assert.ok(findContrastPair({ exampleList: deixisList, type: 'adjective_noun', isNamed: (after) => /Bexa's the one/.test(after) }), '영어 이름 짝');
   assert.equal(deixisPrompt.includes('write B'), false);
 });
@@ -91,7 +91,7 @@ test('단순 수치는 발표자가 고른 항목이나 뒤 발화가 댄 항목
   assert.match(speechPrompt, /뒤 발화가 다른 말 뒤에라도 그 수치가 어느 항목의 값인지 이름을 댔다/);
   assert.match(speechPrompt, /어떻게 셌는지·어디서 뽑았는지·어느 범위의 값인지만 말하면 어느 항목인지 정해지지 않았다 → O/);
   assert.match(speechPrompt, /항목 이름을 댄 구절도 근거다/);
-  assert.match(speechPrompt, /앞뒤 발화가 항목을 정하지 않았다면 값이 적힌 곳\(장부·기록표·칸\)만 말한 것도 O 다/);
+  assert.match(speechPrompt, /앞뒤 발화가 항목을 정하지 않았다면 값이 적힌 곳\(화이트보드·메모장·칸\)만 말한 것도 O 다/);
   const speechList = ROUTER_PROMPT_MAP[JUDGE_GROUP_MAP.speech].fewShotList;
   assert.ok(findContrastPair({ exampleList: speechList, type: 'number', isNamed: (after) => /와셔 쪽/.test(after) }), '뒤 발화 항목 이름 짝');
   assert.ok(speechList.some((example) => example.input.candidateList[0].type === 'number' && example.output.judgeList[0].gap === 'X'

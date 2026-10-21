@@ -65,7 +65,7 @@ const CRITERIA_LINE_MAP = {
   [TRIGGER_TYPE_MAP.number]: [
     `· ${TRIGGER_TYPE_LABEL_MAP[TRIGGER_TYPE_MAP.number]}(30%, 12.5톤, 64 people): 무엇의 수치인지 밝히지 않았다.`,
     '  앞에서 항목을 여럿 말했는데 앞에서도 뒤에서도 그중 어느 것의 값인지 말하지 않았으면 O 다.',
-    '  "기록·결과·단가·숫자 하나"처럼 값의 종류만 있고 무엇을 세거나 잰 값인지 없으면 O 다. 앞뒤 발화가 항목을 정하지 않았다면 값이 적힌 곳(장부·기록표·칸)만 말한 것도 O 다.',
+    '  "기록·결과·단가·숫자 하나"처럼 값의 종류만 있고 무엇을 세거나 잰 값인지 없으면 O 다. 앞뒤 발화가 항목을 정하지 않았다면 값이 적힌 곳(화이트보드·메모장·칸)만 말한 것도 O 다.',
   ],
   [TRIGGER_TYPE_MAP.change]: [
     `· ${TRIGGER_TYPE_LABEL_MAP[TRIGGER_TYPE_MAP.change]}(올랐다, 더 높다, ~보다 낫다, 결국 감소했다, went down):`,
@@ -347,25 +347,25 @@ const ALL_FEW_SHOT_LIST = [
   },
   {
     input: {
-      before: '조별 불량률은 주간조 4.6%, 야간조 2.1%로 나왔고 주말조는 아직 정리 전이에요.',
-      utterance: '야간조 불량률이 주간조보다 낮았네요.',
-      after: '라인 배치는 그대로 갑니다.',
+      before: '성게는 아직 정리 전이라 빼고요, 전복은 한 마리 평균 38그램, 해삼은 52그램이 나왔어요.',
+      utterance: '전복 쪽이 해삼보다 가볍네요.',
+      after: '키우는 분들 말씀도 그렇더라고요.',
       candidateList: [
-        { id: 1, type: TRIGGER_TYPE_MAP.change, phrase: '주간조보다 낮았네요' },
+        { id: 1, type: TRIGGER_TYPE_MAP.change, phrase: '해삼보다 가볍네요' },
       ],
     },
-    output: { judgeList: [{ id: 1, gap: 'X', evidence: '주간조 4.6%, 야간조 2.1%로 나왔고', reason: '앞 문맥에서 야간조 2.1%, 주간조 4.6%로 양쪽 값을 밝혔다' }] },
+    output: { judgeList: [{ id: 1, gap: 'X', evidence: '전복은 한 마리 평균 38그램, 해삼은 52그램이 나왔어요', reason: '앞 문맥에서 전복 38그램, 해삼 52그램으로 양쪽 값을 밝혔다' }] },
   },
   {
     input: {
-      before: '조별 불량률은 주간조 4.6%, 야간조 2.1%로 나왔고 주말조는 아직 정리 전이에요.',
-      utterance: '주말조 불량률이 주간조보다 낮았네요.',
-      after: '라인 배치는 그대로 갑니다.',
+      before: '성게는 아직 정리 전이라 빼고요, 전복은 한 마리 평균 38그램, 해삼은 52그램이 나왔어요.',
+      utterance: '성게 쪽이 해삼보다 가볍네요.',
+      after: '키우는 분들 말씀도 그렇더라고요.',
       candidateList: [
-        { id: 1, type: TRIGGER_TYPE_MAP.change, phrase: '주간조보다 낮았네요' },
+        { id: 1, type: TRIGGER_TYPE_MAP.change, phrase: '해삼보다 가볍네요' },
       ],
     },
-    output: { judgeList: [{ id: 1, gap: 'O', evidence: '', reason: '앞 문맥의 값은 주간조·야간조 것이고 주말조 불량률은 발화에 없다' }] },
+    output: { judgeList: [{ id: 1, gap: 'O', evidence: '', reason: '앞 문맥의 값은 전복·해삼 것이고 성게 무게는 발화에 없다' }] },
   },
   {
     input: {
@@ -446,14 +446,14 @@ const ALL_FEW_SHOT_LIST = [
   },
   {
     input: {
-      before: 'We agreed at the last meeting to cover just one of the three pilot schools today, Linwood.',
+      before: 'We agreed at the last meeting to cover just one of the three pilot schools today, Oakhurst.',
       utterance: 'So, 91 percent of their students passed the reading check.',
       after: 'The full table is in the appendix.',
       candidateList: [
         { id: 1, type: TRIGGER_TYPE_MAP.number, phrase: '91 percent' },
       ],
     },
-    output: { judgeList: [{ id: 1, gap: 'X', evidence: 'We agreed at the last meeting to cover just one of the three pilot schools today, Linwood', reason: '지난 회의에서 정한 대로 세 학교 중 오늘 다룰 곳은 Linwood 다' }] },
+    output: { judgeList: [{ id: 1, gap: 'X', evidence: 'We agreed at the last meeting to cover just one of the three pilot schools today, Oakhurst', reason: '지난 회의에서 정한 대로 세 학교 중 오늘 다룰 곳은 Oakhurst 다' }] },
   },
   {
     input: {
@@ -490,25 +490,25 @@ const ALL_FEW_SHOT_LIST = [
   },
   {
     input: {
-      before: '이번 전시 때 동관하고 서관 중에 한 곳을 신제품 자리로 쓰기로 했어요.',
-      utterance: '조명이 밝은 쪽에 신제품을 놓으면 눈에 잘 띌 것 같아요.',
-      after: '아, 서관 말이에요, 천장 조명을 지난달에 새로 갈았거든요.',
+      before: '이번 바자회 때 몬스테라하고 고무나무 중에 하나를 포토존에 두기로 했어요.',
+      utterance: '잎이 무성한 쪽을 두면 눈에 잘 띌 것 같아요.',
+      after: '아, 고무나무 말이에요, 지난주에 분갈이를 하고 새잎이 많이 났거든요.',
       candidateList: [
-        { id: 1, type: TRIGGER_TYPE_MAP.adjectiveNoun, phrase: '밝은 쪽' },
+        { id: 1, type: TRIGGER_TYPE_MAP.adjectiveNoun, phrase: '무성한 쪽' },
       ],
     },
-    output: { judgeList: [{ id: 1, gap: 'X', evidence: '서관 말이에요', reason: '어느 곳이 밝은지 앞에서 말하지 않았지만 뒤 발화에서 서관이라고 이름을 댔다' }] },
+    output: { judgeList: [{ id: 1, gap: 'X', evidence: '고무나무 말이에요', reason: '어느 쪽 잎이 무성한지 앞에서 말하지 않았지만 뒤 발화에서 고무나무라고 이름을 댔다' }] },
   },
   {
     input: {
-      before: '이번 전시 때 동관하고 서관 중에 한 곳을 신제품 자리로 쓰기로 했어요.',
-      utterance: '조명이 밝은 쪽에 신제품을 놓으면 눈에 잘 띌 것 같아요.',
-      after: '아, 천장 조명을 지난달에 새로 갈았다고 들었거든요.',
+      before: '이번 바자회 때 몬스테라하고 고무나무 중에 하나를 포토존에 두기로 했어요.',
+      utterance: '잎이 무성한 쪽을 두면 눈에 잘 띌 것 같아요.',
+      after: '아, 지난주에 분갈이를 하고 새잎이 많이 났다고 들었거든요.',
       candidateList: [
-        { id: 1, type: TRIGGER_TYPE_MAP.adjectiveNoun, phrase: '밝은 쪽' },
+        { id: 1, type: TRIGGER_TYPE_MAP.adjectiveNoun, phrase: '무성한 쪽' },
       ],
     },
-    output: { judgeList: [{ id: 1, gap: 'O', evidence: '', reason: '두 곳 중 어느 곳이 밝은지 앞뒤 발화에 없다' }] },
+    output: { judgeList: [{ id: 1, gap: 'O', evidence: '', reason: '두 화분 중 어느 쪽 잎이 무성한지 앞뒤 발화에 없다' }] },
   },
   {
     input: {
