@@ -52,7 +52,7 @@ const {
   createFactCardTokenizer, selectFactCards, resolveFactCardUsage, formatFactCardSummary,
 } = require('./orchestrator/fact-card-select');
 const {
-  verifyValuePresence, approximateChartNarration, VALUE_PRESENCE_VERDICT_MAP, VALUE_CHECK_SOURCE_MAP,
+  verifyValuePresence, readValueCheckTarget, approximateChartNarration, VALUE_PRESENCE_VERDICT_MAP, VALUE_CHECK_SOURCE_MAP,
 } = require('./orchestrator/value-presence');
 const {
   createChartEstimator, detectTickSnapSuspect, toChartValueList, CHART_STATUS_MAP,
@@ -60,6 +60,7 @@ const {
 const {
   createFrameDecoder, resolveNativeImage, createChartFrameSaver, buildChartFrameTag,
 } = require('./perception/frame-bitmap');
+const { checkSpokenValueMatch, SPOKEN_VALUE_VERDICT_MAP } = require('./prompts/approximate-value');
 const {
   createScreenTextGrounding, shouldStartScreenTextGrounding, isScreenTextNarrationType, finalizeScreenTextRecord,
   formatScreenTextSummary,
@@ -1174,7 +1175,8 @@ function registerPipeline({ getViewerView, meetingArchive = null }) {
       const agent = agentFieldMap[narrationType] || agentFieldMap[NARRATION_TYPE_MAP.deixis];
       const {
         text: generatedText, isGrounded, slotMap, rejectKind = null, rejectReason = '', rawContent = '',
-        screenTextBlock = null, factCardBlock = null, chartBlock = null, appliedBudget = null,
+        screenTextBlock = null, factCardBlock = null, chartBlock = null, restoredTimeMark = null, droppedFact = null,
+        appliedBudget = null,
       } = await agent.generate({
         ...generatorArgs, ...(extraArgByTypeMap[narrationType] || {}), ...factCardArg,
       });
@@ -1185,6 +1187,11 @@ function registerPipeline({ getViewerView, meetingArchive = null }) {
         : null;
       const screenTextDetail = screenTextRecord ? ` · ${formatScreenTextSummary(screenTextRecord)}` : '';
       const factCardDetail = factCardRecord ? ` · ${formatFactCardSummary(factCardRecord)}` : '';
+      // 조립이 코드로 바꾼 것(근거 칸에서 되살린 시점, seen 에 없는 숫자라 읽지 않은 fact)을 남겨 기록에서 오탐을 셀 수 있게 한다.
+      const assemblyDetail = [
+        restoredTimeMark ? ` · 시점 되살림="${restoredTimeMark}"` : '',
+        droppedFact ? ` · 근거 없는 fact 뺌="${droppedFact}"` : '',
+      ].join('');
       await appendRecord({
         kind: RECORD_KIND_MAP.deixis, ts, utterance, caption: text, isGrounded, judgeReason, slideLabel,
         routerMode: config.routerMode, narrationType, subKind: selectedCandidate?.subKind || null,
@@ -1192,6 +1199,8 @@ function registerPipeline({ getViewerView, meetingArchive = null }) {
         ...(screenTextRecord ? { screenText: screenTextRecord } : {}),
         ...(factCardRecord ? { factCard: factCardRecord } : {}),
         ...(speechRoiResult.record ? { speechRoi: speechRoiResult.record } : {}),
+        ...(restoredTimeMark ? { restoredTimeMark } : {}),
+        ...(droppedFact ? { droppedFact } : {}),
       });
       if (!isGrounded || !text) {
         const rejection = describeAgentRejection({ rejectKind, rejectReason, rawContent });
@@ -1207,20 +1216,43 @@ function registerPipeline({ getViewerView, meetingArchive = null }) {
         });
         return { isOk: true, isGrounded: false };
       }
-      if (narrationType === NARRATION_TYPE_MAP.interpretation && slotMap?.value) {
+      const valueCheckTarget = readValueCheckTarget({
+        narrationType, subKind: selectedCandidate?.subKind || null, slotMap, text, contentSwitch: config.contentSwitch,
+      });
+      // 화면 값 먼저(켜짐)의 값→의미는 발표자가 말한 그 수를 읽는다. 값 칸의 수가 발화의 수(어림 값이면 ±15%)와 멀면
+      // 옆 막대·다른 항목의 화면 값으로 바꿔 쓴 것이라, 화면에 있는 값이어도 읽지 않는다.
+      const isSpokenValueChecked = config.contentSwitch?.isScreenValueFirstEnabled && valueCheckTarget
+        && valueCheckTarget.checkSubKind === INTERPRETATION_KIND_MAP.valueToMeaning;
+      const spokenValueMatch = isSpokenValueChecked ? checkSpokenValueMatch({ value: valueCheckTarget.value, utterance }) : null;
+      if (spokenValueMatch?.verdict === SPOKEN_VALUE_VERDICT_MAP.far) {
+        markDebug({
+          stage: DEBUG_STAGE_MAP.valueCheck, verdict: DEBUG_VERDICT_MAP.skip, ts, narrationType,
+          reason: '발화 값 대조 far — 발화의 수와 먼 값',
+          detail: `값="${valueCheckTarget.value}" · ${spokenValueMatch.reason} → "${text}"`,
+        });
+        await appendRecord({
+          kind: RECORD_KIND_MAP.deixis, ts, utterance, caption: text, isGrounded: false, slideLabel,
+          narrationType, subKind: selectedCandidate?.subKind || null, skipReason: 'value-far-from-spoken',
+          ...(screenTextRecord ? { screenText: screenTextRecord } : {}),
+          ...(factCardRecord ? { factCard: factCardRecord } : {}),
+          ...(speechRoiResult.record ? { speechRoi: speechRoiResult.record } : {}),
+        });
+        return { isOk: true, isGrounded: false };
+      }
+      if (valueCheckTarget) {
         const slideText = slideTextStore.get(slideLabel);
         // 해설이 본 것과 같은 프레임의 OCR 글자(믿을 줄만)가 끝나 있으면 저장 전사보다 먼저 그것과 대조한다.
         const frameText = screenTextTask?.peekFrameText() ?? null;
         const verifyValueOnSlide = (value) => verifyValuePresence({
           value, slideText: slideText.text, slideTextStatus: slideText.status, frameText,
           utterance, contextText: [beforeText, afterText].filter(Boolean).join(' '),
-          subKind: selectedCandidate?.subKind || INTERPRETATION_KIND_MAP.valueToMeaning,
+          subKind: valueCheckTarget.checkSubKind,
           // 값이 없다고 나오면 지금 화면을 OCR 과 다른 엔진(VLM)으로 다시 읽어, 클릭으로 나타난 값과 OCR 오독을 함께 거른다.
           retranscribe: () => slideTextAgent.transcribeWithVlm({ jpegBuffer: frameSet.screenFrame }),
           // 그래프 어림값을 프롬프트에 넣었을 때(on)만 화면에 적히지 않은 어림값을 있는 값으로 인정한다.
           chartValueList: toChartValueList(chartEstimate),
         });
-        const valueVerdict = await verifyValueOnSlide(slotMap.value);
+        const valueVerdict = await verifyValueOnSlide(valueCheckTarget.value);
         const verdictByValueMap = {
           [VALUE_PRESENCE_VERDICT_MAP.present]: DEBUG_VERDICT_MAP.pass,
           [VALUE_PRESENCE_VERDICT_MAP.absent]: DEBUG_VERDICT_MAP.skip,
@@ -1230,11 +1262,11 @@ function registerPipeline({ getViewerView, meetingArchive = null }) {
           [VALUE_CHECK_SOURCE_MAP.frameOcr]: '같은 프레임 OCR', [VALUE_CHECK_SOURCE_MAP.chartEstimate]: '그래프 어림값',
         };
         // 그래프 어림값이 있는데 값 칸 숫자가 눈금 값이고 어림값과 다르면, 막대를 눈금으로 반올림해 말한 것으로 의심해 기록만 남긴다.
-        const isTickSnapSuspect = detectTickSnapSuspect({ value: slotMap.value, chart: screenText?.chart });
+        const isTickSnapSuspect = detectTickSnapSuspect({ value: valueCheckTarget.value, chart: screenText?.chart });
         markDebug({
           stage: DEBUG_STAGE_MAP.valueCheck, verdict: verdictByValueMap[valueVerdict.verdict], ts, narrationType,
           reason: `값 존재 검사 ${valueVerdict.verdict}`,
-          detail: `값="${slotMap.value}" 슬라이드=${slideLabel || '-'} 전사=${slideText.status}`
+          detail: `값="${valueCheckTarget.value}" 슬라이드=${slideLabel || '-'} 전사=${slideText.status}`
             + ` 대조=${checkedSourceLabelMap[valueVerdict.checkedSource] || '저장 전사'}`
             + `${valueVerdict.reason ? ` · ${valueVerdict.reason}` : ''}`
             + `${isTickSnapSuspect ? ' · 눈금값 의심(tickSnapSuspect)' : ''} → "${text}"`,
@@ -1255,7 +1287,7 @@ function registerPipeline({ getViewerView, meetingArchive = null }) {
         const chartCoreList = [...(valueVerdict.chartCoreList || [])];
         let isSecondPairDropped = false;
         // 둘째 변화의 값이 화면에 없으면 둘째 쌍만 빼고 첫 쌍으로 읽는다. 첫 쌍은 에이전트가 쓴 전체 예산에 다시 맞춘다.
-        if (slotMap.value2 && text.includes(slotMap.value2)) {
+        if (slotMap?.value2 && text.includes(slotMap.value2)) {
           const secondVerdict = await verifyValueOnSlide(slotMap.value2);
           chartCoreList.push(...(secondVerdict.chartCoreList || []));
           if (secondVerdict.verdict === VALUE_PRESENCE_VERDICT_MAP.absent) {
@@ -1303,7 +1335,7 @@ function registerPipeline({ getViewerView, meetingArchive = null }) {
         stage: DEBUG_STAGE_MAP.vlm, verdict: DEBUG_VERDICT_MAP.pass, ts, narrationType,
         reason: `생성 ${narrationType}/${selectedCandidate?.subKind || '-'}`,
         detail: `발화="${utterance}" → "${text}" (${Date.now() - startedAt}ms, 예산 ${wordBudget?.minWordCount ?? '-'}~${wordBudget?.maxWordCount ?? '-'}어절)`
-          + screenTextDetail + factCardDetail,
+          + screenTextDetail + factCardDetail + assemblyDetail,
       });
 
       captionDescribed.add({ ts, text, slideLabel, elementList: [text] });

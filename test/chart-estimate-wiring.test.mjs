@@ -311,7 +311,7 @@ test('main: 수치 해설일 때만 어림을 기다리고, 프롬프트·값 �
   assert.doesNotMatch(visualArg, /chart/, '척도 에이전트에는 넘기지 않는다');
   assert.match(source, /chartValueList: toChartValueList\(chartEstimate\)/);
   assert.match(source, /finalizeScreenTextRecord\(\{ record: screenText\.record, screenTextBlock, chartBlock \}\)/);
-  assert.match(source, /detectTickSnapSuspect\(\{ value: slotMap\.value, chart: screenText\?\.chart \}\)/);
+  assert.match(source, /detectTickSnapSuspect\(\{ value: valueCheckTarget\.value, chart: screenText\?\.chart \}\)/);
 });
 
 // 흐름 창은 생성 기록 detail 의 → "문장" (Nms …) 에서 해설 문장과 걸린 시간을 읽는다. 그래프 어림 요약이 붙어도 그대로 읽어야 한다.

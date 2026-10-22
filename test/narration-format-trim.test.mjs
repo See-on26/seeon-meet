@@ -112,7 +112,8 @@ test('전체 예산: 조립한 해설이 어절 예산을 넘으면 되풀이 �
     '신규 가입자, 서울 1,200명, 부산 800명',
   );
   assert.equal(
-    claim({ target: '올해 상반기 신규 가입자', value: '서울 1,200명, 부산 800명, 대구 500명', maxWordCount: 6 }),
+    claim({ target: '올해 상반기 신규 가입자', value: '서울 1,200명, 부산 800명, 대구 500명', maxWordCount: 6,
+      contentSwitch: { isTimeMarkEnabled: true } }),
     '올해 상반기 신규 가입자, 서울 1,200명',
     '켜면(기본) 시점을 남기고 값 뒤 항목을 뺀다',
   );

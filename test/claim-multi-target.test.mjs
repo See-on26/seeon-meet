@@ -105,6 +105,7 @@ test('수치 에이전트는 실제로 쓴 전체 예산(언어 배율 적용값
 
   const reassemble = (budget) => assembleNarration({
     narrationType: 'interpretation', subKind: 'claim_to_value', rawSlotMap: { ...korean.slotMap, target2: '', value2: '' }, ...budget,
+    contentSwitch: { isTimeMarkEnabled: true },
   }).text;
   assert.equal(reassemble({}), '올해 상반기 신규 가입자, 서울 1,200명, 부산 800명, 대구 500명', '예산 없이 다시 조립하면 길게 되살아난다');
   // 대상 앞 시점("올해 상반기")은 예산을 맞출 때도 남긴다(시점 표기 지키기, 기본 켜짐).

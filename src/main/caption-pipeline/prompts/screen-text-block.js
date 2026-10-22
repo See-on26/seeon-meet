@@ -15,7 +15,14 @@ const SCREEN_TEXT_USAGE_LINE_MAP = {
   [SCREEN_TEXT_USAGE_MAP.scaleValue]: '  대상·비교 대상의 이름과 화면에 글자로 적힌 값(통계 패널·툴팁·범례·데이터 라벨·눈금)은 여기서 확인하되, 어느 글자가 어느 대상의 것인지는 반드시 이미지에서 확인한다. 이미지와 다르면 이미지를 따른다.',
 };
 // 척도 해설이 먼저 읽을 통계 줄(합계·평균·최댓값 등). 발화 낱말이 없어도 상한 안에 먼저 넣는다.
-const STAT_KEYWORD_PATTERN = /평균|합계|총계|총합|총액|누적|최대|최고|최소|최저|중앙값|\b(?:max|min|avg|average|mean|total|sum|median)\b/i;
+// 최대·최고·최소·최저는 뒤에 다른 낱말이 붙으면("최고경영자", "최대한", "최소화") 통계가 아니고,
+// 영어 max·min 은 뒤에 수나 ":"가 올 때만 통계다("5 min"의 min 은 분이다).
+const STAT_KEYWORD_PATTERN = new RegExp([
+  '평균|합계|총계|총합|총액|누적|중앙값',
+  '(?:최대|최고|최소|최저)(?:값|치|점|가)?(?![가-힣])',
+  '\\b(?:max|min)\\b\\s*[:=]?\\s*[-+]?\\d',
+  '\\b(?:avg|average|mean|total|sum|median)\\b',
+].join('|'), 'i');
 
 function isStatLine(text) {
   return STAT_KEYWORD_PATTERN.test(String(text || ''));

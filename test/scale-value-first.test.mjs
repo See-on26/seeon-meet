@@ -1,4 +1,5 @@
 import { test, afterEach } from 'node:test';
+import fs from 'node:fs';
 import assert from 'node:assert/strict';
 import { createRequire } from 'node:module';
 
@@ -10,12 +11,16 @@ const {
   buildVisualDescriptionPrompt, buildScaleScreenTextBlock,
 } = require('../src/main/caption-pipeline/prompts/visual-description.js');
 const { createVisualDescriptionAgent } = require('../src/main/caption-pipeline/agents/visual-description-agent.js');
+const { isStatLine } = require('../src/main/caption-pipeline/prompts/screen-text-block.js');
+const { readValueCheckTarget, isValuePresent } = require('../src/main/caption-pipeline/orchestrator/value-presence.js');
 
 // 척도 에이전트 다시 만들기: 회의 화면의 척도 대상은 대개 그래프·지도·표라 견줄 사물이 없어 "비교 대상 없음"으로 NONE 이 많았다.
 // 대상 둘레에 글자로 적힌 값(통계 패널·툴팁·범례·라벨·눈금)을 먼저 읽고, 대상이 보이면 NONE 을 내지 않게 한다.
 // 화면에 없는 값은 지어내지 않는다(막대·선 높이를 눈금으로 어림하지 않는다).
-const ON = { isScaleValueFirstEnabled: true };
-const OFF = { isScaleValueFirstEnabled: false };
+// 다른 스위치는 셸 환경변수에 기대지 않게 모두 켠 값으로 고정한다.
+const ALL_ON = { isFactCompleteEnabled: true, isTimeMarkEnabled: true, isScreenValueFirstEnabled: true, isScaleValueFirstEnabled: true };
+const ON = ALL_ON;
+const OFF = { ...ALL_ON, isScaleValueFirstEnabled: false };
 const LISTENER_LINE_PREFIX = '청자는 화면을 볼 수 없다. 발표자는';
 
 const scale = (rawSlotMap, option = {}) => assembleNarration({
@@ -119,4 +124,47 @@ test('척도 에이전트: config 스위치를 프롬프트·조립·OCR 양 세
   const off = await createVisualDescriptionAgent({ config: { ...config, contentSwitch: OFF } }).generate(generateArgs);
   assert.doesNotMatch(promptList[1], /"reading":/);
   assert.notDeepEqual(on.screenTextBlock, off.screenTextBlock);
+});
+
+// 척도는 NONE 을 덜 내게 바꿔 화면에 없는 값을 지어낼 위험이 커졌다. 수치 해설처럼 해설의 수가 화면 글자에 있는지 본다.
+test('척도 값 검사: 켜면 caption 의 수(배수 제외)를 화면 글자와 대조할 값으로 넘기고, 화면에 없으면 absent 다', () => {
+  const target = (caption, contentSwitch = ON) => readValueCheckTarget({
+    narrationType: 'visual_description', subKind: 'scale', slotMap: { reading: '', caption }, contentSwitch,
+  });
+  const invented = target('약 5,000건 정도로 가장 긴 막대');
+  assert.equal(invented.checkSubKind, 'claim_to_value', '화면 글자에만 대조한다(발화 제외)');
+  assert.match(invented.value, /5,000/);
+  assert.equal(isValuePresent({ ...invented, subKind: invented.checkSubKind, slideText: '분기별 처리 건수 1,240 310', slideTextStatus: 'ready' }).verdict,
+    'absent');
+  const written = target('옆 막대 310건보다 긴 1,240건 막대');
+  assert.equal(isValuePresent({ value: written.value, subKind: written.checkSubKind, slideText: '분기별 처리 건수 1,240건 310건', slideTextStatus: 'ready' }).verdict,
+    'present');
+  // 견준 배수·분수는 화면에 적힌 값이 아니라 대조하지 않는다.
+  assert.equal(target('소나무보다 4배 정도 큰 불상'), null);
+  assert.equal(target('옆 건물의 3분의 1 크기인 창고'), null);
+  assert.equal(target('옆 건물보다 높은 전망대'), null);
+  assert.equal(target('약 5,000건 정도로 가장 긴 막대', OFF), null, '끄면 예전처럼 척도는 대조하지 않는다');
+  // 칸 JSON 이 아닌 답(slotMap 없음)도 읽을 해설로 대조한다.
+  assert.match(readValueCheckTarget({ narrationType: 'visual_description', subKind: null, slotMap: null, text: '약 5,000건 정도로 가장 긴 막대',
+    contentSwitch: ON }).value, /5,000/);
+});
+
+test('값 검사 대상: 수치 해설은 예전과 같이 값 칸을, 그 세부 종류(없으면 값→의미)로 대조한다', () => {
+  assert.deepEqual(readValueCheckTarget({ narrationType: 'interpretation', subKind: 'claim_to_value', slotMap: { value: '9.2시간에서 3.1시간' }, contentSwitch: OFF }),
+    { value: '9.2시간에서 3.1시간', checkSubKind: 'claim_to_value' });
+  assert.deepEqual(readValueCheckTarget({ narrationType: 'interpretation', subKind: null, slotMap: { value: '73%' }, contentSwitch: OFF }),
+    { value: '73%', checkSubKind: 'value_to_meaning' });
+  assert.equal(readValueCheckTarget({ narrationType: 'interpretation', subKind: 'claim_to_value', slotMap: { value: '' }, contentSwitch: ON }), null);
+  assert.equal(readValueCheckTarget({ narrationType: 'deixis', subKind: 'simple', slotMap: { caption: '2024년 매출 표' }, contentSwitch: ON }), null);
+});
+
+test('파이프라인: 값 검사 대상을 readValueCheckTarget 으로 고르고 그 세부 종류로 대조한다', () => {
+  const source = fs.readFileSync(new URL('../src/main/caption-pipeline/index.js', import.meta.url), 'utf8');
+  assert.match(source, /readValueCheckTarget\(\{/);
+  assert.match(source, /subKind: valueCheckTarget\.checkSubKind/);
+});
+
+test('통계 줄: "최고경영자"·"5 min" 같은 낱말은 통계 줄로 보지 않는다', () => {
+  for (const text of ['최고 1,240건', '최대값 98', '합계 4,820건', 'max: 12', 'Min 3.2', '평균 3.2', 'total 4,820']) assert.equal(isStatLine(text), true, text);
+  for (const text of ['최고경영자 인사말', '5 min read', '최대한 빨리 처리', '최소화 방안']) assert.equal(isStatLine(text), false, text);
 });

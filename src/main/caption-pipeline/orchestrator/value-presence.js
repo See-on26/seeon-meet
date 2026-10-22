@@ -1,7 +1,11 @@
-const { INTERPRETATION_KIND_MAP } = require('../contracts/narration-types');
+const { NARRATION_TYPE_MAP, INTERPRETATION_KIND_MAP, VISUAL_DESCRIPTION_KIND_MAP } = require('../contracts/narration-types');
 const { CAPTION_LANGUAGE_MAP } = require('../contracts/caption-language');
 const { assembleNarration } = require('../agents/shared/narration-format');
 const { SLIDE_TEXT_STATUS_MAP } = require('./slide-text-store');
+const { resolveContentSwitch } = require('../agents/shared/content-switch');
+const {
+  NUMBER_CORE_PATTERN, extractNumberCoreList, containsNumberCore, normalizeForSearch, findMissingNumberCoreList,
+} = require('../agents/shared/number-core');
 
 const VALUE_PRESENCE_VERDICT_MAP = {
   present: 'present',
@@ -13,22 +17,6 @@ const VALUE_PRESENCE_VERDICT_MAP = {
 // chart_estimate = 화면에 적히지 않은 숫자를 그래프 어림값(막대 높이를 축 눈금으로 환산한 값)으로 인정.
 const VALUE_CHECK_SOURCE_MAP = { frameOcr: 'frame_ocr', slideText: 'slide_text', chartEstimate: 'chart_estimate' };
 
-const NUMBER_CORE_PATTERN = /\d+(?:[.,]\d+)*/g;
-
-function extractNumberCoreList(text) {
-  return (String(text || '').match(NUMBER_CORE_PATTERN) || []).map((core) => core.replace(/,/g, ''));
-}
-
-function escapeRegExp(text) {
-  return text.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
-}
-
-// 앞뒤가 다른 숫자로 이어지면 같은 값이 아니다. 예: "73" 은 "73.5"·"173" 과 다르다.
-function containsNumberCore({ haystack, core }) {
-  const pattern = new RegExp(`(?<![\\d.])${escapeRegExp(core)}(?!\\d|\\.\\d)`);
-  return pattern.test(haystack);
-}
-
 // ASR 이 수를 한글로 적으면("칠십삼 퍼센트", "두 배") 숫자로 정규화된 값과 글자로 대조할 수 없다.
 const SINO_NUMERAL_PATTERN = /[일이삼사오육칠팔구십백천만억]+\s*(?:퍼센트|프로|배|명|건|개|원|위|년|세|단계|점|초|분|시간)/;
 const NATIVE_NUMERAL_PATTERN = /(?:한|두|세|네|다섯|여섯|일곱|여덟|아홉|열|스무|서른|마흔|쉰)\s*(?:배|명|건|개|가지|번|단계|곳|살)/;
@@ -37,8 +25,23 @@ function hasSpokenKoreanNumber(text) {
   return SINO_NUMERAL_PATTERN.test(text) || NATIVE_NUMERAL_PATTERN.test(text);
 }
 
-function normalizeForSearch(text) {
-  return String(text || '').replace(/(\d),(\d)/g, '$1$2');
+// 척도 해설에서 견준 배수·분수("4배", "3분의 1", "2 times")는 화면에 적힌 값이 아니라 모델이 견주어 낸 크기라 대조하지 않는다.
+const SCALE_RATIO_PATTERN = /\d+(?:\.\d+)?\s*(?:배|분의\s*\d+(?:\.\d+)?|times\b|x\b|×)/gi;
+const DIGIT_PATTERN = /\d/;
+
+// 해설이 화면에 적힌 값을 읽었는지 대조할 값과, 대조에 쓸 세부 종류.
+// 수치 해설은 값 칸을 그 세부 종류로 본다(값→의미는 발화도 함께 본다). 척도 값 먼저(켜짐)의 척도 해설은 NONE 을 덜 내게 바꿔
+// 화면에 없는 값을 지어낼 위험이 커졌으므로, 읽을 해설(text, 칸 JSON 이 아니어도 같다)의 수(배수·분수 제외)를 화면 글자에만
+// 대조한다(주장→값과 같다). text 가 없으면 caption 칸을 본다.
+function readValueCheckTarget({ narrationType, subKind = null, slotMap = null, text = '', contentSwitch = null }) {
+  if (narrationType === NARRATION_TYPE_MAP.interpretation) {
+    return slotMap?.value ? { value: slotMap.value, checkSubKind: subKind || INTERPRETATION_KIND_MAP.valueToMeaning } : null;
+  }
+  const isScale = narrationType === NARRATION_TYPE_MAP.visualDescription
+    && (subKind || VISUAL_DESCRIPTION_KIND_MAP.scale) === VISUAL_DESCRIPTION_KIND_MAP.scale;
+  if (!isScale || !resolveContentSwitch(contentSwitch).isScaleValueFirstEnabled) return null;
+  const value = String(text || slotMap?.caption || '').replace(SCALE_RATIO_PATTERN, ' ').replace(/\s+/g, ' ').trim();
+  return DIGIT_PATTERN.test(value) ? { value, checkSubKind: INTERPRETATION_KIND_MAP.claimToValue } : null;
 }
 
 // 값 슬롯의 숫자가 화면 글자(값→의미는 트리거 발화와 앞뒤 발화도 포함)에 실제로 있는지 본다.
@@ -173,6 +176,6 @@ function approximateChartNarration({ narrationType, subKind, slotMap, coreList, 
 }
 
 module.exports = {
-  isValuePresent, verifyValuePresence, VALUE_PRESENCE_VERDICT_MAP, VALUE_CHECK_SOURCE_MAP,
+  isValuePresent, verifyValuePresence, findMissingNumberCoreList, readValueCheckTarget, VALUE_PRESENCE_VERDICT_MAP, VALUE_CHECK_SOURCE_MAP,
   markApproximateNumber, hasUnmarkedApproximateNumber, approximateChartNarration,
 };
