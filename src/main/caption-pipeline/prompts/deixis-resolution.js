@@ -5,6 +5,7 @@ const {
 const { DEFAULT_CAPTION_LANGUAGE } = require('../contracts/caption-language');
 const { buildOutputLanguageRuleList } = require('./output-language-rule');
 const { resolveContentSwitch } = require('../agents/shared/content-switch');
+const { buildFactCardBlock, FACT_CARD_USAGE_MAP } = require('./fact-card-block');
 
 const DEFAULT_DEIXIS_MIN_WORD_COUNT = 4;
 const DEFAULT_DEIXIS_MAX_WORD_COUNT = 8;
@@ -61,10 +62,13 @@ function buildFactCompleteRuleList({ subKind, isFactCompleteEnabled }) {
 function buildGroundingPrompt({ utterance, recentTranscript, maxChars,
   hasPointingRegion = false, pointingOrderHint = '',
   minWordCount = DEFAULT_DEIXIS_MIN_WORD_COUNT, maxWordCount = DEFAULT_DEIXIS_MAX_WORD_COUNT,
-  subKind = null, mergedAnchorList = [], language = DEFAULT_CAPTION_LANGUAGE, contentSwitch = null }) {
+  subKind = null, mergedAnchorList = [], factCardList = [], language = DEFAULT_CAPTION_LANGUAGE, contentSwitch = null }) {
   const trimmedUtterance = (utterance || '').trim();
   const resolvedSwitch = resolveContentSwitch(contentSwitch);
   const { isFactCompleteEnabled } = resolvedSwitch;
+  // 화면 사실 카드는 구역 이름·구성만 넣고 항목 값·이름은 넣지 않는다(옆 상자 값을 대상에 붙이지 않게).
+  // 기본으로는 받지 않는다(SEEON_FACT_CARD_AGENTS 에 deixis 가 있을 때만). 카드가 없으면 빈 덩어리다.
+  const factCardBlock = buildFactCardBlock({ cardList: factCardList, usage: FACT_CARD_USAGE_MAP.deixis });
   const formRuleList = readFormRuleList({ subKind, isFactCompleteEnabled });
   return [
     hasPointingRegion
@@ -80,6 +84,8 @@ function buildGroundingPrompt({ utterance, recentTranscript, maxChars,
     mergedAnchorList.length
       ? `발표자가 지시한 표현: ${mergedAnchorList.join(', ')}. 이 대상이 무엇인지도 caption 안에 함께 밝혀라.`
       : '',
+    // 사실 카드 덩어리는 청자 줄 바로 앞에 빈 줄 하나를 두고 넣는다. 카드가 없으면 프롬프트는 글자 하나까지 그대로다.
+    factCardBlock.text ? `${factCardBlock.text}\n` : '',
     '청자는 화면을 볼 수 없다. 발표자가 가리킨 대상 중, 말로는 아직 설명되지 않은 시각 정보를 보충하는 캡션을 만들어라.',
     SPEECH_GAP_DECIDED_RULE,
     '가리킨 대상의 이름(지명·항목명·제품명 등)은 화면에서 읽어 반드시 밝힌다 — 지시어로만 들은 청자는 그것이 어느 것인지 모른다.',

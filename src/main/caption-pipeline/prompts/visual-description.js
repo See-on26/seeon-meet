@@ -8,6 +8,7 @@ const { buildOutputLanguageRuleList } = require('./output-language-rule');
 const { buildScreenTextBlock, isStatLine, SCREEN_TEXT_USAGE_MAP } = require('./screen-text-block');
 const { resolveContentSwitch } = require('../agents/shared/content-switch');
 const { extractApproximateValueList, isNearApproximateValue, buildApproximateValueLine } = require('./approximate-value');
+const { buildFactCardBlock, FACT_CARD_USAGE_MAP } = require('./fact-card-block');
 
 const DEFAULT_VISUAL_WORD_RANGE_MAP = {
   [VISUAL_DESCRIPTION_KIND_MAP.reaction]: { minWordCount: 5, maxWordCount: 12 },
@@ -59,8 +60,8 @@ const SCALE_VALUE_FIRST_RULE_LIST = [
 
 function buildVisualDescriptionPrompt({ subKind = VISUAL_DESCRIPTION_KIND_MAP.reaction,
   utterance = '', recentTranscript = '', minWordCount, maxWordCount, maxChars = null,
-  describedElementList = [], mergedAnchorList = [], origin = null, screenLineList = [], language = DEFAULT_CAPTION_LANGUAGE,
-  contentSwitch = null }) {
+  describedElementList = [], mergedAnchorList = [], origin = null, screenLineList = [], factCardList = [],
+  language = DEFAULT_CAPTION_LANGUAGE, contentSwitch = null }) {
   const resolvedSwitch = resolveContentSwitch(contentSwitch);
   const defaultRange = DEFAULT_VISUAL_WORD_RANGE_MAP[subKind]
     || DEFAULT_VISUAL_WORD_RANGE_MAP[VISUAL_DESCRIPTION_KIND_MAP.reaction];
@@ -93,6 +94,8 @@ function buildVisualDescriptionPrompt({ subKind = VISUAL_DESCRIPTION_KIND_MAP.re
 
   if (isScaleValueFirst) {
     const screenTextBlock = buildScaleScreenTextBlock({ screenLineList, utterance, mergedAnchorList, contentSwitch: resolvedSwitch });
+    // 척도 해설에 넣을 화면 사실 카드(발화와 가까운 카드 1장). 카드가 없으면 빈 덩어리다.
+    const factCardBlock = buildFactCardBlock({ cardList: factCardList, usage: FACT_CARD_USAGE_MAP.scale });
     return [
       '이 이미지는 회의에서 공유 중인 화면이다.',
       `발표자가 방금 이렇게 말했다: "${(utterance || '').trim()}"`,
@@ -101,6 +104,8 @@ function buildVisualDescriptionPrompt({ subKind = VISUAL_DESCRIPTION_KIND_MAP.re
         ? `발표자가 지시한 표현: ${mergedAnchorList.join(', ')}. 이 대상이 무엇인지도 함께 밝혀라.`
         : '',
       resolvedSwitch.isScreenValueFirstEnabled ? buildApproximateValueLine(extractApproximateValueList(utterance)) : '',
+      // 사실 카드 덩어리는 화면 글자 덩어리 바로 앞에 빈 줄 하나를 두고 넣는다. 카드가 없으면 프롬프트는 글자 하나까지 그대로다.
+      factCardBlock.text ? `${factCardBlock.text}\n` : '',
       // 화면 글자 덩어리는 예전 척도 프롬프트처럼 청자 줄 바로 앞에 빈 줄 하나를 두고 넣는다.
       screenTextBlock.text ? `${screenTextBlock.text}\n` : '',
       '',
@@ -117,6 +122,8 @@ function buildVisualDescriptionPrompt({ subKind = VISUAL_DESCRIPTION_KIND_MAP.re
 
   if (isScale) {
     const screenTextBlock = buildScaleScreenTextBlock({ screenLineList, utterance, mergedAnchorList, contentSwitch: resolvedSwitch });
+    // 척도 해설에 넣을 화면 사실 카드(발화와 가까운 카드 1장). 카드가 없으면 빈 덩어리다.
+    const factCardBlock = buildFactCardBlock({ cardList: factCardList, usage: FACT_CARD_USAGE_MAP.scale });
     return [
       '이 이미지는 회의에서 공유 중인 화면이다.',
       `발표자가 방금 이렇게 말했다: "${(utterance || '').trim()}"`,
@@ -125,6 +132,8 @@ function buildVisualDescriptionPrompt({ subKind = VISUAL_DESCRIPTION_KIND_MAP.re
         ? `발표자가 지시한 표현: ${mergedAnchorList.join(', ')}. 이 대상이 무엇인지도 함께 밝혀라.`
         : '',
       resolvedSwitch.isScreenValueFirstEnabled ? buildApproximateValueLine(extractApproximateValueList(utterance)) : '',
+      // 사실 카드 덩어리는 화면 글자 덩어리 바로 앞에 빈 줄 하나를 두고 넣는다. 카드가 없으면 프롬프트는 글자 하나까지 그대로다.
+      factCardBlock.text ? `${factCardBlock.text}\n` : '',
       // 화면 글자 덩어리는 청자 줄 바로 앞에 빈 줄 하나를 두고 넣는다. 덩어리가 없으면 프롬프트는 글자 하나까지 그대로다.
       screenTextBlock.text ? `${screenTextBlock.text}\n` : '',
       '',

@@ -9,6 +9,7 @@ const {
   buildInterpretationPrompt, buildInterpretationScreenTextBlock, INTERPRETATION_RULE_MAP,
   DEFAULT_INTERPRETATION_MIN_WORD_COUNT, DEFAULT_INTERPRETATION_MAX_WORD_COUNT,
 } = require('../prompts/interpretive-bridge');
+const { buildFactCardBlock, FACT_CARD_USAGE_MAP } = require('../prompts/fact-card-block');
 const { DEFAULT_CAPTION_LANGUAGE } = require('../contracts/caption-language');
 
 const AGENT_LABEL = '해석연결';
@@ -17,7 +18,7 @@ function createInterpretiveBridgeAgent({ config, getCaptionLanguage = () => DEFA
   async function generate({ jpegBuffer, utterance, recentTranscript = '',
     subKind = null, minWordCount = DEFAULT_INTERPRETATION_MIN_WORD_COUNT,
     maxWordCount = DEFAULT_INTERPRETATION_MAX_WORD_COUNT,
-    describedElementList = [], mergedAnchorList = [], mergedClaimList = [], screenLineList = [],
+    describedElementList = [], mergedAnchorList = [], mergedClaimList = [], screenLineList = [], factCardList = [],
     language = getCaptionLanguage() }) {
     // 렌더러의 어절 예산을 캡션 언어의 단어 수로 바꾼다(영어는 상한을 ENGLISH_WORD_SCALE 배로, 한국어는 그대로).
     ({ minWordCount, maxWordCount } = scaleWordBudget({ minWordCount, maxWordCount, language }));
@@ -27,13 +28,14 @@ function createInterpretiveBridgeAgent({ config, getCaptionLanguage = () => DEFA
       config, jpegBuffer, label: AGENT_LABEL, maxTokens: SLOT_AGENT_MAX_TOKENS,
       prompt: buildInterpretationPrompt({
         utterance, recentTranscript, subKind, minWordCount, maxWordCount,
-        maxChars: effectiveMaxChars, describedElementList, mergedAnchorList, mergedClaimList, screenLineList, language, contentSwitch,
+        maxChars: effectiveMaxChars, describedElementList, mergedAnchorList, mergedClaimList, screenLineList, factCardList, language, contentSwitch,
       }),
     });
     // 프롬프트에 실제로 들어간 화면 글자 양을 기록용으로 함께 돌려준다.
     const { lineCount, charCount, numberLineCount } = buildInterpretationScreenTextBlock({
       screenLineList, utterance, subKind, mergedAnchorList, mergedClaimList, contentSwitch,
     });
+    const factCardBlock = buildFactCardBlock({ cardList: factCardList, usage: FACT_CARD_USAGE_MAP.value });
     return {
       ...parseSlotCaption({
         content,
@@ -42,6 +44,7 @@ function createInterpretiveBridgeAgent({ config, getCaptionLanguage = () => DEFA
         maxChars: effectiveMaxChars, maxWordCount, hasSecondClaim: mergedClaimList.length > 0, language, contentSwitch,
       }),
       screenTextBlock: { lineCount, charCount, numberLineCount },
+      factCardBlock: { cardCount: factCardBlock.cardCount, charCount: factCardBlock.charCount },
       // 둘째 값이 화면에 없어 첫 쌍만 다시 조립할 때도 같은 전체 예산으로 줄이도록, 실제로 쓴 예산(언어 배율 적용값)을 돌려준다.
       appliedBudget: { maxWordCount, maxChars: effectiveMaxChars },
     };

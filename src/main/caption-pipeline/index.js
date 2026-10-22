@@ -46,6 +46,11 @@ const { describeAgentRejection } = require('./agents/shared/caption-parser');
 const { assembleNarration } = require('./agents/shared/narration-format');
 const { createOcrClient } = require('./agents/shared/ocr-client');
 const { createSlideTextStore } = require('./orchestrator/slide-text-store');
+const { createFactCardAgent } = require('./agents/fact-card-agent');
+const { createFactCardStore, FACT_CARD_STATUS_MAP } = require('./orchestrator/fact-card-store');
+const {
+  createFactCardTokenizer, selectFactCards, resolveFactCardUsage, formatFactCardSummary,
+} = require('./orchestrator/fact-card-select');
 const { verifyValuePresence, VALUE_PRESENCE_VERDICT_MAP, VALUE_CHECK_SOURCE_MAP } = require('./orchestrator/value-presence');
 const {
   createScreenTextGrounding, shouldStartScreenTextGrounding, isScreenTextNarrationType, finalizeScreenTextRecord,
@@ -239,9 +244,12 @@ function registerPipeline({ getViewerView, meetingArchive = null }) {
     ocrClient, isEnabled: () => config.isScreenTextGroundingEnabled,
   });
   ipcMain.handle('pipeline-slide-text-backend-default', async () => ({ backend: config.slideTextBackend }));
+  // 장마다 전사를 읽은 엔진(ocr·vlm). 사실 카드 값 검증 기록에 대조 원본으로 남긴다.
+  const slideTextSourceMap = new Map();
   const slideTextStore = createSlideTextStore({
     transcribe: ({ jpegBuffer }) => slideTextAgent.transcribe({ jpegBuffer }),
     onSettled: ({ slideLabel, status, textLength, errorMessage, source, fallbackReason, lineCount, elapsedMs }) => {
+      slideTextSourceMap.set(slideLabel, source || null);
       markDebug({
         stage: DEBUG_STAGE_MAP.valueCheck,
         verdict: status === 'failed' ? DEBUG_VERDICT_MAP.fail : DEBUG_VERDICT_MAP.info,
@@ -254,6 +262,32 @@ function registerPipeline({ getViewerView, meetingArchive = null }) {
         slideLabel, status, text: slideTextStore.get(slideLabel).text,
       });
       labelReadySlides();
+    },
+  });
+  // 화면 사실 카드(SEEON_FACT_CARD). 새 장의 전사와 나란히 VLM 한 번으로 만들고, 카드의 숫자는 그 전사 글자로 검증한다.
+  // 해설 순간에는 만들어 둔 카드에서 고르기만 하고 VLM 을 더 부르지 않는다.
+  const factCardAgent = createFactCardAgent({ config });
+  const factCardTokenizer = createFactCardTokenizer({ kiwiTokenizer });
+  const factCardStore = createFactCardStore({
+    build: ({ jpegBuffer }) => factCardAgent.build({ jpegBuffer }),
+    slideTextStore,
+    readSlideTextSource: (major) => slideTextSourceMap.get(major) ?? null,
+    isEnabled: () => config.isFactCardEnabled,
+    onSettled: ({ slideLabel, status, frameTs, isRetry, screenTitle, cardList, verify, elapsedMs, queuedMs,
+      rawLength, jsonMode, isTruncated, errorMessage }) => {
+      appendRecord({
+        kind: RECORD_KIND_MAP.factSheet, ts: Date.now(), slideLabel, status, frameTs, isRetry, screenTitle, cardList,
+        verify, elapsedMs, queuedMs, jsonMode, rawLength, isTruncated, ...(errorMessage ? { errorMessage } : {}),
+      }).catch(() => {});
+      markDebug({
+        stage: DEBUG_STAGE_MAP.context,
+        verdict: status === FACT_CARD_STATUS_MAP.failed ? DEBUG_VERDICT_MAP.fail : DEBUG_VERDICT_MAP.info,
+        reason: `슬라이드 ${slideLabel} 사실 카드 ${status}${isRetry ? '(복귀 재시도)' : ''}`,
+        detail: `${cardList.length}장 [${cardList.map((card) => card.title || card.kind || '-').join(', ')}]`
+          + ` 생성 ${elapsedMs ?? '-'}ms 대기 ${queuedMs ?? '-'}ms`
+          + `${verify ? ` · 값 검증 ${verify.source} 비움 ${verify.droppedValueCount}/${verify.checkedValueCount}` : ''}`
+          + `${isTruncated ? ' · 출력 상한에서 잘림' : ''}${errorMessage ? ` · ${errorMessage}` : ''}`,
+      });
     },
   });
 
@@ -370,6 +404,8 @@ function registerPipeline({ getViewerView, meetingArchive = null }) {
     narrationHistory.reset();
     silenceGate.reset();
     slideTextStore.reset();
+    factCardStore.reset();
+    slideTextSourceMap.clear();
     boundaryTrigger.reset();
     const meetingLanguage = applySessionMeetingLanguage({ asrLanguageSession, asrLanguage });
     sessionSlideTextBackend = resolveSlideTextBackend({ requested: slideTextBackend, fallback: config.slideTextBackend });
@@ -439,6 +475,10 @@ function registerPipeline({ getViewerView, meetingArchive = null }) {
     const startedAt = Date.now();
     describedStore.setCurrentSlide(slideLabel);
     console.log(`[pipeline] ▶ 전환 프레임 ts=${ts} slide=${slideLabel}${isRevisit ? ' (복귀)' : ''} (${Math.round(buffer.byteLength / 1024)}KB)`);
+    // 건너뛰었거나 실패한 사실 카드는 그 장으로 돌아와 체류가 확정된 프레임으로 한 번만 다시 만든다(저장소가 상태·횟수를 본다).
+    if (isRevisit && config.isFactCardEnabled) {
+      factCardStore.ensure({ slideLabel, jpegBuffer: Buffer.from(buffer), isRetry: true });
+    }
     try {
       const result = await agentFieldMap[NARRATION_TYPE_MAP.pageTransition].generate({
         jpegBuffer: Buffer.from(buffer), ts,
@@ -639,7 +679,10 @@ function registerPipeline({ getViewerView, meetingArchive = null }) {
   });
 
   ipcMain.handle('pipeline-slide-text', async (_event, { slideLabel, buffer }) => {
-    const isStarted = slideTextStore.ensure({ slideLabel, jpegBuffer: Buffer.from(buffer) });
+    const jpegBuffer = Buffer.from(buffer);
+    const isStarted = slideTextStore.ensure({ slideLabel, jpegBuffer });
+    // 사실 카드는 같은 그림으로 전사와 나란히 만든다(카드 쪽이 한 번에 하나, 밀리면 최신 장만).
+    if (config.isFactCardEnabled) factCardStore.ensure({ slideLabel, jpegBuffer });
     return { isOk: true, isStarted };
   });
 
@@ -1003,9 +1046,28 @@ function registerPipeline({ getViewerView, meetingArchive = null }) {
 
       const narrationType = selectedCandidate?.type || NARRATION_TYPE_MAP.deixis;
       // 수치·척도 해설이면 판단 뒤 상한까지만 OCR 을 기다려 그 줄을 근거로 넘긴다. 늦거나 없으면 덩어리 없이(지금 프롬프트로) 만든다.
-      const screenText = isScreenTextNarrationType(narrationType) && screenTextTask
-        ? await screenTextTask.waitForPrompt()
+      const screenTextPromise = isScreenTextNarrationType(narrationType) && screenTextTask
+        ? screenTextTask.waitForPrompt()
         : null;
+      // 사실 카드가 아직 만들어지는 중이면 같은 프레임 OCR 을 기다리는 동안만 함께 기다린다(새 대기 없음).
+      // OCR 작업이 없으면(지시 해설, OCR 근거 꺼짐) 기다리지 않고 지금 준비된 카드만 쓴다.
+      const factCardUsage = resolveFactCardUsage({
+        narrationType, subKind: selectedCandidate?.subKind || null,
+        isEnabled: config.isFactCardEnabled, agentList: config.factCardAgentList,
+      });
+      const factCardStatePromise = factCardUsage
+        ? factCardStore.waitUntil({ slideLabel, untilPromise: screenTextPromise })
+        : null;
+      const screenText = screenTextPromise ? await screenTextPromise : null;
+      const factCardState = factCardStatePromise ? await factCardStatePromise : null;
+      const factCard = factCardState ? selectFactCards({
+        state: factCardState, usage: factCardUsage, utterance,
+        anchorList: [
+          selectedCandidate?.anchor, ...(selectedCandidate?.mergedAnchorList || []), ...(selectedCandidate?.mergedClaimList || []),
+        ],
+        beforeText, frameLineList: screenText?.lineList || [], requestTs: ts, tokenizer: factCardTokenizer,
+      }) : null;
+      const factCardArg = factCard?.cardList.length ? { factCardList: factCard.cardList } : {};
 
       const wordBudget = wordBudgetMap?.[narrationType] || null;
       const generatorArgs = {
@@ -1027,18 +1089,23 @@ function registerPipeline({ getViewerView, meetingArchive = null }) {
       const agent = agentFieldMap[narrationType] || agentFieldMap[NARRATION_TYPE_MAP.deixis];
       const {
         text: generatedText, isGrounded, slotMap, rejectKind = null, rejectReason = '', rawContent = '',
-        screenTextBlock = null, appliedBudget = null,
+        screenTextBlock = null, factCardBlock = null, appliedBudget = null,
       } = await agent.generate({
-        ...generatorArgs, ...(extraArgByTypeMap[narrationType] || {}),
+        ...generatorArgs, ...(extraArgByTypeMap[narrationType] || {}), ...factCardArg,
       });
       let text = generatedText;
       const screenTextRecord = screenText ? finalizeScreenTextRecord({ record: screenText.record, screenTextBlock }) : null;
+      const factCardRecord = factCard
+        ? { ...factCard.record, charCount: factCardBlock?.charCount ?? 0, waitedMs: factCardState.waitedMs }
+        : null;
       const screenTextDetail = screenTextRecord ? ` · ${formatScreenTextSummary(screenTextRecord)}` : '';
+      const factCardDetail = factCardRecord ? ` · ${formatFactCardSummary(factCardRecord)}` : '';
       await appendRecord({
         kind: RECORD_KIND_MAP.deixis, ts, utterance, caption: text, isGrounded, judgeReason, slideLabel,
         routerMode: config.routerMode, narrationType, subKind: selectedCandidate?.subKind || null,
         ...(isGrounded && text ? {} : { rejectKind, rejectReason, rawContent }),
         ...(screenTextRecord ? { screenText: screenTextRecord } : {}),
+        ...(factCardRecord ? { factCard: factCardRecord } : {}),
       });
       if (!isGrounded || !text) {
         const rejection = describeAgentRejection({ rejectKind, rejectReason, rawContent });
@@ -1047,7 +1114,7 @@ function registerPipeline({ getViewerView, meetingArchive = null }) {
           stage: DEBUG_STAGE_MAP.vlm, verdict: DEBUG_VERDICT_MAP.skip, ts, narrationType,
           reason: rejection.reason,
           detail: `${rejection.detailPrefix}발화="${utterance}" 세부=${selectedCandidate?.subKind || '-'} (${Date.now() - startedAt}ms)`
-            + screenTextDetail,
+            + screenTextDetail + factCardDetail,
         });
         return { isOk: true, isGrounded: false };
       }
@@ -1080,6 +1147,7 @@ function registerPipeline({ getViewerView, meetingArchive = null }) {
             kind: RECORD_KIND_MAP.deixis, ts, utterance, caption: text, isGrounded: false, slideLabel,
             narrationType, subKind: selectedCandidate?.subKind || null, skipReason: 'value-absent',
             ...(screenTextRecord ? { screenText: screenTextRecord } : {}),
+            ...(factCardRecord ? { factCard: factCardRecord } : {}),
           });
           return { isOk: true, isGrounded: false };
         }
@@ -1105,7 +1173,7 @@ function registerPipeline({ getViewerView, meetingArchive = null }) {
         stage: DEBUG_STAGE_MAP.vlm, verdict: DEBUG_VERDICT_MAP.pass, ts, narrationType,
         reason: `생성 ${narrationType}/${selectedCandidate?.subKind || '-'}`,
         detail: `발화="${utterance}" → "${text}" (${Date.now() - startedAt}ms, 예산 ${wordBudget?.minWordCount ?? '-'}~${wordBudget?.maxWordCount ?? '-'}어절)`
-          + screenTextDetail,
+          + screenTextDetail + factCardDetail,
       });
 
       captionDescribed.add({ ts, text, slideLabel, elementList: [text] });

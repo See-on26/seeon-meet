@@ -9,6 +9,7 @@ const { resolveContentSwitch } = require('../agents/shared/content-switch');
 const {
   extractApproximateValueList, isNearApproximateValue, buildApproximateValueLine, SCREEN_VALUE_FIRST_RULE,
 } = require('./approximate-value');
+const { buildFactCardBlock, FACT_CARD_USAGE_MAP } = require('./fact-card-block');
 
 const DEFAULT_INTERPRETATION_MIN_WORD_COUNT = 6;
 const DEFAULT_INTERPRETATION_MAX_WORD_COUNT = 12;
@@ -75,7 +76,7 @@ function buildInterpretationPrompt({ utterance, recentTranscript = '', subKind =
   minWordCount = DEFAULT_INTERPRETATION_MIN_WORD_COUNT,
   maxWordCount = DEFAULT_INTERPRETATION_MAX_WORD_COUNT,
   maxChars = null, describedElementList = [], mergedAnchorList = [], mergedClaimList = [],
-  screenLineList = [], language = DEFAULT_CAPTION_LANGUAGE, contentSwitch = null }) {
+  screenLineList = [], factCardList = [], language = DEFAULT_CAPTION_LANGUAGE, contentSwitch = null }) {
   const resolvedSwitch = resolveContentSwitch(contentSwitch);
   const effectiveMaxChars = Number.isFinite(maxChars) ? maxChars : computeMaxChars({ maxWordCount, language });
   const screenTextBlock = buildInterpretationScreenTextBlock({
@@ -84,6 +85,8 @@ function buildInterpretationPrompt({ utterance, recentTranscript = '', subKind =
   const approximateValueLine = buildApproximateValueLine(readApproximateValueList({
     utterance, mergedClaimList, contentSwitch: resolvedSwitch,
   }));
+  // 슬라이드 확정 때 만들어 둔 화면 사실 카드 중 발화와 가까운 것(factCardList). 카드가 없으면 빈 덩어리다.
+  const factCardBlock = buildFactCardBlock({ cardList: factCardList, usage: FACT_CARD_USAGE_MAP.value });
   const ruleList = INTERPRETATION_RULE_MAP[subKind]
     || [...INTERPRETATION_RULE_MAP[INTERPRETATION_KIND_MAP.valueToMeaning],
       ...INTERPRETATION_RULE_MAP[INTERPRETATION_KIND_MAP.claimToValue]];
@@ -103,6 +106,8 @@ function buildInterpretationPrompt({ utterance, recentTranscript = '', subKind =
         + ' 같은 대상·같은 값을 다시 말한 것이면 "target2"·"value2"는 빈 문자열로 둔다.'
       : '',
     approximateValueLine,
+    // 사실 카드 덩어리는 화면 글자 덩어리 바로 앞에 빈 줄 하나를 두고 넣는다. 카드가 없으면 프롬프트는 글자 하나까지 그대로다.
+    factCardBlock.text ? `${factCardBlock.text}\n` : '',
     // 화면 글자 덩어리는 규칙 바로 앞에 빈 줄 하나를 두고 넣는다. 덩어리가 없으면 프롬프트는 글자 하나까지 그대로다.
     screenTextBlock.text ? `${screenTextBlock.text}\n` : '',
     '',
