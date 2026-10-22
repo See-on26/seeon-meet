@@ -384,6 +384,59 @@ test('켬: 가리킴 짝·합침 안내 문장', () => {
   assert.doesNotMatch(pointing, /어느 값이 어느 항목의 것인지는 첫째 이미지/);
 });
 
+// 사실 카드·그래프 어림값은 화면 전체를 읽은 덩어리라 "이미지와 다르면"·"막대 수가 맞지 않으면"을 확대 그림과 맞춰 보면
+// 일부만 보이는 둘째 이미지 때문에 버려진다. 두 장일 때 그런 덩어리가 있으면 첫째 이미지와 맞춰 보라는 줄을 더한다.
+const WHOLE_SCREEN_BLOCK_LINE = '아래 참고 덩어리(사실 카드·OCR 글자·그래프 어림값)는 화면 전체를 읽은 것이다.'
+  + ' 덩어리를 이미지와 맞춰 볼 때는 첫째 이미지와 맞추고, 둘째 이미지에 일부만 보인다고 맞지 않는다고 보지 않는다.';
+const wholeScreenCard = {
+  id: '3:1', kind: 'chart', title: '지역별 판매량', position: '왼쪽', period: '2023~2024', unit: '천 대',
+  axisList: [{ name: '판매량', from: '0', to: '800' }], legendList: ['2023', '2024'], headerList: [],
+  itemList: [{ label: '서울', value: '2023 410, 2024 520', note: '', isValueVerified: null }], count: 5, matchedItemIndexList: [0],
+};
+const wholeScreenChart = {
+  status: 'ok', isSnapped: true, unit: '', tickMin: 0, tickMax: 1000, step: 200,
+  valueList: [{ label: '서울', value: 520, raw: 520.3 }, { label: '부산', value: 280, raw: 280.1 }],
+};
+
+test('켬: 화면 전체를 읽은 덩어리(사실 카드·그래프 어림값)가 함께 들어가면 두 장 안내가 그 덩어리를 첫째 이미지와 맞춰 보게 한다', () => {
+  const zoom = { zoomKind: 'speech', zoomTerm: '서울' };
+  const contentSwitchList = [undefined, { isFactCompleteEnabled: false, isTimeMarkEnabled: false, isScreenValueFirstEnabled: false, isScaleValueFirstEnabled: false }];
+  for (const contentSwitch of contentSwitchList) {
+    const deixisBase = { utterance: '여기 서울 보시면', maxChars: 60, subKind: 'simple', contentSwitch, ...zoom };
+    const valueBase = { utterance: '서울이 늘었습니다', subKind: 'claim_to_value', contentSwitch, ...zoom };
+    const scaleBase = { utterance: '서울 정말 크죠', subKind: 'scale', contentSwitch, ...zoom };
+    const withBlockList = [
+      buildGroundingPrompt({ ...deixisBase, factCardList: [wholeScreenCard] }),
+      buildInterpretationPrompt({ ...valueBase, factCardList: [wholeScreenCard] }),
+      buildInterpretationPrompt({ ...valueBase, chartEstimate: wholeScreenChart }),
+      buildVisualDescriptionPrompt({ ...scaleBase, factCardList: [wholeScreenCard] }),
+    ];
+    for (const prompt of withBlockList) {
+      const lineList = prompt.split('\n');
+      const lineIndex = lineList.indexOf(WHOLE_SCREEN_BLOCK_LINE);
+      assert.ok(lineIndex > 0, '두 장 안내 안에 있다');
+      assert.equal(lineList[lineIndex + 1], '이미지가 두 장이라는 것, 확대했다는 것은 출력에 쓰지 않는다.', '두 장 안내 끝줄 바로 앞');
+      assert.ok(lineIndex < lineList.findIndex((line) => line.startsWith('발표자가 방금')), '발화 줄보다 앞');
+    }
+    // 덩어리가 없거나(OCR 글자만 있는 것은 두 장 안내가 이미 첫째 이미지 배치로 확인하게 한다) 한 장이면 줄이 없다.
+    const withoutBlockList = [
+      buildGroundingPrompt(deixisBase),
+      buildInterpretationPrompt({ ...valueBase, screenLineList: [{ text: '서울 410 520', score: 0.93 }] }),
+      buildVisualDescriptionPrompt(scaleBase),
+      buildGroundingPrompt({ ...deixisBase, zoomKind: null, factCardList: [wholeScreenCard] }),
+      buildInterpretationPrompt({ ...valueBase, zoomKind: null, factCardList: [wholeScreenCard], chartEstimate: wholeScreenChart }),
+      buildVisualDescriptionPrompt({ ...scaleBase, zoomKind: null, factCardList: [wholeScreenCard] }),
+    ];
+    for (const prompt of withoutBlockList) assert.ok(!prompt.includes(WHOLE_SCREEN_BLOCK_LINE));
+  }
+  // 척도는 값 먼저 판이든 예전 판이든 두 장이면 첫 줄을 두 장 안내로 바꾼다.
+  for (const isScaleValueFirstEnabled of [true, false]) {
+    const prompt = buildVisualDescriptionPrompt({ utterance: '서울 정말 크죠', subKind: 'scale', contentSwitch: { isScaleValueFirstEnabled }, ...zoom });
+    assert.ok(prompt.startsWith('첫째 이미지는 회의에서 공유 중인 화면 전체다.\n'), String(isScaleValueFirstEnabled));
+    assert.doesNotMatch(prompt, /이 이미지는/);
+  }
+});
+
 test('척도 아닌 시각 묘사(반응·무발화)는 확대 인자가 와도 한 장', async () => {
   const bodyList = installFetch('{"description":"사진"}');
   await createVisualDescriptionAgent({ config: vlmConfig }).generate({

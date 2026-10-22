@@ -19,8 +19,15 @@ function buildZoomFocus({ zoomKind, zoomTerm }) {
   return `${toSpokenFocus(zoomTerm)}를`;
 }
 
+// 사실 카드·그래프 어림값은 화면 전체를 읽은 덩어리다. 덩어리의 "이미지와 다르면"·"막대 수·순서가 맞지 않으면"을 일부만 보이는
+// 확대 그림과 맞춰 보면 맞는 덩어리도 버려지므로, 그런 덩어리가 함께 들어갈 때 첫째 이미지와 맞춰 보게 한다.
+const WHOLE_SCREEN_BLOCK_LINE = '아래 참고 덩어리(사실 카드·OCR 글자·그래프 어림값)는 화면 전체를 읽은 것이다.'
+  + ' 덩어리를 이미지와 맞춰 볼 때는 첫째 이미지와 맞추고, 둘째 이미지에 일부만 보인다고 맞지 않는다고 보지 않는다.';
+
 // 확대 그림이 없으면 빈 목록이다(호출부는 지금의 한 장 안내를 그대로 쓴다).
-function buildZoomImageIntroLineList({ zoomKind = null, zoomTerm = null, usage = ZOOM_USAGE_MAP.target } = {}) {
+// hasWholeScreenBlock: 사실 카드·그래프 어림값 덩어리가 같은 프롬프트에 들어가는지. OCR 글자만 있으면 값 줄이 이미 배치를 첫째 이미지로 확인하게 한다.
+function buildZoomImageIntroLineList({ zoomKind = null, zoomTerm = null, usage = ZOOM_USAGE_MAP.target,
+  hasWholeScreenBlock = false } = {}) {
   if (!Object.values(ZOOM_KIND_MAP).includes(zoomKind)) return [];
   return [
     '첫째 이미지는 회의에서 공유 중인 화면 전체다.',
@@ -29,6 +36,7 @@ function buildZoomImageIntroLineList({ zoomKind = null, zoomTerm = null, usage =
     usage === ZOOM_USAGE_MAP.value
       ? '값·항목 이름은 둘째 이미지에서 먼저 읽되, 어느 값이 어느 항목의 것인지는 첫째 이미지의 배치로 확인한다.'
       : '',
+    hasWholeScreenBlock ? WHOLE_SCREEN_BLOCK_LINE : '',
     '이미지가 두 장이라는 것, 확대했다는 것은 출력에 쓰지 않는다.',
   ].filter(Boolean);
 }

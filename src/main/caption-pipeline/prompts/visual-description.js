@@ -94,11 +94,14 @@ function buildVisualDescriptionPrompt({ subKind = VISUAL_DESCRIPTION_KIND_MAP.re
   ].filter(Boolean);
 
   // zoomKind 가 있으면 [화면 전체, 확대] 두 장 요청이라 척도 프롬프트(값 먼저 판·예전 판 모두)의 첫 줄을 두 장 안내로 바꾼다. 척도만 두 장을 받는다.
-  const zoomIntroLineList = isScale ? buildZoomImageIntroLineList({ zoomKind, zoomTerm, usage: ZOOM_USAGE_MAP.value }) : [];
+  const readScaleZoomIntroLineList = ({ factCardBlock }) => buildZoomImageIntroLineList({
+    zoomKind, zoomTerm, usage: ZOOM_USAGE_MAP.value, hasWholeScreenBlock: Boolean(factCardBlock.text),
+  });
   if (isScaleValueFirst) {
     const screenTextBlock = buildScaleScreenTextBlock({ screenLineList, utterance, mergedAnchorList, contentSwitch: resolvedSwitch });
     // 척도 해설에 넣을 화면 사실 카드(발화와 가까운 카드 1장). 카드가 없으면 빈 덩어리다.
     const factCardBlock = buildFactCardBlock({ cardList: factCardList, usage: FACT_CARD_USAGE_MAP.scale });
+    const zoomIntroLineList = readScaleZoomIntroLineList({ factCardBlock });
     return [
       ...(zoomIntroLineList.length ? zoomIntroLineList : ['이 이미지는 회의에서 공유 중인 화면이다.']),
       `발표자가 방금 이렇게 말했다: "${(utterance || '').trim()}"`,
@@ -127,6 +130,7 @@ function buildVisualDescriptionPrompt({ subKind = VISUAL_DESCRIPTION_KIND_MAP.re
     const screenTextBlock = buildScaleScreenTextBlock({ screenLineList, utterance, mergedAnchorList, contentSwitch: resolvedSwitch });
     // 척도 해설에 넣을 화면 사실 카드(발화와 가까운 카드 1장). 카드가 없으면 빈 덩어리다.
     const factCardBlock = buildFactCardBlock({ cardList: factCardList, usage: FACT_CARD_USAGE_MAP.scale });
+    const zoomIntroLineList = readScaleZoomIntroLineList({ factCardBlock });
     return [
       ...(zoomIntroLineList.length ? zoomIntroLineList : ['이 이미지는 회의에서 공유 중인 화면이다.']),
       `발표자가 방금 이렇게 말했다: "${(utterance || '').trim()}"`,

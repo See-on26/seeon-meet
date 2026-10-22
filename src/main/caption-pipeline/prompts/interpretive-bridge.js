@@ -111,7 +111,9 @@ function buildInterpretationPrompt({ utterance, recentTranscript = '', subKind =
     hasChartEstimate,
   });
   // zoomKind 가 있으면 [화면 전체, 확대] 두 장 요청이라 첫 줄을 두 장 안내로 바꾼다.
-  const zoomIntroLineList = buildZoomImageIntroLineList({ zoomKind, zoomTerm, usage: ZOOM_USAGE_MAP.value });
+  const zoomIntroLineList = buildZoomImageIntroLineList({
+    zoomKind, zoomTerm, usage: ZOOM_USAGE_MAP.value, hasWholeScreenBlock: Boolean(factCardBlock.text || chartBlock.text),
+  });
   return [
     ...(zoomIntroLineList.length ? zoomIntroLineList : ['이 이미지는 회의에서 공유 중인 화면이다.']),
     `발표자가 방금 이렇게 말했다: "${(utterance || '').trim()}"`,

@@ -73,7 +73,9 @@ function buildGroundingPrompt({ utterance, recentTranscript, maxChars,
   // 기본으로는 받지 않는다(SEEON_FACT_CARD_AGENTS 에 deixis 가 있을 때만). 카드가 없으면 빈 덩어리다.
   const factCardBlock = buildFactCardBlock({ cardList: factCardList, usage: FACT_CARD_USAGE_MAP.deixis });
   const formRuleList = readFormRuleList({ subKind, isFactCompleteEnabled });
-  const zoomIntroLineList = buildZoomImageIntroLineList({ zoomKind, zoomTerm, usage: ZOOM_USAGE_MAP.target });
+  const zoomIntroLineList = buildZoomImageIntroLineList({
+    zoomKind, zoomTerm, usage: ZOOM_USAGE_MAP.target, hasWholeScreenBlock: Boolean(factCardBlock.text),
+  });
   return [
     ...(zoomIntroLineList.length ? zoomIntroLineList : [hasPointingRegion
       ? '이 이미지는 회의 공유화면에서 발표자가 방금 필기하거나 포인터로 가리킨 영역을 확대한 것이다.'
