@@ -6,6 +6,8 @@ const {
 const { DEFAULT_CAPTION_LANGUAGE } = require('../contracts/caption-language');
 const { buildOutputLanguageRuleList } = require('./output-language-rule');
 const { buildScreenTextBlock, SCREEN_TEXT_USAGE_MAP } = require('./screen-text-block');
+const { resolveContentSwitch } = require('../agents/shared/content-switch');
+const { extractApproximateValueList, buildApproximateValueLine } = require('./approximate-value');
 
 const DEFAULT_VISUAL_WORD_RANGE_MAP = {
   [VISUAL_DESCRIPTION_KIND_MAP.reaction]: { minWordCount: 5, maxWordCount: 12 },
@@ -26,7 +28,9 @@ function buildScaleScreenTextBlock({ screenLineList = [], utterance = '', merged
 
 function buildVisualDescriptionPrompt({ subKind = VISUAL_DESCRIPTION_KIND_MAP.reaction,
   utterance = '', recentTranscript = '', minWordCount, maxWordCount, maxChars = null,
-  describedElementList = [], mergedAnchorList = [], origin = null, screenLineList = [], language = DEFAULT_CAPTION_LANGUAGE }) {
+  describedElementList = [], mergedAnchorList = [], origin = null, screenLineList = [], language = DEFAULT_CAPTION_LANGUAGE,
+  contentSwitch = null }) {
+  const resolvedSwitch = resolveContentSwitch(contentSwitch);
   const defaultRange = DEFAULT_VISUAL_WORD_RANGE_MAP[subKind]
     || DEFAULT_VISUAL_WORD_RANGE_MAP[VISUAL_DESCRIPTION_KIND_MAP.reaction];
   const effectiveMinWordCount = Number.isFinite(minWordCount) ? minWordCount : defaultRange.minWordCount;
@@ -60,6 +64,7 @@ function buildVisualDescriptionPrompt({ subKind = VISUAL_DESCRIPTION_KIND_MAP.re
       mergedAnchorList.length
         ? `발표자가 지시한 표현: ${mergedAnchorList.join(', ')}. 이 대상이 무엇인지도 함께 밝혀라.`
         : '',
+      resolvedSwitch.isScreenValueFirstEnabled ? buildApproximateValueLine(extractApproximateValueList(utterance)) : '',
       // 화면 글자 덩어리는 청자 줄 바로 앞에 빈 줄 하나를 두고 넣는다. 덩어리가 없으면 프롬프트는 글자 하나까지 그대로다.
       screenTextBlock.text ? `${screenTextBlock.text}\n` : '',
       '',

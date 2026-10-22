@@ -5,6 +5,8 @@ const CONTENT_SWITCH_ENV_NAME_MAP = {
   isFactCompleteEnabled: 'SEEON_FACT_COMPLETE_ENABLED',
   // 시점 표기 지키기: 예산 맞추기에서 대상 칸의 시점 낱말을 빼지 않고, 근거 칸에 하나뿐인 시점이 해설에서 빠졌으면 되살린다.
   isTimeMarkEnabled: 'SEEON_TIME_MARK_ENABLED',
+  // 발화 어림 되풀이 막기: 발표자가 어림해 말한 수("약 800")를 짚어, 화면에 글자로 적힌 값이 있으면 그 값을 말하게 한다.
+  isScreenValueFirstEnabled: 'SEEON_SCREEN_VALUE_FIRST_ENABLED',
 };
 
 function readContentSwitch(env = process.env) {

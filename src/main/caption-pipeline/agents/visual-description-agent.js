@@ -4,6 +4,7 @@ const {
 } = require('./shared/caption-parser');
 const { requestVlmContent } = require('./shared/vlm-gateway');
 const { scaleWordBudget } = require('./shared/narration-format');
+const { resolveContentSwitch } = require('./shared/content-switch');
 const {
   buildVisualDescriptionPrompt, buildScaleScreenTextBlock, DEFAULT_VISUAL_WORD_RANGE_MAP,
 } = require('../prompts/visual-description');
@@ -39,17 +40,18 @@ function createVisualDescriptionAgent({ config, getCaptionLanguage = () => DEFAU
     }
     const effectiveMaxWordCount = Number.isFinite(maxWordCount) ? maxWordCount : defaultRange.maxWordCount;
     const effectiveMaxChars = computeMaxChars({ maxWordCount: effectiveMaxWordCount, language });
+    const contentSwitch = resolveContentSwitch(config?.contentSwitch);
     const content = await requestVlmContent({
       config, jpegBuffer, label: AGENT_LABEL, temperature: VISUAL_DESCRIPTION_TEMPERATURE, maxTokens: SLOT_AGENT_MAX_TOKENS,
       prompt: buildVisualDescriptionPrompt({
         subKind, utterance, recentTranscript, minWordCount, maxWordCount,
-        maxChars: effectiveMaxChars, describedElementList, mergedAnchorList, origin, screenLineList, language,
+        maxChars: effectiveMaxChars, describedElementList, mergedAnchorList, origin, screenLineList, language, contentSwitch,
       }),
     });
     const parsed = parseSlotCaption({
       content: wrapPlainSilenceContent({ content, origin }),
       narrationType: NARRATION_TYPE_MAP.visualDescription, subKind, origin,
-      maxChars: effectiveMaxChars, maxWordCount: effectiveMaxWordCount, language,
+      maxChars: effectiveMaxChars, maxWordCount: effectiveMaxWordCount, language, contentSwitch,
     });
     if (subKind !== VISUAL_DESCRIPTION_KIND_MAP.scale) return parsed;
     // 척도는 프롬프트에 실제로 들어간 화면 글자 양을 기록용으로 함께 돌려준다.

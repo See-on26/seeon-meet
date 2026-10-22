@@ -6,6 +6,9 @@ const { DEFAULT_CAPTION_LANGUAGE } = require('../contracts/caption-language');
 const { buildOutputLanguageRuleList } = require('./output-language-rule');
 const { buildScreenTextBlock } = require('./screen-text-block');
 const { resolveContentSwitch } = require('../agents/shared/content-switch');
+const {
+  extractApproximateValueList, isNearApproximateValue, buildApproximateValueLine, SCREEN_VALUE_FIRST_RULE,
+} = require('./approximate-value');
 
 const DEFAULT_INTERPRETATION_MIN_WORD_COUNT = 6;
 const DEFAULT_INTERPRETATION_MAX_WORD_COUNT = 12;
@@ -49,12 +52,22 @@ const TIME_MARK_RULE = '    시점(연도·분기·월·주)은 지우지 않는
 
 // 같은 화면을 OCR 로 읽은 줄(screenLineList)로 프롬프트에 넣을 덩어리를 만든다. 줄 고르기는 발화와
 // 해설이 함께 다루는 표현(지시 구·둘째 변화 구)의 낱말을 본다. 줄이 없으면 빈 덩어리다.
+// 화면 값 먼저(켜짐)면 발화의 어림 값에 가까운 수가 든 줄도 먼저 넣는다 — 화면에 적힌 정확한 값을 모델이 확인할 수 있게.
+function readApproximateValueList({ utterance = '', mergedClaimList = [], contentSwitch }) {
+  return contentSwitch.isScreenValueFirstEnabled
+    ? extractApproximateValueList([utterance || '', ...mergedClaimList].join('\n')) : [];
+}
+
 function buildInterpretationScreenTextBlock({ screenLineList = [], utterance = '', subKind = null,
-  mergedAnchorList = [], mergedClaimList = [] }) {
+  mergedAnchorList = [], mergedClaimList = [], contentSwitch = null }) {
+  const approximateValueList = readApproximateValueList({
+    utterance, mergedClaimList, contentSwitch: resolveContentSwitch(contentSwitch),
+  });
   return buildScreenTextBlock({
     lineList: screenLineList,
     keywordSourceList: [utterance || '', ...mergedAnchorList, ...mergedClaimList],
     isClaimToValue: subKind === INTERPRETATION_KIND_MAP.claimToValue,
+    isPriorityLine: approximateValueList.length ? (text) => isNearApproximateValue({ text, approximateValueList }) : null,
   });
 }
 
@@ -66,8 +79,11 @@ function buildInterpretationPrompt({ utterance, recentTranscript = '', subKind =
   const resolvedSwitch = resolveContentSwitch(contentSwitch);
   const effectiveMaxChars = Number.isFinite(maxChars) ? maxChars : computeMaxChars({ maxWordCount, language });
   const screenTextBlock = buildInterpretationScreenTextBlock({
-    screenLineList, utterance, subKind, mergedAnchorList, mergedClaimList,
+    screenLineList, utterance, subKind, mergedAnchorList, mergedClaimList, contentSwitch: resolvedSwitch,
   });
+  const approximateValueLine = buildApproximateValueLine(readApproximateValueList({
+    utterance, mergedClaimList, contentSwitch: resolvedSwitch,
+  }));
   const ruleList = INTERPRETATION_RULE_MAP[subKind]
     || [...INTERPRETATION_RULE_MAP[INTERPRETATION_KIND_MAP.valueToMeaning],
       ...INTERPRETATION_RULE_MAP[INTERPRETATION_KIND_MAP.claimToValue]];
@@ -86,6 +102,7 @@ function buildInterpretationPrompt({ utterance, recentTranscript = '', subKind =
         + ' 그 대상이 첫 변화의 대상과 다르면(예: 매출과 방문자 수) "target2"·"value2"에 그 대상과 화면의 값을 쓴다.'
         + ' 같은 대상·같은 값을 다시 말한 것이면 "target2"·"value2"는 빈 문자열로 둔다.'
       : '',
+    approximateValueLine,
     // 화면 글자 덩어리는 규칙 바로 앞에 빈 줄 하나를 두고 넣는다. 덩어리가 없으면 프롬프트는 글자 하나까지 그대로다.
     screenTextBlock.text ? `${screenTextBlock.text}\n` : '',
     '',
@@ -103,6 +120,7 @@ function buildInterpretationPrompt({ utterance, recentTranscript = '', subKind =
     '',
     '규칙:',
     '(1) 화면에 실제로 보이는 값·문구만 쓴다. **추정하거나 지어내지 않는다.**',
+    resolvedSwitch.isScreenValueFirstEnabled ? SCREEN_VALUE_FIRST_RULE : '',
     `(2) 화면에서 근거를 찾을 수 없으면 "${GROUNDING_NONE_TOKEN}"만 출력한다.`,
     '(3) 발화 문장을 그대로 옮기지 마라. **핵심만 짧은 명사구로 간추린다.**',
     '    "이 상태가 달라집니다" → "준비 상태에 따른 차이"',

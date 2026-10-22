@@ -32,7 +32,7 @@ function createInterpretiveBridgeAgent({ config, getCaptionLanguage = () => DEFA
     });
     // 프롬프트에 실제로 들어간 화면 글자 양을 기록용으로 함께 돌려준다.
     const { lineCount, charCount, numberLineCount } = buildInterpretationScreenTextBlock({
-      screenLineList, utterance, subKind, mergedAnchorList, mergedClaimList,
+      screenLineList, utterance, subKind, mergedAnchorList, mergedClaimList, contentSwitch,
     });
     return {
       ...parseSlotCaption({

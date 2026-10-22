@@ -383,12 +383,27 @@ const ENGLISH_FACT_COMPLETE_LABEL_MAP = {
   },
 };
 
+// 화면 값 먼저(SEEON_SCREEN_VALUE_FIRST_ENABLED): 값→의미의 값 칸을 "발화에 나온 수치"로 안내하면 발표자의 어림 값("약 800")을
+// 그대로 옮겼다. 화면에 글자로 적힌 꼴을 쓰게 한다.
+const SCREEN_VALUE_FIRST_VALUE_LABEL = '발표자가 말한 그 수치를 화면에 적힌 꼴 그대로 — 발화가 어림한 값(약·쯤·정도)이면'
+  + ' 화면에 글자로 적힌 정확한 값 (예: 73%)';
+const ENGLISH_SCREEN_VALUE_FIRST_VALUE_LABEL = 'the figure the speaker said, as written on screen — if the speaker approximated it'
+  + ' ("about", "around"), the exact value written on screen (e.g. 73%)';
+
+function isScreenValueLabelSlotList({ narrationType, subKind, contentSwitch }) {
+  return contentSwitch.isScreenValueFirstEnabled && narrationType === NARRATION_TYPE_MAP.interpretation
+    && subKind === INTERPRETATION_KIND_MAP.valueToMeaning;
+}
+
 function readSlotList({ narrationType, subKind, origin = null, hasSecondClaim = false, contentSwitch }) {
   const isSilenceDescription = origin === NARRATION_ORIGIN_MAP.silence
     && narrationType === NARRATION_TYPE_MAP.visualDescription && subKind === VISUAL_DESCRIPTION_KIND_MAP.reaction;
   if (isSilenceDescription) return SILENCE_DESCRIPTION_SLOT_LIST;
   const factSlotList = contentSwitch.isFactCompleteEnabled ? FACT_COMPLETE_SLOT_MAP[narrationType]?.[subKind] : null;
-  const slotList = factSlotList || NARRATION_SLOT_MAP[narrationType]?.[subKind] || null;
+  const baseSlotList = factSlotList || NARRATION_SLOT_MAP[narrationType]?.[subKind] || null;
+  const slotList = baseSlotList && isScreenValueLabelSlotList({ narrationType, subKind, contentSwitch })
+    ? baseSlotList.map((slot) => (slot.key === 'value' ? { ...slot, label: SCREEN_VALUE_FIRST_VALUE_LABEL } : slot))
+    : baseSlotList;
   const isClaimPair = hasSecondClaim && narrationType === NARRATION_TYPE_MAP.interpretation
     && subKind === INTERPRETATION_KIND_MAP.claimToValue;
   if (!slotList || !isClaimPair) return slotList;
@@ -419,6 +434,7 @@ function readEnglishLabelMap({ narrationType, subKind, contentSwitch }) {
   return {
     ...(ENGLISH_SLOT_LABEL_MAP[narrationType]?.[subKind] || {}),
     ...(contentSwitch.isFactCompleteEnabled ? ENGLISH_FACT_COMPLETE_LABEL_MAP[narrationType]?.[subKind] : null),
+    ...(isScreenValueLabelSlotList({ narrationType, subKind, contentSwitch }) ? { value: ENGLISH_SCREEN_VALUE_FIRST_VALUE_LABEL } : null),
   };
 }
 

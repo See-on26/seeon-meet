@@ -97,11 +97,12 @@ function toTrimmedTextList(lineList) {
 
 // 상한 안에서 ① 발화 낱말·숫자가 든 줄 → ② 숫자가 있는 줄 → ③ 나머지 순으로 고르고, 고른 줄은 원래의 위→아래 순서로 돌려준다.
 // 위에서부터 자르면 글자 많은 화면 아래쪽에 있는 말한 대상의 줄이 빠진다.
-function selectScreenTextLineList({ lineList, keywordSourceList = [], maxChars = SCREEN_TEXT_MAX_CHARS }) {
+// isPriorityLine: 발화 낱말이 없어도 ①로 올릴 줄(발화의 어림 값에 가까운 수가 든 줄 등).
+function selectScreenTextLineList({ lineList, keywordSourceList = [], maxChars = SCREEN_TEXT_MAX_CHARS, isPriorityLine = null }) {
   const textList = toTrimmedTextList(lineList);
   const { wordList, numberCoreList } = extractKeywordList(keywordSourceList);
   const readTier = (text) => {
-    if (isKeywordLine({ text, wordList, numberCoreList })) return 0;
+    if (isKeywordLine({ text, wordList, numberCoreList }) || isPriorityLine?.(text)) return 0;
     return DIGIT_PATTERN.test(text) ? 1 : 2;
   };
   const tierList = textList.map(readTier);
@@ -120,8 +121,8 @@ function selectScreenTextLineList({ lineList, keywordSourceList = [], maxChars =
 // isClaimToValue: 변화·비교(claim_to_value)이면 숫자 줄이 있을 때 "수치 없음" 거절을 막는 문장을 붙인다.
 // 값→의미·척도에는 붙이지 않고, 말한 수가 적힌 줄을 짚어 주지도 않는다(줄이 섞이면 엉뚱한 줄을 짚는다).
 function buildScreenTextBlock({ lineList, keywordSourceList = [], isClaimToValue = false,
-  usage = SCREEN_TEXT_USAGE_MAP.value, maxChars = SCREEN_TEXT_MAX_CHARS }) {
-  const selectedList = selectScreenTextLineList({ lineList, keywordSourceList, maxChars });
+  usage = SCREEN_TEXT_USAGE_MAP.value, maxChars = SCREEN_TEXT_MAX_CHARS, isPriorityLine = null }) {
+  const selectedList = selectScreenTextLineList({ lineList, keywordSourceList, maxChars, isPriorityLine });
   if (!selectedList.length) return { text: '', lineCount: 0, charCount: 0, numberLineCount: 0 };
   const numberLineCount = selectedList.filter((text) => DIGIT_PATTERN.test(text)).length;
   const blockLineList = [
