@@ -10,7 +10,7 @@ const FACT_CARD_SCHEMA_EXAMPLE = '{"screenTitle":"화면 전체 제목(적힌 �
   + '"itemList":[{"label":"항목·행 이름","value":"적힌 값(없으면 빈 문자열)","note":"조건·비교 기준·각주"}],"itemCount":0}]}';
 
 const FACT_CARD_EXAMPLE = '{"screenTitle":"국내 판매 현황","cardList":[{"kind":"chart","title":"지역별 판매량","position":"왼쪽","period":"2023~2024","unit":"천 대",'
-  + '"axisList":[{"name":"지역","from":"서울","to":"강원"},{"name":"판매량","from":"0","to":"800"}],"legendList":["2023","2024"],"headerList":[],'
+  + '"axisList":[{"name":"지역","from":"서울","to":"강원"},{"name":"판매량","from":"0","to":"600"}],"legendList":["2023","2024"],"headerList":[],'
   + '"itemList":[{"label":"서울","value":"2023 410, 2024 520","note":""}],"itemCount":5}]}';
 
 function buildFactCardPrompt() {
@@ -23,7 +23,7 @@ function buildFactCardPrompt() {
     '· 기간·시점·단위·조건(전년 대비, 추정치, 기준일 등)이 제목·축·각주에 적혀 있으면 period·unit·note 에 옮긴다.',
     '· 글자가 없는 사진·그림뿐이면 {"screenTitle":"","cardList":[]} 만 출력한다.',
     `JSON 하나만 출력한다. 형식: ${FACT_CARD_SCHEMA_EXAMPLE}`,
-    '예) 지역별 판매량 막대그래프(2023·2024 두 계열, 세로축 0~800, 단위 천 대) →',
+    '예) 지역별 판매량 막대그래프(2023·2024 두 계열, 세로축 0~600, 단위 천 대) →',
     FACT_CARD_EXAMPLE,
   ].join('\n');
 }

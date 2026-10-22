@@ -197,4 +197,6 @@ test('카드 프롬프트: 적힌 그대로 옮기고, 그래프 높이로 값�
   assert.match(prompt, /어림하지 않는다/);
   assert.match(prompt, /JSON 하나만 출력한다/);
   assert.match(prompt, /"screenTitle":"","cardList":\[\]/);
+  // 예시 수가 평가 실패 사례의 수(800·770)와 같으면 그 문항의 답을 프롬프트가 흘릴 수 있다.
+  assert.doesNotMatch(prompt, /(?<![\d,.])(?:800|770)(?![\d])/);
 });
