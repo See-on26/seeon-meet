@@ -23,6 +23,7 @@ const SCREEN_CHANGE_SKIP_MAP = {
   kindOff: 'kind_off',
   vlmNone: 'vlm_none',
   valueAbsent: 'value_absent',
+  valueFarFromSpoken: 'value_far_from_spoken',
   duplicate: 'duplicate',
   rateLimited: 'rate_limited',
   notEmitted: 'not_emitted',

@@ -8,7 +8,8 @@ const { DEBUG_STAGE_MAP, DEBUG_VERDICT_MAP } = require('../contracts/debug-event
 const { RECORD_KIND_MAP } = require('../instrumentation/record-store');
 const { describeAgentRejection } = require('../agents/shared/caption-parser');
 const { assembleNarration } = require('../agents/shared/narration-format');
-const { isValuePresent, VALUE_PRESENCE_VERDICT_MAP } = require('./value-presence');
+const { isValuePresent, readValueCheckTarget, VALUE_PRESENCE_VERDICT_MAP } = require('./value-presence');
+const { checkSpokenValueMatch, SPOKEN_VALUE_VERDICT_MAP } = require('../prompts/approximate-value');
 const { SLIDE_TEXT_STATUS_MAP } = require('./slide-text-store');
 const { createScreenChangeGate } = require('./screen-change-gate');
 const { createPendingEvidence } = require('./pending-evidence');
@@ -89,12 +90,11 @@ function createScreenChangeService({
 
   // 값 검사는 새 화면의 OCR 글자로만 한다. 해설 한 건에 VLM 을 두 번 부르지 않으려고 VLM 재전사는 하지 않는다.
   // OCR 글자가 없으면(그 화면 OCR 실패) 슬라이드 전사로 본다.
-  function checkRetryValue({ value, note, frame, slideLabel }) {
+  function checkRetryValue({ value, subKind, note, frame, slideLabel }) {
     const isFrameChecked = typeof frame.text === 'string';
     const stored = isFrameChecked ? null : slideTextStore.get(slideLabel);
     return isValuePresent({
-      value, utterance: note.utterance, contextText: note.contextText,
-      subKind: note.subKind || INTERPRETATION_KIND_MAP.valueToMeaning,
+      value, utterance: note.utterance, contextText: note.contextText, subKind,
       slideText: isFrameChecked ? frame.text : stored.text,
       slideTextStatus: isFrameChecked ? SLIDE_TEXT_STATUS_MAP.ready : stored.status,
     }).verdict !== VALUE_PRESENCE_VERDICT_MAP.absent;
@@ -133,17 +133,36 @@ function createScreenChangeService({
       });
       return { isVlmCalled: true, isEmitted: false, skipReason: SCREEN_CHANGE_SKIP_MAP.vlmNone };
     }
-    if (narrationType === NARRATION_TYPE_MAP.interpretation && slotMap?.value) {
-      if (!checkRetryValue({ value: slotMap.value, note, frame, slideLabel })) {
+    // 원래 경로(pipeline-deixis)와 같은 값 검사를 한다. 대조할 값은 수치의 값 칸과 척도 값 먼저(켜짐)의 척도 수이고,
+    // 화면 값 먼저(켜짐)의 값→의미는 값이 발화의 수(어림 값이면 ±15%)와 멀면 화면에 있어도 읽지 않는다.
+    const valueCheckTarget = readValueCheckTarget({
+      narrationType, subKind: note.subKind, slotMap, text, contentSwitch: config.contentSwitch,
+    });
+    const isSpokenValueChecked = config.contentSwitch?.isScreenValueFirstEnabled
+      && valueCheckTarget?.checkSubKind === INTERPRETATION_KIND_MAP.valueToMeaning;
+    const spokenValueMatch = isSpokenValueChecked
+      ? checkSpokenValueMatch({ value: valueCheckTarget.value, utterance: note.utterance }) : null;
+    if (spokenValueMatch?.verdict === SPOKEN_VALUE_VERDICT_MAP.far) {
+      await appendRecord({ ...recordBase, caption: text, isGrounded: false, skipReason: 'value-far-from-spoken' });
+      markDebug({
+        stage: DEBUG_STAGE_MAP.valueCheck, verdict: DEBUG_VERDICT_MAP.skip, ts, narrationType,
+        reason: '화면 변화 뒤 다시 봄 — 발화 값 대조 far', detail: `값="${valueCheckTarget.value}" · ${spokenValueMatch.reason} → "${text}"`,
+      });
+      return { isVlmCalled: true, isEmitted: false, skipReason: SCREEN_CHANGE_SKIP_MAP.valueFarFromSpoken };
+    }
+    if (valueCheckTarget) {
+      if (!checkRetryValue({ value: valueCheckTarget.value, subKind: valueCheckTarget.checkSubKind, note, frame, slideLabel })) {
         await appendRecord({ ...recordBase, caption: text, isGrounded: false, skipReason: 'value-absent' });
         markDebug({
           stage: DEBUG_STAGE_MAP.valueCheck, verdict: DEBUG_VERDICT_MAP.skip, ts, narrationType,
-          reason: '화면 변화 뒤 다시 봄 — 값 존재 검사 absent', detail: `값="${slotMap.value}" → "${text}"`,
+          reason: '화면 변화 뒤 다시 봄 — 값 존재 검사 absent', detail: `값="${valueCheckTarget.value}" → "${text}"`,
         });
         return { isVlmCalled: true, isEmitted: false, skipReason: SCREEN_CHANGE_SKIP_MAP.valueAbsent };
       }
       // 둘째 값이 새 화면에 없으면 첫 쌍만 읽는다(원래 경로와 같은 규칙).
-      if (slotMap.value2 && text.includes(slotMap.value2) && !checkRetryValue({ value: slotMap.value2, note, frame, slideLabel })) {
+      if (slotMap?.value2 && text.includes(slotMap.value2) && !checkRetryValue({
+        value: slotMap.value2, subKind: valueCheckTarget.checkSubKind, note, frame, slideLabel,
+      })) {
         const firstPair = assembleNarration({
           narrationType, subKind: note.subKind, rawSlotMap: { ...slotMap, target2: '', value2: '' },
           maxWordCount: result.appliedBudget?.maxWordCount, maxChars: result.appliedBudget?.maxChars,

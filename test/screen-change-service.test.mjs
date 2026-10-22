@@ -125,6 +125,67 @@ test('다시 부른 수치 해설의 값이 새 화면 글자에 없으면 내�
   assert.equal(changeRecord.skipReason, 'value_absent');
 });
 
+// 다시 본 해설도 원래 경로와 같은 값 검사를 거친다: 척도 값 먼저의 척도 수는 새 화면 글자에 있어야 하고,
+// 화면 값 먼저의 값→의미는 값이 발화의 수(어림 값이면 ±15%)와 멀면 읽지 않는다.
+const changeEvent = {
+  ts: 9000, slideLabel: '2', buffer: [2], vlmBuffer: [3], regionNorm: { x: 0.08, y: 0.58, w: 0.45, h: 0.08 },
+  changedRatio: 0.02, cellCount: 10, firstSeenTs: 8000, firstSeenVideoTimeMs: 61000, recentTranscript: '',
+};
+const scaleContext = () => deixisContext({
+  narrationType: 'visual_description',
+  selectedCandidate: { type: 'visual_description', subKind: 'scale', anchor: '정말 길죠' },
+  generatorArgs: {
+    jpegBuffer: Buffer.from('old'), utterance: '이 막대 정말 길죠', recentTranscript: '', describedElementList: [],
+    minWordCount: 4, maxWordCount: 8, subKind: 'scale', mergedAnchorList: [], mergedClaimList: [],
+  },
+});
+const valueToMeaningContext = () => deixisContext({
+  selectedCandidate: { type: 'interpretation', subKind: 'value_to_meaning', anchor: '이 숫자' },
+  generatorArgs: {
+    jpegBuffer: Buffer.from('old'), utterance: '한 3천 명쯤 왔다는 이 숫자가 중요합니다', recentTranscript: '', describedElementList: [],
+    minWordCount: 6, maxWordCount: 12, subKind: 'value_to_meaning', mergedAnchorList: [], mergedClaimList: [],
+  },
+});
+
+test('다시 본 척도 해설의 수가 새 화면 글자에 없으면 내지 않고, 있으면 낸다', async () => {
+  for (const [lineText, isEmitted] of [['접수 건수 1,240건', false], ['접수 건수 5,000건', true]]) {
+    const { service, callMap } = createHarness({
+      ocrList: [ocrResponse(BASE_LINE_LIST), ocrResponse([...BASE_LINE_LIST, ocrLine(lineText, 600)])],
+      agentResultMap: {
+        visual_description: { text: '5,000건으로 가장 긴 막대', isGrounded: true, slotMap: { caption: '5,000건으로 가장 긴 막대' } },
+      },
+    });
+    await service.handleBaseline({ slideLabel: '2', buffer: [1], ts: 1000, isSlideStart: true, slideStartTs: 0 });
+    await service.noteUnresolved(scaleContext());
+    await service.handleChange(changeEvent);
+    assert.deepEqual(callMap.agent.map((call) => call.type), ['visual_description'], lineText);
+    assert.equal(callMap.sendCaption.length, isEmitted ? 1 : 0, lineText);
+    const changeRecord = callMap.record.find((rec) => rec.kind === 'screen_change');
+    assert.equal(changeRecord.skipReason, isEmitted ? null : 'value_absent', lineText);
+  }
+});
+
+test('다시 본 값→의미 해설의 값이 발화의 수와 멀면 화면에 있어도 내지 않고, 가까우면 낸다', async () => {
+  for (const [value, isEmitted] of [['4,200명', false], ['2,870명', true]]) {
+    const { service, callMap } = createHarness({
+      ocrList: [ocrResponse(BASE_LINE_LIST), ocrResponse([...BASE_LINE_LIST, ocrLine('입장객 2,870명 · 예약 4,200명', 600)])],
+      agentResultMap: {
+        interpretation: { text: `${value}은 서울 지점 입장객 수를 의미`, isGrounded: true, slotMap: { value, frame: '서울 지점 입장객 수' } },
+      },
+    });
+    await service.handleBaseline({ slideLabel: '2', buffer: [1], ts: 1000, isSlideStart: true, slideStartTs: 0 });
+    await service.noteUnresolved(valueToMeaningContext());
+    await service.handleChange(changeEvent);
+    assert.equal(callMap.agent.length, 1, value);
+    assert.equal(callMap.sendCaption.length, isEmitted ? 1 : 0, value);
+    const changeRecord = callMap.record.find((rec) => rec.kind === 'screen_change');
+    assert.equal(changeRecord.skipReason, isEmitted ? null : 'value_far_from_spoken', value);
+    if (!isEmitted) {
+      assert.equal(callMap.record.find((rec) => rec.kind === 'deixis').skipReason, 'value-far-from-spoken');
+    }
+  }
+});
+
 test('지시 해설은 가리킨 영역 없이 전체 화면으로 다시 부른다', async () => {
   const { service, callMap } = createHarness({
     ocrList: [ocrResponse(BASE_LINE_LIST), ocrResponse(CHANGED_LINE_LIST)],
