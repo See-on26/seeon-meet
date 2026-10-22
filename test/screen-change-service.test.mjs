@@ -52,6 +52,31 @@ function deixisContext(extra = {}) {
   };
 }
 
+// 발화 ROI 의 확대 그림은 원래 판정 프레임의 일부다. 새 화면으로 다시 볼 때 옛 확대를 둘째 장으로 붙이면 두 장이 다른 순간이 된다.
+test('늦은 근거 재시도: 원래 요청의 확대 그림(발화 ROI)은 넘기지 않고 새 화면 한 장으로 다시 본다', async () => {
+  const { service, callMap } = createHarness({
+    ocrList: [ocrResponse(BASE_LINE_LIST), ocrResponse(CHANGED_LINE_LIST)],
+    agentResultMap: {
+      interpretation: { text: '3분기 매출, 42억 원', isGrounded: true, slotMap: { target: '3분기 매출', value: '42억 원' } },
+    },
+  });
+  await service.handleBaseline({ slideLabel: '2', buffer: [1], ts: 1000, isSlideStart: true, slideStartTs: 0 });
+  const context = deixisContext();
+  await service.noteUnresolved({
+    ...context,
+    generatorArgs: { ...context.generatorArgs, zoomJpegBuffer: Buffer.from('old-zoom'), zoomKind: 'speech', zoomTerm: '매출' },
+  });
+  await service.handleChange({
+    ts: 9000, slideLabel: '2', buffer: [2], vlmBuffer: [3], regionNorm: { x: 0.08, y: 0.58, w: 0.45, h: 0.08 },
+    changedRatio: 0.02, cellCount: 10, firstSeenTs: 8000, firstSeenVideoTimeMs: 61000, recentTranscript: '',
+  });
+  assert.deepEqual(callMap.agent.map((call) => call.type), ['interpretation']);
+  const { args } = callMap.agent[0];
+  assert.equal(Buffer.from(args.jpegBuffer).toString('hex'), Buffer.from([2]).toString('hex'));
+  for (const key of ['zoomJpegBuffer', 'zoomKind', 'zoomTerm']) assert.ok(!(key in args), key);
+  assert.equal(args.utterance, '매출이 크게 늘었습니다');
+});
+
 test('미해결 수치 트리거 뒤 같은 슬라이드 변화가 오면 수치 에이전트를 새 화면·새 OCR 줄로 한 번 부르고 발화 기반으로 낸다', async () => {
   const { service, callMap } = createHarness({
     ocrList: [ocrResponse(BASE_LINE_LIST), ocrResponse(CHANGED_LINE_LIST)],

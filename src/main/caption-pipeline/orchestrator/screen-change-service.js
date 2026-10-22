@@ -208,9 +208,12 @@ function createScreenChangeService({
   }
 
   // pipeline-deixis 가 NONE·값 없음으로 끝났을 때 부른다. 원래 에이전트를 다시 부를 인자를 그림 없이 담아 둔다.
+  // 발화 ROI 의 확대 그림(zoom…)도 원래 판정 프레임의 일부라 빼 둔다. 새 화면에 옛 확대를 붙이면 두 장이 다른 순간이 된다.
   function noteUnresolved({ ts, frameTs = null, slideLabel, narrationType, selectedCandidate = null, generatorArgs = {},
     rejectKind = null, beforeText = '', afterText = '' }) {
-    const { jpegBuffer, describedElementList, ...argsWithoutImage } = generatorArgs;
+    const {
+      jpegBuffer, describedElementList, zoomJpegBuffer, zoomKind, zoomTerm, ...argsWithoutImage
+    } = generatorArgs;
     return narrator.noteUnresolved({
       ts, captureTs: Number.isFinite(frameTs) ? frameTs : ts, slideLabel, narrationType,
       subKind: selectedCandidate?.subKind || null, rejectKind,
