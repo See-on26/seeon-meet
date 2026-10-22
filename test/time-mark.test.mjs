@@ -91,6 +91,17 @@ test('시점 되살리기(지시): seen 에 하나뿐인 시점이 caption·fact
   }).text, '3분기 매출 표, 인원 그래프');
 });
 
+test('시점 되살리기(지시): 붙여도 단순형 해설은 8어절 안이다 — caption 끝(자료 종류 쪽)을 줄여 자리를 만든다', () => {
+  const text = deixis({ seen: '2019년부터 2023년까지 서울 강수량', caption: '서울 부산 대구 세 도시 강수량 막대그래프', fact: '' },
+    { contentSwitch: ON });
+  assert.ok(text.split(' ').length <= 8, text);
+  assert.ok(text.startsWith('2019년부터 2023년까지 서울 부산 대구'), text);
+  const withFact = deixis({ seen: '2024년 지점별 매출', caption: '서울 부산 대구 지점별 매출 막대그래프', fact: '세 지점 합계 비교' },
+    { contentSwitch: ON });
+  assert.ok(withFact.split(' ').length <= 8, withFact);
+  assert.ok(withFact.startsWith('2024년 '), withFact);
+});
+
 test('시점 되살리기(수치): source 에 하나뿐인 시점이 해설에 없으면 대상 칸·해석틀 앞에 붙인다', () => {
   assert.equal(claim({ source: '2024년 4분기 매출 120억 → 150억', target: '매출', value: '120억에서 150억', contentSwitch: ON }),
     '2024년 4분기 매출, 120억에서 150억');

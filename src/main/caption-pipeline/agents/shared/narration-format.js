@@ -829,10 +829,17 @@ function joinCaptionWithFact({ caption, fact, language = CAPTION_LANGUAGE_MAP.ko
 // 모델이 칸 어절 수를 맞추느라 연도·분기를 먼저 빼서, 추이·비교 해설이 언제의 것인지 알 수 없었다.
 // 시점이 둘 이상이거나 "전년 대비"처럼 비교 기준으로 쓰였으면 어느 것이 대상의 것인지 모르므로 붙이지 않는다(time-mark.js).
 // 읽히는 칸이 이미 시간 축("월별 … 추이")을 말하면 근거 칸의 시점은 축의 한 칸일 수 있어 붙이지 않는다.
+// 지시 해설은 붙인 뒤에도 읽히는 길이 상한(단순형 8어절, 완전형 10+2어절) 안에 들도록 caption 끝(자료 종류 쪽)을 줄여 자리를 만들고,
+// caption 이 3어절보다 짧아져야 하면 붙이지 않는다. 수치 해설은 전체 예산 맞추기(fitClaimPairToBudget)·칸 상한이 길이를 맡는다.
+const TIME_RESTORE_MIN_TARGET_WORD_COUNT = 3;
 const TIME_RESTORE_RULE_MAP = {
   [NARRATION_TYPE_MAP.deixis]: {
-    [DEIXIS_FORM_MAP.simple]: { sourceKey: 'seen', targetKey: 'caption', readKeyList: ['caption', 'fact'] },
-    [DEIXIS_FORM_MAP.complete]: { sourceKey: 'seen', targetKey: 'caption', readKeyList: ['caption'] },
+    [DEIXIS_FORM_MAP.simple]: {
+      sourceKey: 'seen', targetKey: 'caption', readKeyList: ['caption', 'fact'], maxReadWordCount: DEIXIS_FACT_TOTAL_MAX_WORD_COUNT,
+    },
+    [DEIXIS_FORM_MAP.complete]: {
+      sourceKey: 'seen', targetKey: 'caption', readKeyList: ['caption'], maxReadWordCount: 10 + SLOT_OVERAGE_TOLERANCE_WORD_COUNT,
+    },
   },
   [NARRATION_TYPE_MAP.interpretation]: {
     [INTERPRETATION_KIND_MAP.valueToMeaning]: { sourceKey: 'source', targetKey: 'frame', readKeyList: ['value', 'frame'] },
@@ -840,13 +847,22 @@ const TIME_RESTORE_RULE_MAP = {
   },
 };
 
-function restoreTimeMark({ narrationType, subKind, slotMap }) {
+function restoreTimeMark({ narrationType, subKind, slotMap, language = CAPTION_LANGUAGE_MAP.ko }) {
   const rule = TIME_RESTORE_RULE_MAP[narrationType]?.[subKind];
   if (!rule || !slotMap[rule.sourceKey] || !slotMap[rule.targetKey]) return slotMap;
   const readText = rule.readKeyList.map((key) => slotMap[key] || '').join(' ');
   if (hasAnyTimeMark(readText) || hasTimeAxisWord(readText)) return slotMap;
   const mark = readSingleTimeMark(slotMap[rule.sourceKey]);
-  return mark ? { ...slotMap, [rule.targetKey]: `${mark} ${slotMap[rule.targetKey]}` } : slotMap;
+  if (!mark) return slotMap;
+  let target = slotMap[rule.targetKey];
+  if (rule.maxReadWordCount) {
+    const otherWordCount = rule.readKeyList.filter((key) => key !== rule.targetKey)
+      .reduce((sum, key) => sum + countWord({ text: slotMap[key] }), 0);
+    const room = scaleMaxWordCount({ count: rule.maxReadWordCount, language }) - otherWordCount - countWord({ text: mark });
+    if (room < TIME_RESTORE_MIN_TARGET_WORD_COUNT) return slotMap;
+    if (countWord({ text: target }) > room) target = shortenPhrase({ text: target, maxWordCount: room, language });
+  }
+  return { ...slotMap, [rule.targetKey]: `${mark} ${target}` };
 }
 
 function hasEmptyRequiredSlot({ slotList, slotMap }) {
@@ -938,7 +954,8 @@ function assembleEnglishNarration({ narrationType, subKind, rawSlotMap, index, o
   if (hasEmptyRequiredSlot({ slotList, slotMap: normalizedSlotMap })) return null;
   if (hasValuelessSlot({ slotList, slotMap: normalizedSlotMap })) return null;
   const keepsTimeMark = contentSwitch.isTimeMarkEnabled;
-  const slotMap = keepsTimeMark ? restoreTimeMark({ narrationType, subKind, slotMap: normalizedSlotMap }) : normalizedSlotMap;
+  const slotMap = keepsTimeMark
+    ? restoreTimeMark({ narrationType, subKind, slotMap: normalizedSlotMap, language: CAPTION_LANGUAGE_MAP.en }) : normalizedSlotMap;
   const joined = assemble({ slotMap, index, maxWordCount, maxChars, keepsTimeMark }).replace(/\s+/g, ' ').trim();
   return { text: capitalizeFirst(dropRepeatedWordAtSeam({ text: joined })), slotMap };
 }
