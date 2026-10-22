@@ -4,6 +4,7 @@ const {
 } = require('../../contracts/narration-types');
 const { NARRATION_ORIGIN_MAP } = require('../../contracts/narration-class');
 const { CAPTION_LANGUAGE_MAP } = require('../../contracts/caption-language');
+const { resolveContentSwitch } = require('./content-switch');
 
 const DIGIT_HAS_FINAL_MAP = {
   0: true, 1: true, 2: false, 3: true, 4: false,
@@ -124,12 +125,14 @@ const INCOMPLETE_WORD_SET = new Set([
   '몇', '각', '여러', '모든', '온갖', '어떤', '무슨', '그', '이', '저', '첫', '첫째', '둘째',
 ]);
 
-function trimToCompletePhrase({ text, isConservative = false }) {
+// keepsNumberedRange: 상한에서 자른 칸도 숫자에 붙은 범위 끝("…12월까지", "…3월 2일부터")은 남긴다.
+// 떼면 "1월부터 12월까지"가 통째로 빠져 범위의 처음과 끝을 묻는 말에 답할 수 없다.
+function trimToCompletePhrase({ text, isConservative = false, keepsNumberedRange = isConservative }) {
   const tailPattern = isConservative ? SAFE_INCOMPLETE_TAIL_PATTERN : INCOMPLETE_TAIL_PATTERN;
   const wordList = String(text || '').trim().split(/\s+/).filter(Boolean);
   while (wordList.length > 1) {
     const last = wordList[wordList.length - 1].replace(TRAILING_MARK_PATTERN, '');
-    const isNumberedRange = isConservative && NUMBERED_RANGE_TAIL_PATTERN.test(last);
+    const isNumberedRange = keepsNumberedRange && NUMBERED_RANGE_TAIL_PATTERN.test(last);
     if (!last || INCOMPLETE_WORD_SET.has(last)
       || (!isNumberedRange && tailPattern.test(last)) || INCOMPLETE_SUFFIX_PATTERN.test(last)) {
       wordList.pop(); continue;
@@ -218,6 +221,50 @@ const NARRATION_SLOT_MAP = {
   },
 };
 
+// 식별 사실 완결(SEEON_FACT_COMPLETE_ENABLED). 해설이 대상은 맞혀도 그 대상을 가르는 세부(개수·범위의 처음과 끝·조건·지명·
+// 비교 상대·시점)를 빠뜨려 그 세부를 묻는 말에 답하지 못했다. 세부가 들어갈 칸을 따로 두고 칸 설명에 무엇을 담을지 적는다.
+// 지시 단순형은 읽히는 칸이 caption 하나라 세부가 seen(읽지 않음)에만 남았다. 대상(caption) 뒤에 식별 사실(fact)을 따로 받는다.
+// caption 은 2~5어절로 안내하되 예전 상한(7어절)까지는 받고(overageWordCount), 이은 해설은 joinCaptionWithFact 가 맞춘다.
+const DEIXIS_FACT_SLOT = {
+  key: 'fact',
+  label: '그 대상을 다른 것과 가르는 화면 속 사실 — 개수·범위(축·기간의 처음과 끝)·조건·지명·비교 상대·시점 가운데 가리킨 곳에 적힌 것.'
+    + ' 범위는 물결표로 짧게, 없으면 빈 문자열 (예: 2019~2023년, 11개 항목, 세로축 0~800)',
+  minWordCount: 0, maxWordCount: 3, isPhrase: true, dropsTailObjectParticle: true,
+};
+// 수치 해설은 값을 읽은 화면 줄을 먼저 옮겨 적게 해(읽히지 않음) 그 줄의 제목·머리글에 있는 시점·조건을 놓치지 않게 한다.
+const INTERPRETATION_SOURCE_SLOT = {
+  key: 'source', label: '그 수치를 읽은 화면 글자 그대로 — 수치가 든 줄과 그 줄의 제목·머리글·범례·단위', minWordCount: 0, maxWordCount: 12, isDiagnostic: true,
+};
+const FACT_COMPLETE_SLOT_MAP = {
+  [NARRATION_TYPE_MAP.deixis]: {
+    [DEIXIS_FORM_MAP.simple]: [
+      DEIXIS_SEEN_SLOT,
+      { key: 'caption', label: '청자에게 읽어 줄 대상 — 가리킨 대상의 이름·내용과 자료 종류(표·사진 등) (예: 2년간 매출 추이 표)', minWordCount: 2, maxWordCount: 5, overageWordCount: 2, isPhrase: true, dropsTailObjectParticle: true },
+      DEIXIS_FACT_SLOT,
+    ],
+    [DEIXIS_FORM_MAP.complete]: [
+      DEIXIS_SEEN_SLOT,
+      {
+        key: 'caption', label: '청자에게 읽어 줄 해설 — 가리킨 대상 각각의 이름·내용(화면에 적힌 개수·시점·지명 등 가르는 사실 포함)을 가리킨 순서대로 쉼표로',
+        minWordCount: 2, maxWordCount: 10, isPhrase: true, isWholeSentence: true, dropsTailObjectParticle: true,
+      },
+    ],
+  },
+  [NARRATION_TYPE_MAP.interpretation]: {
+    [INTERPRETATION_KIND_MAP.valueToMeaning]: [
+      INTERPRETATION_SOURCE_SLOT,
+      NARRATION_SLOT_MAP[NARRATION_TYPE_MAP.interpretation][INTERPRETATION_KIND_MAP.valueToMeaning][0],
+      // 비교 상대·시점이 붙으면 "작년 대비 A사 기업가치 성장률"(5어절)이 넘친다. 끝의 측정량 낱말이 잘리지 않게 1어절 넓힌다.
+      { key: 'frame', label: '값의 해석틀 — 화면에서 찾은 대상·기준. 비교 상대·시점·조건이 화면에 적혀 있으면 함께 (예: 작년 대비 A사 기업가치 성장률)', minWordCount: 3, maxWordCount: 6, isPhrase: true, dropsLeadingWordsOnOverflow: true },
+    ],
+    [INTERPRETATION_KIND_MAP.claimToValue]: [
+      INTERPRETATION_SOURCE_SLOT,
+      { key: 'target', label: '변화·비교의 대상 — 화면에 적힌 항목 이름. 발표자가 여러 항목을 묶어 부른 말이면 그 묶음 이름. 화면에 적힌 시점·조건은 함께 (예: 첫 응답 시간, 2024년 4분기 매출, 인력)', minWordCount: 1, maxWordCount: 4, isPhrase: true },
+      { key: 'value', label: '화면에서 찾은 근거 값 — 반드시 수치. 변화면 바뀌기 전 값에서 바뀐 뒤 값(바뀐 뒤 값만 있으면 그 값, 두 값의 시점이 다르면 각 시점과 함께), 비교면 두 대상과 각 값, 묶음 이름이면 항목 2개까지 각 이름과 값 (예: 2023년 9.2시간에서 2024년 3.1시간, 도심 33.8도 교외 29.1도, 개발자 120명과 디자이너 30명)', minWordCount: 1, maxWordCount: 6, mustContainValue: true },
+    ],
+  },
+};
+
 // 무발화 묘사는 발표자가 보라고 한 자료를 전한다. 구조도는 제목만으로는 무엇을 보는지 알 수 없어
 // 구성 요소와 연결 관계까지 말해야 하므로 사진 반응 묘사(8어절)보다 길게 받는다.
 const SILENCE_DESCRIPTION_SLOT_LIST = [
@@ -301,12 +348,46 @@ const ENGLISH_SILENCE_DESCRIPTION_LABEL_MAP = {
   description: 'description of the material the speaker asked to look at — for charts/tables the values and changes,'
     + ' for structure/flow diagrams the main components and how they connect (end with the material type)',
 };
+const ENGLISH_INTERPRETATION_SOURCE_LABEL = 'the screen text where the figure was read, as written'
+  + ' — the line with the figure plus its title, header, legend and unit';
+const ENGLISH_FACT_COMPLETE_LABEL_MAP = {
+  [NARRATION_TYPE_MAP.deixis]: {
+    [DEIXIS_FORM_MAP.simple]: {
+      caption: 'the narration read to the listener — the name and content of the referenced item with its material type'
+        + ' (e.g. "the two-year sales trend table")',
+      fact: 'a fact on screen that tells this item apart — count, range (start and end of an axis or period), condition, place name,'
+        + ' comparison basis or time point written where the speaker pointed; keep ranges short, empty string if none'
+        + ' (e.g. "2019-2023", "11 items", "y-axis 0 to 800")',
+    },
+    [DEIXIS_FORM_MAP.complete]: {
+      caption: 'the narration read to the listener — the name and content of each referenced item (with distinguishing facts written'
+        + ' on screen such as count, time point or place), in the order pointed at, separated by commas',
+    },
+  },
+  [NARRATION_TYPE_MAP.interpretation]: {
+    [INTERPRETATION_KIND_MAP.valueToMeaning]: {
+      source: ENGLISH_INTERPRETATION_SOURCE_LABEL,
+      frame: 'what the figure measures — the item/basis found on screen, with the comparison basis, time point and condition if written'
+        + ' (e.g. "Company A\'s year-over-year valuation growth rate")',
+    },
+    [INTERPRETATION_KIND_MAP.claimToValue]: {
+      source: ENGLISH_INTERPRETATION_SOURCE_LABEL,
+      target: 'the item that changed or was compared — the item name written on screen; if the speaker grouped several items,'
+        + ' that group name; keep any time point or condition written on screen (e.g. first response time, Q4 2024 sales, staff)',
+      value: 'the supporting figure from the screen — must be a number. For a change, the value before to the value after'
+        + ' (only the value after if that is all there is; with each time point if they differ); for a comparison, both items'
+        + ' with their values; for a group, up to 2 items with names and values (e.g. "9.2 hours in 2023 to 3.1 hours in 2024",'
+        + ' "downtown 33.8°C, suburbs 29.1°C", "120 developers and 30 designers")',
+    },
+  },
+};
 
-function readSlotList({ narrationType, subKind, origin = null, hasSecondClaim = false }) {
+function readSlotList({ narrationType, subKind, origin = null, hasSecondClaim = false, contentSwitch }) {
   const isSilenceDescription = origin === NARRATION_ORIGIN_MAP.silence
     && narrationType === NARRATION_TYPE_MAP.visualDescription && subKind === VISUAL_DESCRIPTION_KIND_MAP.reaction;
   if (isSilenceDescription) return SILENCE_DESCRIPTION_SLOT_LIST;
-  const slotList = NARRATION_SLOT_MAP[narrationType]?.[subKind] || null;
+  const factSlotList = contentSwitch.isFactCompleteEnabled ? FACT_COMPLETE_SLOT_MAP[narrationType]?.[subKind] : null;
+  const slotList = factSlotList || NARRATION_SLOT_MAP[narrationType]?.[subKind] || null;
   const isClaimPair = hasSecondClaim && narrationType === NARRATION_TYPE_MAP.interpretation
     && subKind === INTERPRETATION_KIND_MAP.claimToValue;
   if (!slotList || !isClaimPair) return slotList;
@@ -333,16 +414,27 @@ function scaleWordBudget({ minWordCount, maxWordCount, language }) {
   return { minWordCount, maxWordCount: scaleMaxWordCount({ count: maxWordCount, language }) };
 }
 
-function getSlotList({ narrationType, subKind, origin = null, hasSecondClaim = false, language = CAPTION_LANGUAGE_MAP.ko }) {
-  const slotList = readSlotList({ narrationType, subKind, origin, hasSecondClaim });
+function readEnglishLabelMap({ narrationType, subKind, contentSwitch }) {
+  return {
+    ...(ENGLISH_SLOT_LABEL_MAP[narrationType]?.[subKind] || {}),
+    ...(contentSwitch.isFactCompleteEnabled ? ENGLISH_FACT_COMPLETE_LABEL_MAP[narrationType]?.[subKind] : null),
+  };
+}
+
+// contentSwitch: 해설 내용 개선 스위치(content-switch.js). 주지 않으면 지금 환경변수를 따른다.
+function getSlotList({ narrationType, subKind, origin = null, hasSecondClaim = false, language = CAPTION_LANGUAGE_MAP.ko,
+  contentSwitch = null }) {
+  const resolvedSwitch = resolveContentSwitch(contentSwitch);
+  const slotList = readSlotList({ narrationType, subKind, origin, hasSecondClaim, contentSwitch: resolvedSwitch });
   if (!slotList || language !== CAPTION_LANGUAGE_MAP.en) return slotList;
   const isSilenceDescription = slotList === SILENCE_DESCRIPTION_SLOT_LIST;
   const labelMap = isSilenceDescription
-    ? ENGLISH_SILENCE_DESCRIPTION_LABEL_MAP : (ENGLISH_SLOT_LABEL_MAP[narrationType]?.[subKind] || {});
+    ? ENGLISH_SILENCE_DESCRIPTION_LABEL_MAP : readEnglishLabelMap({ narrationType, subKind, contentSwitch: resolvedSwitch });
   return slotList.map((slot) => ({
     ...slot,
     label: labelMap[slot.key] || slot.label,
     ...scaleWordBudget({ minWordCount: slot.minWordCount, maxWordCount: slot.maxWordCount, language }),
+    ...(slot.overageWordCount ? { overageWordCount: scaleMaxWordCount({ count: slot.overageWordCount, language }) } : {}),
   }));
 }
 
@@ -402,7 +494,7 @@ function normalizeEnglishSlotMap({ slotList, rawSlotMap }) {
   for (const slot of slotList) {
     const raw = rawSlotMap?.[slot.key];
     const text = typeof raw === 'string' ? raw : '';
-    const wordLimit = slot.maxWordCount + SLOT_OVERAGE_TOLERANCE_WORD_COUNT;
+    const wordLimit = slot.maxWordCount + (slot.overageWordCount || 0) + SLOT_OVERAGE_TOLERANCE_WORD_COUNT;
     const truncated = truncateSlot({ text, maxWordCount: wordLimit });
     if (countWord({ text }) > wordLimit) {
       slotMap[slot.key] = trimEnglishDanglingTail({
@@ -420,8 +512,10 @@ function isWithinEnglishSlotLimit({ text, maxWordCount }) {
   return countWord({ text }) <= maxWordCount + SLOT_OVERAGE_TOLERANCE_WORD_COUNT;
 }
 
-function normalizeSlotMap({ slotList, rawSlotMap, language = CAPTION_LANGUAGE_MAP.ko }) {
+// overageWordCount: 칸 설명에는 maxWordCount 로 안내하되 그만큼 더 긴 답까지는 자르지 않고 받는 칸(지시 단순형 caption).
+function normalizeSlotMap({ slotList, rawSlotMap, language = CAPTION_LANGUAGE_MAP.ko, contentSwitch = null }) {
   if (language === CAPTION_LANGUAGE_MAP.en) return normalizeEnglishSlotMap({ slotList, rawSlotMap });
+  const { isFactCompleteEnabled } = resolveContentSwitch(contentSwitch);
   const slotMap = {};
   for (const slot of slotList) {
     const raw = rawSlotMap?.[slot.key];
@@ -445,18 +539,20 @@ function normalizeSlotMap({ slotList, rawSlotMap, language = CAPTION_LANGUAGE_MA
       slotMap[slot.key] = truncateSlot({ text, maxWordCount: slot.maxWordCount + SLOT_OVERAGE_TOLERANCE_WORD_COUNT });
       continue;
     }
-    if (slot.dropsLeadingWordsOnOverflow && countWord({ text }) > slot.maxWordCount) {
+    const slotMaxWordCount = slot.maxWordCount + (slot.overageWordCount || 0);
+    if (slot.dropsLeadingWordsOnOverflow && countWord({ text }) > slotMaxWordCount) {
       slotMap[slot.key] = trimToCompletePhrase({
-        text: truncateSlotKeepingTail({ text, maxWordCount: slot.maxWordCount }), isConservative: true,
+        text: truncateSlotKeepingTail({ text, maxWordCount: slotMaxWordCount }), isConservative: true,
       });
       continue;
     }
-    const truncated = truncateSlot({ text, maxWordCount: slot.maxWordCount });
-    const isTruncated = countWord({ text }) > slot.maxWordCount;
+    const truncated = truncateSlot({ text, maxWordCount: slotMaxWordCount });
+    const isTruncated = countWord({ text }) > slotMaxWordCount;
     if (isTruncated) {
       slotMap[slot.key] = trimToCompletePhrase({
         // 대상 칸은 값 칸보다 먼저 다듬어지므로, 상한에서 자른 뒤 실제로 읽히는 대상 칸 낱말만 값에서 뺀다.
         text: slot.mustContainValue ? fitWholeItemList({ text, maxWordCount: slot.maxWordCount, target: slotMap.target }) : truncated,
+        keepsNumberedRange: isFactCompleteEnabled,
       });
     }
     else if (slot.isPhrase) slotMap[slot.key] = trimToCompletePhrase({ text: truncated, isConservative: true });
@@ -630,6 +726,46 @@ function assembleClaimToValue({ slotMap, maxWordCount, maxChars, language = CAPT
   return Number.isFinite(maxWordCount) && countWord({ text: both }) > maxWordCount ? first : both;
 }
 
+// 지시 단순형의 식별 사실(fact)은 대상(caption) 뒤에 쉼표로 잇는다. fact 낱말이 모두 caption 에 이미 있으면 되풀이라 붙이지 않는다.
+// 이은 해설이 상한(8어절, 영어는 1.9배)을 넘으면 caption 끝(자료 종류 쪽)부터 3어절까지 줄이고, 그래도 넘으면 fact 끝을 줄인다.
+// caption 앞쪽은 이름·지명이고 fact 는 묻는 세부라 둘 다 남기고, 빠져도 뜻이 덜 상하는 자료 종류 낱말부터 뺀다.
+const DEIXIS_FACT_TOTAL_MAX_WORD_COUNT = 8;
+const DEIXIS_FACT_MIN_CAPTION_WORD_COUNT = 3;
+
+function toComparableWordList(text) {
+  return String(text || '').toLowerCase().split(/[\s,·]+/).filter(Boolean);
+}
+
+function isFactRepeatedInCaption({ caption, fact }) {
+  const captionWordSet = new Set(toComparableWordList(caption));
+  const factWordList = toComparableWordList(fact);
+  return factWordList.length > 0 && factWordList.every((word) => captionWordSet.has(word));
+}
+
+function shortenPhrase({ text, maxWordCount, language }) {
+  const truncated = truncateSlot({ text, maxWordCount });
+  return language === CAPTION_LANGUAGE_MAP.en
+    ? trimEnglishDanglingTail({ text: truncated }) : trimToCompletePhrase({ text: truncated, keepsNumberedRange: true });
+}
+
+function joinCaptionWithFact({ caption, fact, language = CAPTION_LANGUAGE_MAP.ko }) {
+  if (!fact || isFactRepeatedInCaption({ caption, fact })) return caption;
+  const totalMaxWordCount = scaleMaxWordCount({ count: DEIXIS_FACT_TOTAL_MAX_WORD_COUNT, language });
+  let fittedCaption = caption;
+  let fittedFact = fact;
+  const readOverCount = () => countWord({ text: fittedCaption }) + countWord({ text: fittedFact }) - totalMaxWordCount;
+  if (readOverCount() > 0) {
+    fittedCaption = shortenPhrase({
+      text: fittedCaption, language,
+      maxWordCount: Math.max(DEIXIS_FACT_MIN_CAPTION_WORD_COUNT, countWord({ text: fittedCaption }) - readOverCount()),
+    });
+  }
+  if (readOverCount() > 0) {
+    fittedFact = shortenPhrase({ text: fittedFact, language, maxWordCount: Math.max(0, countWord({ text: fittedFact }) - readOverCount()) });
+  }
+  return fittedFact ? `${fittedCaption}, ${fittedFact}` : fittedCaption;
+}
+
 function hasEmptyRequiredSlot({ slotList, slotMap }) {
   return slotList.some((slot) => {
     if (slot.isDiagnostic || slot.minWordCount <= 0) return false;
@@ -646,7 +782,8 @@ const NARRATION_ASSEMBLE_MAP = {
     [PAGE_TRANSITION_KIND_MAP.document]: ({ slotMap }) => `페이지: ${slotMap.description}`,
   },
   [NARRATION_TYPE_MAP.deixis]: {
-    [DEIXIS_FORM_MAP.simple]: ({ slotMap }) => slotMap.caption,
+    // 식별 사실 칸이 꺼져 있으면 칸 목록에 fact 가 없어 caption 만 읽는다.
+    [DEIXIS_FORM_MAP.simple]: ({ slotMap }) => joinCaptionWithFact({ caption: slotMap.caption, fact: slotMap.fact }),
     [DEIXIS_FORM_MAP.complete]: ({ slotMap }) => slotMap.caption,
   },
   [NARRATION_TYPE_MAP.interpretation]: {
@@ -679,7 +816,9 @@ const ENGLISH_NARRATION_ASSEMBLE_MAP = {
     [PAGE_TRANSITION_KIND_MAP.document]: ({ slotMap }) => `Page: ${slotMap.description}`,
   },
   [NARRATION_TYPE_MAP.deixis]: {
-    [DEIXIS_FORM_MAP.simple]: ({ slotMap }) => slotMap.caption,
+    [DEIXIS_FORM_MAP.simple]: ({ slotMap }) => joinCaptionWithFact({
+      caption: slotMap.caption, fact: slotMap.fact, language: CAPTION_LANGUAGE_MAP.en,
+    }),
     [DEIXIS_FORM_MAP.complete]: ({ slotMap }) => slotMap.caption,
   },
   [NARRATION_TYPE_MAP.interpretation]: {
@@ -707,8 +846,9 @@ function capitalizeFirst(text) {
 }
 
 // 한국어 끝맺음 검사(자료 명사·조사·관형형)는 영어에 맞지 않아 쓰지 않는다. 빈 칸·수치 검사는 같다.
-function assembleEnglishNarration({ narrationType, subKind, rawSlotMap, index, origin, hasSecondClaim, maxWordCount, maxChars }) {
-  const slotList = getSlotList({ narrationType, subKind, origin, hasSecondClaim, language: CAPTION_LANGUAGE_MAP.en });
+function assembleEnglishNarration({ narrationType, subKind, rawSlotMap, index, origin, hasSecondClaim, maxWordCount, maxChars,
+  contentSwitch }) {
+  const slotList = getSlotList({ narrationType, subKind, origin, hasSecondClaim, language: CAPTION_LANGUAGE_MAP.en, contentSwitch });
   const assemble = ENGLISH_NARRATION_ASSEMBLE_MAP[narrationType]?.[subKind];
   if (!slotList || !assemble) return null;
   const slotMap = normalizeEnglishSlotMap({ slotList, rawSlotMap: pairClaimSlot({ narrationType, subKind, rawSlotMap }) });
@@ -719,16 +859,19 @@ function assembleEnglishNarration({ narrationType, subKind, rawSlotMap, index, o
 }
 
 function assembleNarration({ narrationType, subKind, rawSlotMap, index = '', origin = null,
-  hasSecondClaim = false, maxWordCount = null, maxChars = null, language = CAPTION_LANGUAGE_MAP.ko }) {
+  hasSecondClaim = false, maxWordCount = null, maxChars = null, language = CAPTION_LANGUAGE_MAP.ko, contentSwitch = null }) {
+  const resolvedSwitch = resolveContentSwitch(contentSwitch);
   if (language === CAPTION_LANGUAGE_MAP.en) {
     return assembleEnglishNarration({
-      narrationType, subKind, rawSlotMap, index, origin, hasSecondClaim, maxWordCount, maxChars,
+      narrationType, subKind, rawSlotMap, index, origin, hasSecondClaim, maxWordCount, maxChars, contentSwitch: resolvedSwitch,
     });
   }
-  const slotList = getSlotList({ narrationType, subKind, origin, hasSecondClaim });
+  const slotList = getSlotList({ narrationType, subKind, origin, hasSecondClaim, contentSwitch: resolvedSwitch });
   const assemble = NARRATION_ASSEMBLE_MAP[narrationType]?.[subKind];
   if (!slotList || !assemble) return null;
-  const slotMap = normalizeSlotMap({ slotList, rawSlotMap: pairClaimSlot({ narrationType, subKind, rawSlotMap }) });
+  const slotMap = normalizeSlotMap({
+    slotList, rawSlotMap: pairClaimSlot({ narrationType, subKind, rawSlotMap }), contentSwitch: resolvedSwitch,
+  });
   if (hasEmptyRequiredSlot({ slotList, slotMap })) return null;
   if (hasValuelessSlot({ slotList, slotMap })) return null;
   if (hasInvalidTailSlot({ slotList, slotMap })) return null;

@@ -1090,7 +1090,7 @@ function registerPipeline({ getViewerView, meetingArchive = null }) {
             const firstPair = assembleNarration({
               narrationType, subKind: selectedCandidate?.subKind, rawSlotMap: { ...slotMap, target2: '', value2: '' },
               maxWordCount: appliedBudget?.maxWordCount, maxChars: appliedBudget?.maxChars,
-              language: getCaptionLanguage(),
+              language: getCaptionLanguage(), contentSwitch: config.contentSwitch,
             });
             markDebug({
               stage: DEBUG_STAGE_MAP.valueCheck, verdict: DEBUG_VERDICT_MAP.skip, ts, narrationType,

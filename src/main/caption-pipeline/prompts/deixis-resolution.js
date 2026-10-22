@@ -4,6 +4,7 @@ const {
 } = require('../agents/shared/caption-parser');
 const { DEFAULT_CAPTION_LANGUAGE } = require('../contracts/caption-language');
 const { buildOutputLanguageRuleList } = require('./output-language-rule');
+const { resolveContentSwitch } = require('../agents/shared/content-switch');
 
 const DEFAULT_DEIXIS_MIN_WORD_COUNT = 4;
 const DEFAULT_DEIXIS_MAX_WORD_COUNT = 8;
@@ -22,15 +23,46 @@ const DEIXIS_FORM_RULE_MAP = {
   ],
 };
 
+// 식별 사실 칸(fact)을 받는 단순형의 형식 예시. caption 은 이름·자료 종류, fact 는 가리킨 곳에 적힌 가르는 사실이고 둘 다 seen 낱말로만 쓴다.
+const DEIXIS_FACT_SIMPLE_FORM_RULE_LIST = [
+  '형식: caption 에 "무엇의 무슨 자료인지"를, fact 에 그것을 다른 것과 가르는 사실을 담는다. 자료 종류를 따로 쪼개지 마라.',
+  '  예) "여기를 보시면" → seen="2년간 매출 추이 표, 2023·2024년 월별 막대", caption="2년간 매출 추이 표", fact="2023·2024년 월별 막대"',
+  '  예) "오른쪽 것을 주목해 주십쇼" → seen="설문 결과 표, 만족·보통·불만 세 줄", caption="설문 결과 표", fact="만족·보통·불만 세 줄"',
+  '  예) "이 사진 보시면" → seen="강가의 돌다리 사진", caption="강가의 돌다리 사진", fact=""',
+];
+
+// 대상을 맞혀도 그 대상을 가르는 세부를 빼면 세부를 묻는 말에 답할 수 없다. 단순형은 fact 칸에, 완전형은 대상 이름 곁에 쓴다.
+const FACT_COMPLETE_RULE_LIST = [
+  '    대상을 다른 것과 가르는 사실 — 개수, 범위의 처음과 끝(축 눈금·기간), 조건, 지명, 비교 상대, 시점 — 이 가리킨 곳에 적혀 있으면 빠뜨리지 않는다.',
+  '    "몇 개인가·어디인가·언제부터 언제까지인가·무엇과 견주었나"를 물어도 답이 되게 한다. 가리킨 곳에 없는 사실은 쓰지 않는다.',
+];
+const FACT_COMPLETE_FORM_LINE_MAP = {
+  [DEIXIS_FORM_MAP.simple]: '    단순형은 그 사실을 fact 칸에 쓰고(범위는 "2019~2023년"처럼 물결표로 짧게), 없으면 빈 문자열로 둔다.',
+  [DEIXIS_FORM_MAP.complete]: '    완전형은 대상마다 그 사실을 이름 곁에 짧게 붙인다.',
+};
+
+function readFormRuleList({ subKind, isFactCompleteEnabled }) {
+  const simpleList = isFactCompleteEnabled ? DEIXIS_FACT_SIMPLE_FORM_RULE_LIST : DEIXIS_FORM_RULE_MAP.simple;
+  if (subKind === DEIXIS_FORM_MAP.simple) return simpleList;
+  return DEIXIS_FORM_RULE_MAP[subKind] || [...simpleList, ...DEIXIS_FORM_RULE_MAP.complete];
+}
+
+function buildFactCompleteRuleList({ subKind, isFactCompleteEnabled }) {
+  if (!isFactCompleteEnabled) return [];
+  const formLineList = subKind ? [FACT_COMPLETE_FORM_LINE_MAP[subKind]] : Object.values(FACT_COMPLETE_FORM_LINE_MAP);
+  return [...FACT_COMPLETE_RULE_LIST, ...formLineList.filter(Boolean)];
+}
+
 // 앞선 해설 목록(describedElementList)은 모델에 보이지 않는다. 목록을 주면 앞선 해설의 이름·연도를 이번 화면 해설에
 // 옮겨 적고, 같은 내용이어도 거절하지 않았다. 같은 대상의 겹친 해설은 재생 전 중복 거르기(narration-history)가 맡는다.
 function buildGroundingPrompt({ utterance, recentTranscript, maxChars,
   hasPointingRegion = false, pointingOrderHint = '',
   minWordCount = DEFAULT_DEIXIS_MIN_WORD_COUNT, maxWordCount = DEFAULT_DEIXIS_MAX_WORD_COUNT,
-  subKind = null, mergedAnchorList = [], language = DEFAULT_CAPTION_LANGUAGE }) {
+  subKind = null, mergedAnchorList = [], language = DEFAULT_CAPTION_LANGUAGE, contentSwitch = null }) {
   const trimmedUtterance = (utterance || '').trim();
-  const formRuleList = DEIXIS_FORM_RULE_MAP[subKind]
-    || [...DEIXIS_FORM_RULE_MAP.simple, ...DEIXIS_FORM_RULE_MAP.complete];
+  const resolvedSwitch = resolveContentSwitch(contentSwitch);
+  const { isFactCompleteEnabled } = resolvedSwitch;
+  const formRuleList = readFormRuleList({ subKind, isFactCompleteEnabled });
   return [
     hasPointingRegion
       ? '이 이미지는 회의 공유화면에서 발표자가 방금 필기하거나 포인터로 가리킨 영역을 확대한 것이다.'
@@ -79,6 +111,7 @@ function buildGroundingPrompt({ utterance, recentTranscript, maxChars,
       + ' — 대상에 붙이지 마라. 대상에 더 적힌 내용이 없으면 자료 맥락(예: 지도에 표시된 지역)으로 채운다.',
     '    값·항목 여러 개의 묶음을 가리켰으면 하나하나 늘어놓지 말고 묶음 이름과 개수로 말한다(예: "기준보다 작은 값 네 개").'
       + ' 늘어놓으면 칸 어절 수를 넘어 목록이 중간에서 잘린다.',
+    ...buildFactCompleteRuleList({ subKind, isFactCompleteEnabled }),
     `(7) 가리킨 대상을 화면에서 특정할 수 없을 때만 "${GROUNDING_NONE_TOKEN}"이다. 그 밖에는 반드시 캡션을 만든다.`,
     `(참고: 총 ${minWordCount}~${maxWordCount}어절, 최대 ${maxChars}자 분량이다.)`,
     '',
@@ -86,10 +119,13 @@ function buildGroundingPrompt({ utterance, recentTranscript, maxChars,
       narrationType: NARRATION_TYPE_MAP.deixis,
       subKind: subKind || DEIXIS_FORM_MAP.simple,
       language,
+      contentSwitch: resolvedSwitch,
     }),
     ...buildOutputLanguageRuleList({
       language,
-      detailLineList: ['caption 은 대상의 이름·내용을 담은 자연스러운 영어 명사구로 쓴다. 시스템은 caption 만 읽는다.',
+      detailLineList: [isFactCompleteEnabled && subKind !== DEIXIS_FORM_MAP.complete
+        ? 'caption·fact 는 자연스러운 영어 명사구로 쓴다. 시스템은 caption 뒤에 fact 를 이어 읽는다.'
+        : 'caption 은 대상의 이름·내용을 담은 자연스러운 영어 명사구로 쓴다. 시스템은 caption 만 읽는다.',
         '영어에서도 지시어(This·That·Here)로 시작하지 말고 대상 이름으로 말한다. "Looking at"·"Pointing at" 같은 동작 말을 붙이지 않는다.'
         + ' 가리킨 표시(circle·dot·marker)는 말하지 않는다.'],
     }),

@@ -5,6 +5,7 @@ const {
 const { DEFAULT_CAPTION_LANGUAGE } = require('../contracts/caption-language');
 const { buildOutputLanguageRuleList } = require('./output-language-rule');
 const { buildScreenTextBlock } = require('./screen-text-block');
+const { resolveContentSwitch } = require('../agents/shared/content-switch');
 
 const DEFAULT_INTERPRETATION_MIN_WORD_COUNT = 6;
 const DEFAULT_INTERPRETATION_MAX_WORD_COUNT = 12;
@@ -34,6 +35,14 @@ const INTERPRETATION_RULE_MAP = {
   ],
 };
 
+// 값을 맞혀도 그 값이 언제·무엇과 견준·어떤 조건의 값인지 빠지면 그 세부를 묻는 말에 답할 수 없다.
+// 값을 읽은 줄을 근거 칸(source)에 먼저 옮겨 적게 해 그 줄의 머리글·제목에서 가르는 사실을 고르게 한다.
+const FACT_COMPLETE_RULE_LIST = [
+  '(4) 값이 무엇의 값인지 가르는 사실 — 시점, 비교 상대(작년 대비·평균 대비), 조건(지역·연령·기준), 범위의 끝 — 이'
+    + ' 그 값의 줄·머리글·제목에 적혀 있으면 빠뜨리지 않는다.',
+  '    source 칸에 값을 읽은 줄을 머리글·제목과 함께 먼저 옮겨 적고, 대상·해석틀은 거기서 고른다. 화면에 없는 사실은 쓰지 않는다.',
+];
+
 // 같은 화면을 OCR 로 읽은 줄(screenLineList)로 프롬프트에 넣을 덩어리를 만든다. 줄 고르기는 발화와
 // 해설이 함께 다루는 표현(지시 구·둘째 변화 구)의 낱말을 본다. 줄이 없으면 빈 덩어리다.
 function buildInterpretationScreenTextBlock({ screenLineList = [], utterance = '', subKind = null,
@@ -49,7 +58,8 @@ function buildInterpretationPrompt({ utterance, recentTranscript = '', subKind =
   minWordCount = DEFAULT_INTERPRETATION_MIN_WORD_COUNT,
   maxWordCount = DEFAULT_INTERPRETATION_MAX_WORD_COUNT,
   maxChars = null, describedElementList = [], mergedAnchorList = [], mergedClaimList = [],
-  screenLineList = [], language = DEFAULT_CAPTION_LANGUAGE }) {
+  screenLineList = [], language = DEFAULT_CAPTION_LANGUAGE, contentSwitch = null }) {
+  const resolvedSwitch = resolveContentSwitch(contentSwitch);
   const effectiveMaxChars = Number.isFinite(maxChars) ? maxChars : computeMaxChars({ maxWordCount, language });
   const screenTextBlock = buildInterpretationScreenTextBlock({
     screenLineList, utterance, subKind, mergedAnchorList, mergedClaimList,
@@ -84,6 +94,7 @@ function buildInterpretationPrompt({ utterance, recentTranscript = '', subKind =
       subKind: subKind || INTERPRETATION_KIND_MAP.valueToMeaning,
       hasSecondClaim: mergedClaimList.length > 0,
       language,
+      contentSwitch: resolvedSwitch,
     }),
     '',
     '규칙:',
@@ -92,6 +103,7 @@ function buildInterpretationPrompt({ utterance, recentTranscript = '', subKind =
     '(3) 발화 문장을 그대로 옮기지 마라. **핵심만 짧은 명사구로 간추린다.**',
     '    "이 상태가 달라집니다" → "준비 상태에 따른 차이"',
     '    지시어("이·그·저·여기·이런")는 넣지 않는다 — 청자는 그것을 볼 수 없다.',
+    ...(resolvedSwitch.isFactCompleteEnabled ? FACT_COMPLETE_RULE_LIST : []),
     `(참고: 조립 후 총 ${minWordCount}~${maxWordCount}어절, 최대 ${effectiveMaxChars}자 분량이다.)`,
     ...buildOutputLanguageRuleList({
       language,

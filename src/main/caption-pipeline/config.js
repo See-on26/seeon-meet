@@ -1,3 +1,5 @@
+const { readContentSwitch } = require('./agents/shared/content-switch');
+
 const DEFAULT_VLM_URL = 'http://127.0.0.1:8801/v1/chat/completions';
 
 const DEFAULT_VLM_MODEL = 'gemma-4-26b-a4b-qat';
@@ -141,6 +143,8 @@ function readPipelineConfig(env = process.env) {
     routerMode: env.SEEON_ROUTER_MODE || DEFAULT_ROUTER_MODE,
     // 추상적 척도 해설(화면에 보이는 대상의 정도)은 기본으로 켠다. 'false' 로 두면 척도 후보를 생성하지 않는다.
     isScaleEnabled: env.SEEON_ROUTER_SCALE_ENABLED !== 'false',
+    // 지시·수치·척도 해설 내용 개선 항목별 스위치(기본 켜짐). 항목과 환경변수 이름은 content-switch.js.
+    contentSwitch: readContentSwitch(env),
     hasBedrockCredentials:
       Boolean(env.AWS_BEARER_TOKEN_BEDROCK)
       || Boolean(env.AWS_ACCESS_KEY_ID && env.AWS_SECRET_ACCESS_KEY)

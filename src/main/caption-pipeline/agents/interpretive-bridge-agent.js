@@ -4,6 +4,7 @@ const {
 } = require('./shared/caption-parser');
 const { requestVlmContent } = require('./shared/vlm-gateway');
 const { scaleWordBudget } = require('./shared/narration-format');
+const { resolveContentSwitch } = require('./shared/content-switch');
 const {
   buildInterpretationPrompt, buildInterpretationScreenTextBlock, INTERPRETATION_RULE_MAP,
   DEFAULT_INTERPRETATION_MIN_WORD_COUNT, DEFAULT_INTERPRETATION_MAX_WORD_COUNT,
@@ -21,11 +22,12 @@ function createInterpretiveBridgeAgent({ config, getCaptionLanguage = () => DEFA
     // 렌더러의 어절 예산을 캡션 언어의 단어 수로 바꾼다(영어는 상한을 ENGLISH_WORD_SCALE 배로, 한국어는 그대로).
     ({ minWordCount, maxWordCount } = scaleWordBudget({ minWordCount, maxWordCount, language }));
     const effectiveMaxChars = computeMaxChars({ maxWordCount, language });
+    const contentSwitch = resolveContentSwitch(config?.contentSwitch);
     const content = await requestVlmContent({
       config, jpegBuffer, label: AGENT_LABEL, maxTokens: SLOT_AGENT_MAX_TOKENS,
       prompt: buildInterpretationPrompt({
         utterance, recentTranscript, subKind, minWordCount, maxWordCount,
-        maxChars: effectiveMaxChars, describedElementList, mergedAnchorList, mergedClaimList, screenLineList, language,
+        maxChars: effectiveMaxChars, describedElementList, mergedAnchorList, mergedClaimList, screenLineList, language, contentSwitch,
       }),
     });
     // 프롬프트에 실제로 들어간 화면 글자 양을 기록용으로 함께 돌려준다.
@@ -37,7 +39,7 @@ function createInterpretiveBridgeAgent({ config, getCaptionLanguage = () => DEFA
         content,
         narrationType: NARRATION_TYPE_MAP.interpretation,
         subKind: subKind || INTERPRETATION_KIND_MAP.valueToMeaning,
-        maxChars: effectiveMaxChars, maxWordCount, hasSecondClaim: mergedClaimList.length > 0, language,
+        maxChars: effectiveMaxChars, maxWordCount, hasSecondClaim: mergedClaimList.length > 0, language, contentSwitch,
       }),
       screenTextBlock: { lineCount, charCount, numberLineCount },
       // 둘째 값이 화면에 없어 첫 쌍만 다시 조립할 때도 같은 전체 예산으로 줄이도록, 실제로 쓴 예산(언어 배율 적용값)을 돌려준다.
