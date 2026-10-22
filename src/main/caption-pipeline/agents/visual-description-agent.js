@@ -5,6 +5,7 @@ const {
 const { requestVlmContent } = require('./shared/vlm-gateway');
 const { scaleWordBudget } = require('./shared/narration-format');
 const { resolveContentSwitch } = require('./shared/content-switch');
+const { toZoomImageArgs, toZoomPromptArgs } = require('./shared/zoom-image');
 const {
   buildVisualDescriptionPrompt, buildScaleScreenTextBlock, DEFAULT_VISUAL_WORD_RANGE_MAP,
 } = require('../prompts/visual-description');
@@ -31,7 +32,7 @@ function createVisualDescriptionAgent({ config, getCaptionLanguage = () => DEFAU
   async function generate({ jpegBuffer, subKind = VISUAL_DESCRIPTION_KIND_MAP.reaction,
     utterance = '', recentTranscript = '', minWordCount, maxWordCount,
     describedElementList = [], mergedAnchorList = [], origin = null, screenLineList = [], factCardList = [],
-    language = getCaptionLanguage() }) {
+    language = getCaptionLanguage(), zoomJpegBuffer = null, zoomKind = null, zoomTerm = null }) {
     const defaultRange = DEFAULT_VISUAL_WORD_RANGE_MAP[subKind]
       || DEFAULT_VISUAL_WORD_RANGE_MAP[VISUAL_DESCRIPTION_KIND_MAP.reaction];
     // 렌더러의 어절 예산을 캡션 언어의 단어 수로 바꾼다(영어는 상한을 ENGLISH_WORD_SCALE 배로, 한국어는 그대로). 받지 못한 값은 기본 범위를 바꾼다.
@@ -43,11 +44,15 @@ function createVisualDescriptionAgent({ config, getCaptionLanguage = () => DEFAU
     const effectiveMaxWordCount = Number.isFinite(maxWordCount) ? maxWordCount : defaultRange.maxWordCount;
     const effectiveMaxChars = computeMaxChars({ maxWordCount: effectiveMaxWordCount, language });
     const contentSwitch = resolveContentSwitch(config?.contentSwitch);
+    // 확대 그림(발화 ROI)은 척도 해설만 받는다. 반응·무발화 묘사는 지금처럼 한 장이다.
+    const zoomArgs = { zoomJpegBuffer: subKind === VISUAL_DESCRIPTION_KIND_MAP.scale ? zoomJpegBuffer : null, zoomKind, zoomTerm };
     const content = await requestVlmContent({
-      config, jpegBuffer, label: AGENT_LABEL, temperature: VISUAL_DESCRIPTION_TEMPERATURE, maxTokens: SLOT_AGENT_MAX_TOKENS,
+      config, ...toZoomImageArgs({ jpegBuffer, zoomJpegBuffer: zoomArgs.zoomJpegBuffer }), label: AGENT_LABEL,
+      temperature: VISUAL_DESCRIPTION_TEMPERATURE, maxTokens: SLOT_AGENT_MAX_TOKENS,
       prompt: buildVisualDescriptionPrompt({
         subKind, utterance, recentTranscript, minWordCount, maxWordCount,
         maxChars: effectiveMaxChars, describedElementList, mergedAnchorList, origin, screenLineList, factCardList, language, contentSwitch,
+        ...toZoomPromptArgs(zoomArgs),
       }),
     });
     const parsed = parseSlotCaption({

@@ -6,6 +6,7 @@ const { DEFAULT_CAPTION_LANGUAGE } = require('../contracts/caption-language');
 const { buildOutputLanguageRuleList } = require('./output-language-rule');
 const { resolveContentSwitch } = require('../agents/shared/content-switch');
 const { buildFactCardBlock, FACT_CARD_USAGE_MAP } = require('./fact-card-block');
+const { buildZoomImageIntroLineList, ZOOM_USAGE_MAP } = require('./zoom-image-intro');
 
 const DEFAULT_DEIXIS_MIN_WORD_COUNT = 4;
 const DEFAULT_DEIXIS_MAX_WORD_COUNT = 8;
@@ -59,10 +60,12 @@ function buildFactCompleteRuleList({ subKind, isFactCompleteEnabled }) {
 
 // 앞선 해설 목록(describedElementList)은 모델에 보이지 않는다. 목록을 주면 앞선 해설의 이름·연도를 이번 화면 해설에
 // 옮겨 적고, 같은 내용이어도 거절하지 않았다. 같은 대상의 겹친 해설은 재생 전 중복 거르기(narration-history)가 맡는다.
+// zoomKind 가 있으면 [화면 전체, 확대] 두 장 요청이라 첫 줄을 두 장 안내로 바꾼다. 없으면 프롬프트는 글자 하나까지 그대로다.
 function buildGroundingPrompt({ utterance, recentTranscript, maxChars,
   hasPointingRegion = false, pointingOrderHint = '',
   minWordCount = DEFAULT_DEIXIS_MIN_WORD_COUNT, maxWordCount = DEFAULT_DEIXIS_MAX_WORD_COUNT,
-  subKind = null, mergedAnchorList = [], factCardList = [], language = DEFAULT_CAPTION_LANGUAGE, contentSwitch = null }) {
+  subKind = null, mergedAnchorList = [], factCardList = [], language = DEFAULT_CAPTION_LANGUAGE, contentSwitch = null,
+  zoomKind = null, zoomTerm = null }) {
   const trimmedUtterance = (utterance || '').trim();
   const resolvedSwitch = resolveContentSwitch(contentSwitch);
   const { isFactCompleteEnabled } = resolvedSwitch;
@@ -70,10 +73,11 @@ function buildGroundingPrompt({ utterance, recentTranscript, maxChars,
   // 기본으로는 받지 않는다(SEEON_FACT_CARD_AGENTS 에 deixis 가 있을 때만). 카드가 없으면 빈 덩어리다.
   const factCardBlock = buildFactCardBlock({ cardList: factCardList, usage: FACT_CARD_USAGE_MAP.deixis });
   const formRuleList = readFormRuleList({ subKind, isFactCompleteEnabled });
+  const zoomIntroLineList = buildZoomImageIntroLineList({ zoomKind, zoomTerm, usage: ZOOM_USAGE_MAP.target });
   return [
-    hasPointingRegion
+    ...(zoomIntroLineList.length ? zoomIntroLineList : [hasPointingRegion
       ? '이 이미지는 회의 공유화면에서 발표자가 방금 필기하거나 포인터로 가리킨 영역을 확대한 것이다.'
-      : '이 이미지는 회의에서 공유 중인 화면이다.',
+      : '이 이미지는 회의에서 공유 중인 화면이다.']),
     `발표자가 방금 이렇게 말하며 화면의 무언가를 가리켰다: "${trimmedUtterance}"`,
     recentTranscript
       ? `발표자의 인접 발화(트리거 직전 1분 이내 + 직후 발화)는 다음과 같다: ${recentTranscript}`

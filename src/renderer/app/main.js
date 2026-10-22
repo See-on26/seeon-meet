@@ -89,7 +89,7 @@ import {
 import { MeetCaptureSession } from '../core/capture/meet-capture-session.js';
 import { fitWithinLongEdge } from '../core/capture/frame-scale.js';
 import { captureWhenSettled } from '../core/capture/settled-capture.js';
-import { captureDeixisFrameSet } from '../core/capture/deixis-frame-set.js';
+import { captureDeixisFrameSet, toPointingRect } from '../core/capture/deixis-frame-set.js';
 import { wallToVideoTimeMs, resolveSpeechEndWallTs, attachCandidateEventVideoTime } from '../core/capture/video-time.js';
 import { createLogoTapCounter } from '../core/dev/logo-tap-counter.js';
 
@@ -1187,10 +1187,13 @@ async function runDeixisDecision(firedDecision) {
     reason: '지시 후보 발행',
     detail: `트리거="${label}" 발화="${utterance || '(없음)'}" 영역=${region ? '포인팅' : '프레임 전체'} 슬라이드=${slideRegistry.currentLabel() || '-'}`,
   });
+  // 잘린 그림이 있을 때만 그 영역의 비율 상자를 함께 보낸다(main 의 발화 ROI 가 발화로 찾은 곳과 견준다).
+  const pointingRect = fullBuffer
+    ? toPointingRect({ subRegion: firedDecision.region, margin: POINTING_CROP_MARGIN }) : null;
   const result = await window.seeon.sendPipelineDeixis({
     ts, buffer, fullBuffer, utterance, recentTranscript, beforeTranscript: before, afterTranscript: after,
     hasPointingRegion: Boolean(region), pointingOrderHint, slideLabel: slideRegistry.currentLabel(),
-    wordBudgetMap, eventVideoTimeMs, triggerCandidateList: candidateList,
+    wordBudgetMap, eventVideoTimeMs, triggerCandidateList: candidateList, pointingRect,
   }).catch(() => null);
 
   const isNarrated = Boolean(result?.isOk && result.isGrounded);

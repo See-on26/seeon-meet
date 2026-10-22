@@ -9,6 +9,7 @@ const { buildScreenTextBlock, isStatLine, SCREEN_TEXT_USAGE_MAP } = require('./s
 const { resolveContentSwitch } = require('../agents/shared/content-switch');
 const { extractApproximateValueList, isNearApproximateValue, buildApproximateValueLine } = require('./approximate-value');
 const { buildFactCardBlock, FACT_CARD_USAGE_MAP } = require('./fact-card-block');
+const { buildZoomImageIntroLineList, ZOOM_USAGE_MAP } = require('./zoom-image-intro');
 
 const DEFAULT_VISUAL_WORD_RANGE_MAP = {
   [VISUAL_DESCRIPTION_KIND_MAP.reaction]: { minWordCount: 5, maxWordCount: 12 },
@@ -61,7 +62,7 @@ const SCALE_VALUE_FIRST_RULE_LIST = [
 function buildVisualDescriptionPrompt({ subKind = VISUAL_DESCRIPTION_KIND_MAP.reaction,
   utterance = '', recentTranscript = '', minWordCount, maxWordCount, maxChars = null,
   describedElementList = [], mergedAnchorList = [], origin = null, screenLineList = [], factCardList = [],
-  language = DEFAULT_CAPTION_LANGUAGE, contentSwitch = null }) {
+  language = DEFAULT_CAPTION_LANGUAGE, contentSwitch = null, zoomKind = null, zoomTerm = null }) {
   const resolvedSwitch = resolveContentSwitch(contentSwitch);
   const defaultRange = DEFAULT_VISUAL_WORD_RANGE_MAP[subKind]
     || DEFAULT_VISUAL_WORD_RANGE_MAP[VISUAL_DESCRIPTION_KIND_MAP.reaction];
@@ -92,12 +93,14 @@ function buildVisualDescriptionPrompt({ subKind = VISUAL_DESCRIPTION_KIND_MAP.re
     `(참고: 조립 후 총 ${effectiveMinWordCount}~${effectiveMaxWordCount}어절, 최대 ${effectiveMaxChars}자 분량이다.)`,
   ].filter(Boolean);
 
+  // zoomKind 가 있으면 [화면 전체, 확대] 두 장 요청이라 척도 프롬프트(값 먼저 판·예전 판 모두)의 첫 줄을 두 장 안내로 바꾼다. 척도만 두 장을 받는다.
+  const zoomIntroLineList = isScale ? buildZoomImageIntroLineList({ zoomKind, zoomTerm, usage: ZOOM_USAGE_MAP.value }) : [];
   if (isScaleValueFirst) {
     const screenTextBlock = buildScaleScreenTextBlock({ screenLineList, utterance, mergedAnchorList, contentSwitch: resolvedSwitch });
     // 척도 해설에 넣을 화면 사실 카드(발화와 가까운 카드 1장). 카드가 없으면 빈 덩어리다.
     const factCardBlock = buildFactCardBlock({ cardList: factCardList, usage: FACT_CARD_USAGE_MAP.scale });
     return [
-      '이 이미지는 회의에서 공유 중인 화면이다.',
+      ...(zoomIntroLineList.length ? zoomIntroLineList : ['이 이미지는 회의에서 공유 중인 화면이다.']),
       `발표자가 방금 이렇게 말했다: "${(utterance || '').trim()}"`,
       recentTranscript ? `참고로 최근 발화 맥락은 다음과 같다: ${recentTranscript}` : '',
       mergedAnchorList.length
@@ -125,7 +128,7 @@ function buildVisualDescriptionPrompt({ subKind = VISUAL_DESCRIPTION_KIND_MAP.re
     // 척도 해설에 넣을 화면 사실 카드(발화와 가까운 카드 1장). 카드가 없으면 빈 덩어리다.
     const factCardBlock = buildFactCardBlock({ cardList: factCardList, usage: FACT_CARD_USAGE_MAP.scale });
     return [
-      '이 이미지는 회의에서 공유 중인 화면이다.',
+      ...(zoomIntroLineList.length ? zoomIntroLineList : ['이 이미지는 회의에서 공유 중인 화면이다.']),
       `발표자가 방금 이렇게 말했다: "${(utterance || '').trim()}"`,
       recentTranscript ? `참고로 최근 발화 맥락은 다음과 같다: ${recentTranscript}` : '',
       mergedAnchorList.length

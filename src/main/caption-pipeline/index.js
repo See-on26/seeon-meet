@@ -65,6 +65,11 @@ const {
   formatScreenTextSummary,
 } = require('./orchestrator/screen-text-grounding');
 const { resolveDeixisFrameSet } = require('./orchestrator/deixis-frame-set');
+const {
+  createSpeechRoiResolver, buildZoomAgentArgs, formatSpeechRoiSummary, SPEECH_ROI_MODE_MAP,
+} = require('./orchestrator/speech-roi');
+const { createSlideLayoutStore, createSharedOcrClient } = require('./orchestrator/speech-roi/slide-layout-store');
+const { createFrameImageOps } = require('./orchestrator/speech-roi/frame-image');
 const { createContextStore, toSlideMajor, LABEL_STATUS_MAP } = require('./context/context-store');
 const { createSlideLabeler } = require('./context/slide-labeler');
 const { createContextFileWriter } = require('./context/context-file');
@@ -244,8 +249,10 @@ function registerPipeline({ getViewerView, meetingArchive = null }) {
   let sessionSlideTextBackend = config.slideTextBackend;
   // 슬라이드 전사와 수치 해설 근거가 OCR 클라이언트 하나를 같이 써서, 서비스가 응답하지 않을 때의 건너뛰기 상태를 나눈다.
   const ocrClient = createOcrClient({ config });
+  // 발화 ROI 가 켜져 있으면 전환 JPEG 하나로 전사(백엔드 ocr)와 위치 사전이 /ocr 한 번의 결과를 같이 쓴다. 꺼져 있으면 지금 클라이언트 그대로다.
+  const sharedOcrClient = config.speechRoiMode === SPEECH_ROI_MODE_MAP.on ? createSharedOcrClient({ ocrClient }) : ocrClient;
   const slideTextAgent = createSlideTextAgent({
-    config, ocrClient, getBackend: () => sessionSlideTextBackend,
+    config, ocrClient: sharedOcrClient, getBackend: () => sessionSlideTextBackend,
   });
   // 그래프 어림(세로 막대)은 수치 해설 때 근거 OCR 줄과 같은 프레임 화소로 한다. log 는 기록만 남기고, on 은 수치 에이전트와 값 검사에도 쓴다.
   const chartEstimator = config.chartEstimateMode === CHART_ESTIMATE_MODE_MAP.off ? null : createChartEstimator({
@@ -254,6 +261,20 @@ function registerPipeline({ getViewerView, meetingArchive = null }) {
   });
   const isChartEstimateInPrompt = config.chartEstimateMode === CHART_ESTIMATE_MODE_MAP.on;
   console.log(`[pipeline] 그래프 어림: ${config.chartEstimateMode}`);
+  // 발화로 ROI 잡기: 새 슬라이드마다 줄 위치를 뽑아 두고(전환 때), 해설 순간 발화 낱말과 맞춰 확대 그림을 둘째 장으로 붙인다.
+  const frameImageOps = createFrameImageOps();
+  const slideLayoutStore = createSlideLayoutStore({
+    recognize: sharedOcrClient.recognize, imageOps: frameImageOps,
+    onSettled: ({ slideLabel, status, reason, lineCount, errorMessage, elapsedMs }) => markDebug({
+      stage: DEBUG_STAGE_MAP.slide, verdict: status === 'failed' ? DEBUG_VERDICT_MAP.fail : DEBUG_VERDICT_MAP.info,
+      reason: `발화 ROI 위치 사전 ${status}`,
+      detail: `슬라이드=${slideLabel} 줄=${lineCount}${reason ? ` 까닭=${reason}` : ''} ${elapsedMs}ms${errorMessage ? ` · ${errorMessage}` : ''}`,
+    }),
+  });
+  const speechRoi = createSpeechRoiResolver({ config, tokenizer: kiwiTokenizer, layoutStore: slideLayoutStore, imageOps: frameImageOps });
+  console.log(`[pipeline] 발화 ROI: ${config.speechRoiMode}${speechRoi.isEnabled()
+    ? ` (유형 ${config.speechRoiTypeList.join(',')} · 지시 OCR ${config.isSpeechRoiFrameOcrEnabled ? 'on' : 'off'}`
+      + ` · 가리킴 짝 ${config.isSpeechRoiPointingPairEnabled ? 'on' : 'off'})` : ''}`);
   // 수치·척도 해설 근거 OCR 은 「화면 글자 읽기」 설정과 상관없이 돈다(그 설정은 슬라이드 전사 엔진만 고른다).
   const screenTextGrounding = createScreenTextGrounding({
     ocrClient, isEnabled: () => config.isScreenTextGroundingEnabled, chartEstimator,
@@ -421,6 +442,7 @@ function registerPipeline({ getViewerView, meetingArchive = null }) {
     slideTextStore.reset();
     factCardStore.reset();
     slideTextSourceMap.clear();
+    slideLayoutStore.reset();
     boundaryTrigger.reset();
     const meetingLanguage = applySessionMeetingLanguage({ asrLanguageSession, asrLanguage });
     sessionSlideTextBackend = resolveSlideTextBackend({ requested: slideTextBackend, fallback: config.slideTextBackend });
@@ -434,6 +456,13 @@ function registerPipeline({ getViewerView, meetingArchive = null }) {
       stage: DEBUG_STAGE_MAP.session, verdict: DEBUG_VERDICT_MAP.info,
       reason: '세션 시작', detail: `모드=${mode} · 받아쓰기=${meetingLanguage} · 캡션 언어=${sessionCaptionLanguage} · 화면 글자=${sessionSlideTextBackend} · ${sessionId} · 기록=${recordStore.filePath}`,
     });
+    if (speechRoi.isEnabled()) {
+      markDebug({
+        stage: DEBUG_STAGE_MAP.session, verdict: DEBUG_VERDICT_MAP.info, reason: '발화 ROI 켜짐',
+        detail: `유형=${config.speechRoiTypeList.join(',')} · 지시 OCR=${config.isSpeechRoiFrameOcrEnabled ? 'on' : 'off'}`
+          + ` · 가리킴 짝=${config.isSpeechRoiPointingPairEnabled ? 'on' : 'off'}`,
+      });
+    }
 
     return { isOk: true, sessionId, recordPath: recordStore.filePath, gapSource: config.gapSource };
   });
@@ -698,6 +727,8 @@ function registerPipeline({ getViewerView, meetingArchive = null }) {
     const isStarted = slideTextStore.ensure({ slideLabel, jpegBuffer });
     // 사실 카드는 같은 그림으로 전사와 나란히 만든다(카드 쪽이 한 번에 하나, 밀리면 최신 장만).
     if (config.isFactCardEnabled) factCardStore.ensure({ slideLabel, jpegBuffer });
+    // 발화 ROI 가 켜져 있으면 같은 전환 JPEG 의 줄 위치를 뽑아 둔다(해설 경로 밖, 새 장마다 한 번).
+    if (speechRoi.isEnabled()) slideLayoutStore.ensure({ slideLabel, jpegBuffer });
     return { isOk: true, isStarted };
   });
 
@@ -940,7 +971,7 @@ function registerPipeline({ getViewerView, meetingArchive = null }) {
     }
   });
 
-  ipcMain.handle('pipeline-deixis', async (_event, { ts, buffer, fullBuffer = null, utterance, recentTranscript, beforeTranscript, afterTranscript, hasPointingRegion, pointingOrderHint, slideLabel, wordBudgetMap, eventVideoTimeMs = null, triggerCandidateList = [] }) => {
+  ipcMain.handle('pipeline-deixis', async (_event, { ts, buffer, fullBuffer = null, utterance, recentTranscript, beforeTranscript, afterTranscript, hasPointingRegion, pointingOrderHint, slideLabel, wordBudgetMap, eventVideoTimeMs = null, triggerCandidateList = [], pointingRect = null }) => {
     let stage = PIPELINE_STAGE_MAP.judge;
     const startedAt = Date.now();
     const hasAnySpeech = [utterance, beforeTranscript, afterTranscript, recentTranscript]
@@ -982,7 +1013,9 @@ function registerPipeline({ getViewerView, meetingArchive = null }) {
     try {
       const frameSet = resolveDeixisFrameSet({ buffer, fullBuffer });
       // 수치·척도 해설이 될 수 있는 요청이면 판단 LLM 과 함께 같은 프레임의 OCR 을 시작한다. 수치·척도 해설이 아니면 결과를 버린다.
-      const screenTextTask = isRouterMode && shouldStartScreenTextGrounding({ triggerCandidateList, isScaleEnabled: config.isScaleEnabled })
+      // 발화 ROI 의 지시 전용 OCR 스위치가 켜져 있으면 지시 요청에도 시작한다(끝나 있을 때 줄 위치로만 쓰고 프롬프트에는 넣지 않는다).
+      const screenTextTask = isRouterMode && (shouldStartScreenTextGrounding({ triggerCandidateList, isScaleEnabled: config.isScaleEnabled })
+        || speechRoi.shouldStartFrameOcr())
         ? screenTextGrounding.start({ jpegBuffer: frameSet.screenFrame })
         : null;
       let judgeReason = null;
@@ -1088,6 +1121,20 @@ function registerPipeline({ getViewerView, meetingArchive = null }) {
         beforeText, frameLineList: screenText?.lineList || [], requestTs: ts, tokenizer: factCardTokenizer,
       }) : null;
       const factCardArg = factCard?.cardList.length ? { factCardList: factCard.cardList } : {};
+      // 발화로 ROI 잡기(켜져 있을 때만): 발화 낱말을 화면 줄 위치와 맞춰 확대 그림을 만든다. 끝난 결과만 쓰고 기다리지 않는다.
+      const speechRoiResult = speechRoi.resolve({
+        narrationType, subKind: selectedCandidate?.subKind || null, utterance, before: beforeText, after: afterText,
+        anchor: selectedCandidate?.anchor || '', slideLabel, screenFrame: frameSet.screenFrame,
+        frameLayout: screenTextTask?.peekLayout() ?? null, pointingRect,
+        regionFrame: fullBuffer ? frameSet.selectAgentFrame(NARRATION_TYPE_MAP.deixis) : null,
+        mergedClaimCount: selectedCandidate?.mergedClaimList?.length || 0,
+      });
+      if (speechRoiResult.record) {
+        markDebug({
+          stage: DEBUG_STAGE_MAP.vlm, verdict: DEBUG_VERDICT_MAP.info, ts, narrationType,
+          reason: `발화 ROI ${speechRoiResult.record.status}`, detail: formatSpeechRoiSummary(speechRoiResult.record),
+        });
+      }
 
       const wordBudget = wordBudgetMap?.[narrationType] || null;
       const generatorArgs = {
@@ -1096,6 +1143,8 @@ function registerPipeline({ getViewerView, meetingArchive = null }) {
         subKind: selectedCandidate?.subKind || null,
         mergedAnchorList: selectedCandidate?.mergedAnchorList || [],
         mergedClaimList: selectedCandidate?.mergedClaimList || [],
+        // 확대 그림이 있으면 첫째 장을 화면 전체로 바꾸고 확대를 둘째 장으로 넘긴다. 없으면 아무것도 바꾸지 않는다.
+        ...buildZoomAgentArgs({ roiResult: speechRoiResult, screenFrame: frameSet.screenFrame }),
       };
 
       const extraArgByTypeMap = {
@@ -1126,6 +1175,7 @@ function registerPipeline({ getViewerView, meetingArchive = null }) {
         ...(isGrounded && text ? {} : { rejectKind, rejectReason, rawContent }),
         ...(screenTextRecord ? { screenText: screenTextRecord } : {}),
         ...(factCardRecord ? { factCard: factCardRecord } : {}),
+        ...(speechRoiResult.record ? { speechRoi: speechRoiResult.record } : {}),
       });
       if (!isGrounded || !text) {
         const rejection = describeAgentRejection({ rejectKind, rejectReason, rawContent });
@@ -1176,6 +1226,7 @@ function registerPipeline({ getViewerView, meetingArchive = null }) {
             narrationType, subKind: selectedCandidate?.subKind || null, skipReason: 'value-absent',
             ...(screenTextRecord ? { screenText: screenTextRecord } : {}),
             ...(factCardRecord ? { factCard: factCardRecord } : {}),
+            ...(speechRoiResult.record ? { speechRoi: speechRoiResult.record } : {}),
           });
           return { isOk: true, isGrounded: false };
         }
@@ -1219,6 +1270,7 @@ function registerPipeline({ getViewerView, meetingArchive = null }) {
               narrationType, subKind: selectedCandidate?.subKind || null, skipReason: 'chart-estimate-unmarked',
               ...(screenTextRecord ? { screenText: screenTextRecord } : {}),
               ...(factCardRecord ? { factCard: factCardRecord } : {}),
+              ...(speechRoiResult.record ? { speechRoi: speechRoiResult.record } : {}),
             });
             return { isOk: true, isGrounded: false };
           }

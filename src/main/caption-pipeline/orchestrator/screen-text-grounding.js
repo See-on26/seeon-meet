@@ -66,6 +66,7 @@ function createSkippedTask(skipReason) {
   return {
     waitForPrompt: async () => ({ lineList: [], record: buildSkippedRecord(skipReason), chart: null }),
     peekFrameText: () => null,
+    peekLayout: () => null,
   };
 }
 
@@ -82,9 +83,9 @@ function createScreenTextGrounding({ ocrClient, isEnabled = () => true, waitMs =
     if (!isEnabled()) return createSkippedTask(SCREEN_TEXT_SKIP_REASON_MAP.disabled);
     if (!ocrClient) return createSkippedTask('ocr_error:OCR 클라이언트 없음');
     const startedAt = now();
-    const state = { isSettled: false, evaluation: null, skipReason: null, ocrMs: null };
-    const settle = ({ evaluation = null, skipReason }) => {
-      Object.assign(state, { isSettled: true, evaluation, skipReason, ocrMs: now() - startedAt });
+    const state = { isSettled: false, evaluation: null, skipReason: null, ocrMs: null, result: null };
+    const settle = ({ evaluation = null, skipReason, result = null }) => {
+      Object.assign(state, { isSettled: true, evaluation, skipReason, ocrMs: now() - startedAt, result });
     };
     let recognizePromise;
     try {
@@ -95,7 +96,7 @@ function createScreenTextGrounding({ ocrClient, isEnabled = () => true, waitMs =
     const settledPromise = recognizePromise.then(
       (result) => {
         const evaluation = evaluateOcrResult(result);
-        settle({ evaluation, skipReason: evaluation.skipReason });
+        settle({ evaluation, skipReason: evaluation.skipReason, result });
       },
       (error) => settle({
         skipReason: error?.isBypassed ? SCREEN_TEXT_SKIP_REASON_MAP.bypass : `ocr_error:${error?.message || error}`,
@@ -156,7 +157,16 @@ function createScreenTextGrounding({ ocrClient, isEnabled = () => true, waitMs =
       return state.evaluation.lineList.filter(isConfidentLine).map((line) => line.text.trim()).join('\n');
     }
 
-    return { waitForPrompt, peekFrameText };
+    // 발화 ROI 가 쓰는 같은 프레임 줄 위치. 끝난 결과만 보고 기다리지 않는다. 평균 점수 문턱은 두지 않고(줄 점수로 따로 가중한다)
+    // 세로 글씨가 많은 화면만 거른다. 줄 좌표는 보낸 JPEG 화소이고 imageWidth·imageHeight 가 그 크기다.
+    function peekLayout() {
+      if (!state.isSettled || !state.result || !Array.isArray(state.result.lineList)) return null;
+      if (state.result.verticalBoxRatio >= OCR_MAX_VERTICAL_BOX_RATIO) return null;
+      const { lineList, imageWidth = null, imageHeight = null } = state.result;
+      return { lineList, imageWidth, imageHeight };
+    }
+
+    return { waitForPrompt, peekFrameText, peekLayout };
   }
 
   return { start };

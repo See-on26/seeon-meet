@@ -13,6 +13,7 @@ const { buildFactCardBlock, FACT_CARD_USAGE_MAP } = require('./fact-card-block')
 const {
   buildChartEstimateBlock, readChartEstimateRuleException, CHART_ESTIMATE_SCREEN_VALUE_LINE,
 } = require('./chart-estimate-block');
+const { buildZoomImageIntroLineList, ZOOM_USAGE_MAP } = require('./zoom-image-intro');
 
 const DEFAULT_INTERPRETATION_MIN_WORD_COUNT = 6;
 const DEFAULT_INTERPRETATION_MAX_WORD_COUNT = 12;
@@ -88,7 +89,8 @@ function buildInterpretationPrompt({ utterance, recentTranscript = '', subKind =
   minWordCount = DEFAULT_INTERPRETATION_MIN_WORD_COUNT,
   maxWordCount = DEFAULT_INTERPRETATION_MAX_WORD_COUNT,
   maxChars = null, describedElementList = [], mergedAnchorList = [], mergedClaimList = [],
-  screenLineList = [], factCardList = [], chartEstimate = null, language = DEFAULT_CAPTION_LANGUAGE, contentSwitch = null }) {
+  screenLineList = [], factCardList = [], chartEstimate = null, language = DEFAULT_CAPTION_LANGUAGE, contentSwitch = null,
+  zoomKind = null, zoomTerm = null }) {
   const resolvedSwitch = resolveContentSwitch(contentSwitch);
   const effectiveMaxChars = Number.isFinite(maxChars) ? maxChars : computeMaxChars({ maxWordCount, language });
   const screenTextBlock = buildInterpretationScreenTextBlock({
@@ -108,8 +110,10 @@ function buildInterpretationPrompt({ utterance, recentTranscript = '', subKind =
         ...INTERPRETATION_RULE_MAP[INTERPRETATION_KIND_MAP.claimToValue]],
     hasChartEstimate,
   });
+  // zoomKind 가 있으면 [화면 전체, 확대] 두 장 요청이라 첫 줄을 두 장 안내로 바꾼다.
+  const zoomIntroLineList = buildZoomImageIntroLineList({ zoomKind, zoomTerm, usage: ZOOM_USAGE_MAP.value });
   return [
-    '이 이미지는 회의에서 공유 중인 화면이다.',
+    ...(zoomIntroLineList.length ? zoomIntroLineList : ['이 이미지는 회의에서 공유 중인 화면이다.']),
     `발표자가 방금 이렇게 말했다: "${(utterance || '').trim()}"`,
     recentTranscript ? `참고로 최근 발화 맥락은 다음과 같다: ${recentTranscript}` : '',
     describedElementList.length

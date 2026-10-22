@@ -158,3 +158,16 @@ test('지시 프롬프트·에이전트는 OCR 줄을 받지 않는다', async (
   assert.equal(promptList.length, 1);
   assert.doesNotMatch(promptList[0], /글자 인식기|79개 RSU/);
 });
+
+// 발화 ROI 로 확대 그림을 둘째 장으로 붙여도 지시 프롬프트에는 OCR 줄 글을 넣지 않는다. 확대 안내에 들어가는 낱말은 발화에서 온 말뿐이다.
+test('지시 프롬프트: 확대 그림 두 장 안내가 붙어도 OCR 줄은 받지 않는다', () => {
+  for (const zoomKind of ['speech', 'pointing', 'merged']) {
+    for (const subKind of ['simple', 'complete']) {
+      const args = { utterance: '여기 이 지역도', maxChars: 60, subKind, hasPointingRegion: true, zoomKind, zoomTerm: '지역' };
+      const base = buildGroundingPrompt(args);
+      assert.equal(buildGroundingPrompt({ ...args, screenLineList }), base, `${zoomKind}/${subKind}`);
+      assert.match(base, /둘째 이미지/, `${zoomKind}/${subKind}`);
+      assert.doesNotMatch(base, /글자 인식기|79개 RSU|WAVE|단말기/, `${zoomKind}/${subKind}`);
+    }
+  }
+});

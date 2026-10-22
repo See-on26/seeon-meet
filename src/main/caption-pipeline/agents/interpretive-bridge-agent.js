@@ -5,6 +5,7 @@ const {
 const { requestVlmContent } = require('./shared/vlm-gateway');
 const { scaleWordBudget } = require('./shared/narration-format');
 const { resolveContentSwitch } = require('./shared/content-switch');
+const { toZoomImageArgs, toZoomPromptArgs } = require('./shared/zoom-image');
 const {
   buildInterpretationPrompt, buildInterpretationScreenTextBlock, INTERPRETATION_RULE_MAP,
   DEFAULT_INTERPRETATION_MIN_WORD_COUNT, DEFAULT_INTERPRETATION_MAX_WORD_COUNT,
@@ -21,17 +22,19 @@ function createInterpretiveBridgeAgent({ config, getCaptionLanguage = () => DEFA
     maxWordCount = DEFAULT_INTERPRETATION_MAX_WORD_COUNT,
     describedElementList = [], mergedAnchorList = [], mergedClaimList = [], screenLineList = [], factCardList = [],
     chartEstimate = null,
-    language = getCaptionLanguage() }) {
+    language = getCaptionLanguage(), zoomJpegBuffer = null, zoomKind = null, zoomTerm = null }) {
     // 렌더러의 어절 예산을 캡션 언어의 단어 수로 바꾼다(영어는 상한을 ENGLISH_WORD_SCALE 배로, 한국어는 그대로).
     ({ minWordCount, maxWordCount } = scaleWordBudget({ minWordCount, maxWordCount, language }));
     const effectiveMaxChars = computeMaxChars({ maxWordCount, language });
     const contentSwitch = resolveContentSwitch(config?.contentSwitch);
+    // 확대 그림(발화 ROI)이 있으면 [화면 전체, 확대] 두 장을 한 요청에 넣는다.
     const content = await requestVlmContent({
-      config, jpegBuffer, label: AGENT_LABEL, maxTokens: SLOT_AGENT_MAX_TOKENS,
+      config, ...toZoomImageArgs({ jpegBuffer, zoomJpegBuffer }), label: AGENT_LABEL, maxTokens: SLOT_AGENT_MAX_TOKENS,
       prompt: buildInterpretationPrompt({
         utterance, recentTranscript, subKind, minWordCount, maxWordCount,
         maxChars: effectiveMaxChars, describedElementList, mergedAnchorList, mergedClaimList, screenLineList, factCardList,
         chartEstimate, language, contentSwitch,
+        ...toZoomPromptArgs({ zoomJpegBuffer, zoomKind, zoomTerm }),
       }),
     });
     // 프롬프트에 실제로 들어간 화면 글자 양을 기록용으로 함께 돌려준다.

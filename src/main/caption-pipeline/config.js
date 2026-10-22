@@ -125,6 +125,38 @@ function readChartEstimateMode({ env }) {
   return DEFAULT_CHART_ESTIMATE_MODE;
 }
 
+// 발화로 ROI 잡기: 발화 낱말을 화면 OCR 줄 위치와 맞춰 그 둘레를 확대하고 해설 요청에 [화면 전체, 확대] 두 장을 넣는다.
+// 제품 기본은 꺼짐(지금과 요청이 같다). 실험실은 env 로 켠다.
+const SPEECH_ROI_MODE_LIST = ['on', 'off'];
+const DEFAULT_SPEECH_ROI_MODE = 'off';
+// 확대를 받을 해설 유형(지시·수치·척도). 회차가 나빠지면 유형별로 떼어 본다.
+const SPEECH_ROI_TYPE_LIST = ['deixis', 'interpretation', 'visual_description'];
+// 지시 후보만 있는 요청에도 같은 프레임 OCR 을 판단과 함께 시작할지(끝나 있을 때만 쓴다). 기본 꺼짐.
+const DEFAULT_SPEECH_ROI_FRAME_OCR = 'off';
+// 발화 확대가 없고 가리킨 영역만 있는 지시 해설도 [화면 전체, 가리킨 영역] 두 장으로 줄지. 발화 ROI 가 켜졌을 때만 쓴다.
+const DEFAULT_SPEECH_ROI_POINTING_PAIR = 'on';
+
+function readOnOffSwitch({ env, envName, defaultValue }) {
+  const value = env[envName];
+  if (value === undefined || value === '') return defaultValue;
+  if (SPEECH_ROI_MODE_LIST.includes(value)) return value;
+  console.warn(`[pipeline] ${envName}="${value}" 은 지원하지 않는 값입니다 — ${defaultValue} 로 둡니다 (허용: ${SPEECH_ROI_MODE_LIST.join('·')})`);
+  return defaultValue;
+}
+
+function readSpeechRoiTypeList({ env }) {
+  const value = env.SEEON_SPEECH_ROI_TYPES;
+  if (value === undefined || value === '') return [...SPEECH_ROI_TYPE_LIST];
+  const requestedList = value.split(',').map((item) => item.trim()).filter(Boolean);
+  const unknownList = requestedList.filter((item) => !SPEECH_ROI_TYPE_LIST.includes(item));
+  const typeList = SPEECH_ROI_TYPE_LIST.filter((item) => requestedList.includes(item));
+  if (unknownList.length || !typeList.length) {
+    console.warn(`[pipeline] SEEON_SPEECH_ROI_TYPES="${value}" 에 지원하지 않는 유형이 있습니다(${unknownList.join('·') || '없음'})`
+      + ` — ${typeList.length ? typeList.join(',') : `기본값 ${SPEECH_ROI_TYPE_LIST.join(',')}`} 로 둡니다 (허용: ${SPEECH_ROI_TYPE_LIST.join('·')})`);
+  }
+  return typeList.length ? typeList : [...SPEECH_ROI_TYPE_LIST];
+}
+
 // 설정 화면에서 고른 값(회의마다 넘어온다)을 쓰고, 없거나 모르는 값이면 .env 로 정한 값을 쓴다.
 function resolveSlideTextBackend({ requested, fallback }) {
   return SLIDE_TEXT_BACKEND_LIST.includes(requested) ? requested : fallback;
@@ -181,6 +213,10 @@ function readPipelineConfig(env = process.env) {
     factCardAgentList: readFactCardAgentList({ env }),
     factCardJsonMode: readFactCardJsonMode({ env }),
     chartEstimateMode: readChartEstimateMode({ env }),
+    speechRoiMode: readOnOffSwitch({ env, envName: 'SEEON_SPEECH_ROI', defaultValue: DEFAULT_SPEECH_ROI_MODE }),
+    speechRoiTypeList: readSpeechRoiTypeList({ env }),
+    isSpeechRoiFrameOcrEnabled: readOnOffSwitch({ env, envName: 'SEEON_SPEECH_ROI_FRAME_OCR', defaultValue: DEFAULT_SPEECH_ROI_FRAME_OCR }) === 'on',
+    isSpeechRoiPointingPairEnabled: readOnOffSwitch({ env, envName: 'SEEON_SPEECH_ROI_POINTING_PAIR', defaultValue: DEFAULT_SPEECH_ROI_POINTING_PAIR }) === 'on',
     gapSource: readGapSource({ env }),
     ocrUrl: resolveOcrUrl({ env, embedUrl }),
     bedrockRegion: env.SEEON_BEDROCK_REGION || DEFAULT_BEDROCK_REGION,
@@ -212,4 +248,5 @@ module.exports = {
   SLIDE_TEXT_BACKEND_LIST, DEFAULT_SLIDE_TEXT_BACKEND, resolveSlideTextBackend, GAP_SOURCE_LIST, DEFAULT_GAP_SOURCE,
   SCREEN_TEXT_GROUNDING_LIST, DEFAULT_SCREEN_TEXT_GROUNDING, FACT_CARD_AGENT_LIST, DEFAULT_FACT_CARD_AGENT_LIST,
   CHART_ESTIMATE_MODE_MAP, CHART_ESTIMATE_MODE_LIST, DEFAULT_CHART_ESTIMATE_MODE,
+  SPEECH_ROI_MODE_LIST, DEFAULT_SPEECH_ROI_MODE, SPEECH_ROI_TYPE_LIST,
 };

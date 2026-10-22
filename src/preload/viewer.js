@@ -55,9 +55,9 @@ contextBridge.exposeInMainWorld('seeon', {
   requestSlideText({ slideLabel, buffer }) {
     return ipcRenderer.invoke('pipeline-slide-text', { slideLabel, buffer: new Uint8Array(buffer) });
   },
-  sendPipelineDeixis({ ts, buffer, fullBuffer = null, utterance, recentTranscript, beforeTranscript = '', afterTranscript = '', hasPointingRegion = false, pointingOrderHint = '', slideLabel = null, wordBudgetMap = null, eventVideoTimeMs = null, triggerCandidateList = [] }) {
+  sendPipelineDeixis({ ts, buffer, fullBuffer = null, utterance, recentTranscript, beforeTranscript = '', afterTranscript = '', hasPointingRegion = false, pointingOrderHint = '', slideLabel = null, wordBudgetMap = null, eventVideoTimeMs = null, triggerCandidateList = [], pointingRect = null }) {
     return ipcRenderer.invoke('pipeline-deixis',
-      { ts, buffer: new Uint8Array(buffer), fullBuffer: fullBuffer ? new Uint8Array(fullBuffer) : null, utterance, recentTranscript, beforeTranscript, afterTranscript, hasPointingRegion, pointingOrderHint, slideLabel, wordBudgetMap, eventVideoTimeMs, triggerCandidateList });
+      { ts, buffer: new Uint8Array(buffer), fullBuffer: fullBuffer ? new Uint8Array(fullBuffer) : null, utterance, recentTranscript, beforeTranscript, afterTranscript, hasPointingRegion, pointingOrderHint, slideLabel, wordBudgetMap, eventVideoTimeMs, triggerCandidateList, pointingRect });
   },
   sendPipelineCommand({ ts, buffer, command = null, questionText = null, questionLabel = '', recentTranscript = '', wordBudget = null, eventVideoTimeMs = null }) {
     return ipcRenderer.invoke('pipeline-command',
