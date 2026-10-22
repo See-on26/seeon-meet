@@ -256,6 +256,24 @@ test('값 검사: 눈금 값("약 800")은 화면에 적혀 있어 지금처럼 
   assert.equal(verdict.chartCoreList, undefined);
 });
 
+// 값→의미의 발화 값 대조(value-far-from-spoken)는 값 검사보다 먼저 돈다. 발표자가 어림해 말한 막대의 어림값은 가까워 통과하고
+// 그 뒤 값 검사에서 어림값으로 인정돼야 한다. 발화 수와 먼 어림값(다른 막대)은 대조에서 걸러진다.
+test('값→의미: 발화 어림 수에 가까운 그래프 어림값은 발화 값 대조를 통과해 어림값으로 인정되고, 먼 막대 값은 걸러진다', async () => {
+  const { checkSpokenValueMatch } = require('../src/main/caption-pipeline/prompts/approximate-value.js');
+  const utterance = '2019년에는 한 800쯤까지 올라간 이 숫자가 중요합니다';
+  for (const value of ['약 770', '2019년 약 770', '770']) {
+    assert.equal(checkSpokenValueMatch({ value, utterance }).verdict, 'near', value);
+    const counter = countingRetranscribe();
+    const verdict = await verifyValuePresence({
+      value, subKind: 'value_to_meaning', utterance, frameText, slideTextStatus: 'pending', retranscribe: counter.retranscribe, chartValueList,
+    });
+    assert.equal(verdict.verdict, 'present', value);
+    assert.equal(verdict.checkedSource, 'chart_estimate', value);
+    assert.equal(counter.count, 0, value);
+  }
+  assert.equal(checkSpokenValueMatch({ value: '약 620', utterance }).verdict, 'far', '다른 막대(2015년)의 어림값');
+});
+
 test('어림 표지: 어림값으로 통과한 숫자 앞에만 "약"(영어 about)을 붙이고, 이미 붙은 숫자는 그대로 둔다', () => {
   assert.equal(markApproximateNumber({ text: '2015년 620에서 2019년 770', coreList: ['620', '770'] }), '2015년 약 620에서 2019년 약 770');
   assert.equal(markApproximateNumber({ text: '2015년 약 620에서 2019년 770쯤', coreList: ['620', '770'] }), '2015년 약 620에서 2019년 770쯤');
