@@ -38,14 +38,21 @@ function isNearApproximateValue({ text, approximateValueList = [] }) {
     && Math.abs(value - item.value) / item.value <= NEAR_RATIO));
 }
 
+const SPEECH_APPROXIMATE_FALLBACK_LINE = '  화면에 글자로 적힌 값이 없을 때만 발화의 어림 값을 쓰고, 막대·선 높이를 눈금으로 어림해 새 값을 만들지 않는다.';
+// 시스템이 잰 「그래프 어림값」 덩어리가 같은 프롬프트(덩어리는 이 줄 아래)에 들어갈 때 쓰는 줄. 덩어리는 발화의 어림 값과 다르면
+// 어림값을 쓰라고 하므로, 적힌 값 다음으로 그래프 어림값을 쓰게 해 두 줄이 다른 값을 고르지 않게 한다. 모델이 직접 눈금을 읽는 것은 여전히 막는다.
+const CHART_APPROXIMATE_FALLBACK_LINE = '  화면에 글자로 적힌 값이 없으면 아래 「그래프 어림값」을 쓰고, 거기에도 없을 때만 발화의 어림 값을 쓴다.'
+  + ' 「그래프 어림값」에 없는 막대·선 높이를 눈금으로 어림해 새 값을 만들지는 않는다.';
+
 // 어림 값이 있을 때 프롬프트에 넣는 줄. 범위는 화면에 글자로 적힌 값이고, 막대·선 높이를 눈금으로 읽어 새 값을 만들지는 않게 한다.
-function buildApproximateValueLine(approximateValueList = []) {
+// hasChartEstimate: 그래프 어림값 덩어리가 함께 들어가면 적힌 값이 없을 때 발화의 어림 값보다 그 값을 먼저 쓰게 한다.
+function buildApproximateValueLine(approximateValueList = [], { hasChartEstimate = false } = {}) {
   if (!approximateValueList.length) return '';
   return [
     `발표자는 수치를 어림해 말했다: ${approximateValueList.map((item) => `"${item.phrase}"`).join(', ')}.`
       + ' 화면에 그 대상의 값이 글자로 적혀 있으면 어림 값 대신 화면에 적힌 값을 그대로 쓴다'
       + '(예: 발화 "3천 명쯤" + 화면 "2,870명" → 2,870명).',
-    '  화면에 글자로 적힌 값이 없을 때만 발화의 어림 값을 쓰고, 막대·선 높이를 눈금으로 어림해 새 값을 만들지 않는다.',
+    hasChartEstimate ? CHART_APPROXIMATE_FALLBACK_LINE : SPEECH_APPROXIMATE_FALLBACK_LINE,
   ].join('\n');
 }
 

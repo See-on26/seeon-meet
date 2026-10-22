@@ -94,13 +94,14 @@ function buildInterpretationPrompt({ utterance, recentTranscript = '', subKind =
   const screenTextBlock = buildInterpretationScreenTextBlock({
     screenLineList, utterance, subKind, mergedAnchorList, mergedClaimList, contentSwitch: resolvedSwitch,
   });
-  const approximateValueLine = buildApproximateValueLine(readApproximateValueList({
-    utterance, mergedClaimList, contentSwitch: resolvedSwitch,
-  }));
-  // 슬라이드 확정 때 만들어 둔 화면 사실 카드 중 발화와 가까운 것(factCardList). 카드가 없으면 빈 덩어리다.
-  const factCardBlock = buildFactCardBlock({ cardList: factCardList, usage: FACT_CARD_USAGE_MAP.value });
   const chartBlock = buildChartEstimateBlock({ chart: chartEstimate, language });
   const hasChartEstimate = Boolean(chartBlock.text);
+  // 그래프 어림값 덩어리가 들어가면 발화 어림 줄도 그 값을 발화의 어림 값보다 먼저 쓰게 한다. 덩어리가 없으면 줄은 그대로다.
+  const approximateValueLine = buildApproximateValueLine(readApproximateValueList({
+    utterance, mergedClaimList, contentSwitch: resolvedSwitch,
+  }), { hasChartEstimate });
+  // 슬라이드 확정 때 만들어 둔 화면 사실 카드 중 발화와 가까운 것(factCardList). 카드가 없으면 빈 덩어리다.
+  const factCardBlock = buildFactCardBlock({ cardList: factCardList, usage: FACT_CARD_USAGE_MAP.value });
   const ruleList = applyChartEstimateRuleList({
     ruleList: INTERPRETATION_RULE_MAP[subKind]
       || [...INTERPRETATION_RULE_MAP[INTERPRETATION_KIND_MAP.valueToMeaning],

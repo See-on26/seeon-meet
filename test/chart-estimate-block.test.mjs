@@ -3,8 +3,11 @@ import assert from 'node:assert/strict';
 import { createRequire } from 'node:module';
 
 const require = createRequire(import.meta.url);
-const { buildChartEstimateBlock } = require('../src/main/caption-pipeline/prompts/chart-estimate-block.js');
+const {
+  buildChartEstimateBlock, readChartEstimateRuleException, CHART_ESTIMATE_SCREEN_VALUE_LINE,
+} = require('../src/main/caption-pipeline/prompts/chart-estimate-block.js');
 const { buildInterpretationPrompt } = require('../src/main/caption-pipeline/prompts/interpretive-bridge.js');
+const { buildVisualDescriptionPrompt } = require('../src/main/caption-pipeline/prompts/visual-description.js');
 const { createInterpretiveBridgeAgent } = require('../src/main/caption-pipeline/agents/interpretive-bridge-agent.js');
 
 const okChart = ({ isSnapped = true, unit = '', labelList = ['2015', '2016', '2017', '2018', '2019'], valueList = [620, 680, 700, 740, 770], tickMax = 1000, step = 200 } = {}) => ({
@@ -79,6 +82,49 @@ test('수치 프롬프트: 어림값이 있으면 화면 글자 덩어리 바로
   const english = buildInterpretationPrompt({ utterance: 'It kept rising.', subKind: 'claim_to_value', screenLineList, chartEstimate: okChart(), language: 'en' });
   assert.match(english, /Note: chart estimates/);
   assert.match(english, /단, 위 「그래프 어림값」은 시스템이 잰 값이라 "about"을 붙여 쓸 수 있다\./);
+});
+
+// 발화 어림 줄(SEEON_SCREEN_VALUE_FIRST_ENABLED)은 적힌 값이 없으면 발화의 어림 값을 쓰고 막대 높이로 새 값을 만들지 말라고 한다.
+// 그래프 어림값 덩어리가 들어가면 이 줄이 덩어리와 다른 값을 쓰라고 하지 않게, 적힌 값 다음으로 그래프 어림값을 쓰게 바꾼다.
+const SPEECH_APPROXIMATE_FALLBACK_LINE = '  화면에 글자로 적힌 값이 없을 때만 발화의 어림 값을 쓰고, 막대·선 높이를 눈금으로 어림해 새 값을 만들지 않는다.';
+const CHART_APPROXIMATE_FALLBACK_LINE = '  화면에 글자로 적힌 값이 없으면 아래 「그래프 어림값」을 쓰고, 거기에도 없을 때만 발화의 어림 값을 쓴다.'
+  + ' 「그래프 어림값」에 없는 막대·선 높이를 눈금으로 어림해 새 값을 만들지는 않는다.';
+
+test('수치 프롬프트: 어림값 덩어리가 들어가면 발화 어림 줄이 그래프 어림값을 먼저 쓰게 하고, 덩어리가 없으면 그대로다', () => {
+  const contentSwitch = { isScreenValueFirstEnabled: true };
+  for (const subKind of ['claim_to_value', 'value_to_meaning', null]) {
+    for (const language of ['ko', 'en']) {
+      const base = { utterance: '소비량이 한 800쯤까지 올랐습니다.', subKind, screenLineList, language, contentSwitch };
+      const without = buildInterpretationPrompt({ ...base, chartEstimate: null });
+      assert.ok(without.includes(SPEECH_APPROXIMATE_FALLBACK_LINE), `${subKind} ${language}: 덩어리가 없으면 발화 어림 줄 그대로`);
+      assert.ok(!without.includes(CHART_APPROXIMATE_FALLBACK_LINE));
+      const withChart = buildInterpretationPrompt({ ...base, chartEstimate: okChart() });
+      assert.match(withChart, /발표자는 수치를 어림해 말했다: "한 800쯤"/);
+      assert.ok(!withChart.includes(SPEECH_APPROXIMATE_FALLBACK_LINE), `${subKind} ${language}: 덩어리와 다투는 줄을 남기지 않는다`);
+      assert.ok(withChart.includes(CHART_APPROXIMATE_FALLBACK_LINE), `${subKind} ${language}`);
+      const chartBlockText = buildChartEstimateBlock({ chart: okChart(), language }).text;
+      assert.ok(withChart.indexOf(CHART_APPROXIMATE_FALLBACK_LINE) < withChart.indexOf(chartBlockText), '"아래 「그래프 어림값」"이 맞도록 덩어리보다 앞');
+      // 바뀌는 곳은 발화 어림 줄, 덩어리, 규칙 예외 두 곳뿐이다. 이것들을 되돌리면 덩어리 없는 프롬프트와 글자까지 같다.
+      const reverted = withChart
+        .replace(CHART_APPROXIMATE_FALLBACK_LINE, SPEECH_APPROXIMATE_FALLBACK_LINE)
+        .replace(`${chartBlockText}\n\n`, '')
+        .replace(readChartEstimateRuleException(language), '')
+        .replace(`${CHART_ESTIMATE_SCREEN_VALUE_LINE}\n`, '');
+      assert.equal(reverted, without, `${subKind} ${language}`);
+    }
+  }
+  // 발화에 어림이 없거나 스위치가 꺼져 있으면 발화 어림 줄 자체가 없고, 덩어리와 예외만 들어간다.
+  for (const option of [
+    { utterance: '소비량이 꾸준히 늘었습니다.', contentSwitch },
+    { utterance: '소비량이 한 800쯤까지 올랐습니다.', contentSwitch: { isScreenValueFirstEnabled: false } },
+  ]) {
+    const prompt = buildInterpretationPrompt({ ...option, subKind: 'claim_to_value', screenLineList, chartEstimate: okChart() });
+    assert.doesNotMatch(prompt, /발표자는 수치를 어림해 말했다/);
+    assert.match(prompt, /참고: 그래프 어림값/);
+  }
+  // 척도 해설은 그래프 어림값을 받지 않으므로 발화 어림 줄이 그대로다.
+  const scale = buildVisualDescriptionPrompt({ subKind: 'scale', utterance: '거의 800명이나 모였어요, 정말 많죠', contentSwitch });
+  assert.ok(scale.includes(SPEECH_APPROXIMATE_FALLBACK_LINE));
 });
 
 test('수치 에이전트: 어림값을 프롬프트로 넘기고 기록용 막대 수를 돌려준다(없으면 null)', async () => {
