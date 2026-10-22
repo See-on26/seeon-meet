@@ -7,6 +7,8 @@ const CONTENT_SWITCH_ENV_NAME_MAP = {
   isTimeMarkEnabled: 'SEEON_TIME_MARK_ENABLED',
   // 발화 어림 되풀이 막기: 발표자가 어림해 말한 수("약 800")를 짚어, 화면에 글자로 적힌 값이 있으면 그 값을 말하게 한다.
   isScreenValueFirstEnabled: 'SEEON_SCREEN_VALUE_FIRST_ENABLED',
+  // 척도 에이전트 다시 만들기: 통계 패널·툴팁·범례 값을 먼저 읽어(reading 칸) 그 값이나 견준 크기로 말하고, NONE 조건을 줄인다.
+  isScaleValueFirstEnabled: 'SEEON_SCALE_VALUE_FIRST_ENABLED',
 };
 
 function readContentSwitch(env = process.env) {

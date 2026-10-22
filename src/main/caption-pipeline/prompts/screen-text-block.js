@@ -6,12 +6,20 @@ const { GROUNDING_NONE_TOKEN } = require('../agents/shared/caption-parser');
 const SCREEN_TEXT_MAX_CHARS = 600;
 
 // 덩어리를 받는 해설. 둘째 안내 줄만 다르다 — 수치는 값·항목 이름을, 척도는 대상·비교 대상 이름과 적힌 크기 값을 확인한다.
-const SCREEN_TEXT_USAGE_MAP = { value: 'value', scale: 'scale' };
+// scaleValue: 척도 값 먼저(켜짐)의 척도 해설 — 통계 패널·툴팁·범례에 적힌 값을 확인하게 한다.
+const SCREEN_TEXT_USAGE_MAP = { value: 'value', scale: 'scale', scaleValue: 'scale_value' };
 const SCREEN_TEXT_INTRO_LINE = '참고: 아래는 같은 화면을 글자 인식기(OCR)로 읽은 글자다. 위에서 아래 순서이고, 같은 높이에 있는 다른 칸의 글자가 한 줄로 이어졌을 수 있다.';
 const SCREEN_TEXT_USAGE_LINE_MAP = {
   [SCREEN_TEXT_USAGE_MAP.value]: '  값·항목 이름의 철자는 여기서 확인하되, 어느 값이 어느 항목의 것인지는 반드시 이미지에서 확인한다. 이미지와 다르면 이미지를 따른다.',
   [SCREEN_TEXT_USAGE_MAP.scale]: '  대상·비교 대상의 이름과 화면에 적힌 크기·길이 값은 여기서 확인하되, 어느 글자가 어느 대상의 것인지는 반드시 이미지에서 확인한다. 이미지와 다르면 이미지를 따른다.',
+  [SCREEN_TEXT_USAGE_MAP.scaleValue]: '  대상·비교 대상의 이름과 화면에 글자로 적힌 값(통계 패널·툴팁·범례·데이터 라벨·눈금)은 여기서 확인하되, 어느 글자가 어느 대상의 것인지는 반드시 이미지에서 확인한다. 이미지와 다르면 이미지를 따른다.',
 };
+// 척도 해설이 먼저 읽을 통계 줄(합계·평균·최댓값 등). 발화 낱말이 없어도 상한 안에 먼저 넣는다.
+const STAT_KEYWORD_PATTERN = /평균|합계|총계|총합|총액|누적|최대|최고|최소|최저|중앙값|\b(?:max|min|avg|average|mean|total|sum|median)\b/i;
+
+function isStatLine(text) {
+  return STAT_KEYWORD_PATTERN.test(String(text || ''));
+}
 const QUOTE_FENCE = '"""';
 
 const HANGUL_PATTERN = /[가-힣]/;
@@ -142,5 +150,5 @@ function buildScreenTextBlock({ lineList, keywordSourceList = [], isClaimToValue
 }
 
 module.exports = {
-  buildScreenTextBlock, selectScreenTextLineList, extractKeywordList, SCREEN_TEXT_MAX_CHARS, SCREEN_TEXT_USAGE_MAP,
+  buildScreenTextBlock, selectScreenTextLineList, extractKeywordList, isStatLine, SCREEN_TEXT_MAX_CHARS, SCREEN_TEXT_USAGE_MAP,
 };

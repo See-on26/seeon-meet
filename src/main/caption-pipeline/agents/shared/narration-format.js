@@ -266,6 +266,31 @@ const FACT_COMPLETE_SLOT_MAP = {
   },
 };
 
+// 척도 값 먼저(SEEON_SCALE_VALUE_FIRST_ENABLED). 회의 화면의 척도 대상은 대개 그래프·지도·표라 견줄 사물이 없어 NONE 이 많았다.
+// 대상 둘레에 글자로 적힌 값을 먼저 옮겨 적게 하고(reading, 읽지 않음), 해설은 그 값이나 화면 속 다른 대상과 견준 크기로 말한다.
+const SCALE_VALUE_FIRST_SLOT_LIST = [
+  {
+    key: 'reading', label: '대상과 그 둘레에 글자로 적힌 값 그대로 — 통계 패널·툴팁·범례·데이터 라벨·눈금. 없으면 빈 문자열',
+    minWordCount: 0, maxWordCount: 12, isDiagnostic: true,
+  },
+  {
+    key: 'caption',
+    label: '청자에게 읽어 줄 정도 묘사 — 발표자가 말한 대상과, 화면에 적힌 그 값 또는 화면 속 다른 대상과 견준 크기'
+      + ' (예: 둘레 12.4km인 호수, 소나무보다 4배 정도 큰 불상)',
+    minWordCount: 3, maxWordCount: 8, isPhrase: true, dropsTailObjectParticle: true,
+  },
+];
+const ENGLISH_SCALE_VALUE_FIRST_LABEL_MAP = {
+  reading: 'values written on or around the item, as written — stats panel, tooltip, legend, data label, axis ticks; empty string if none',
+  caption: 'degree description read to the listener — the item the speaker mentioned with its value written on screen, or its size'
+    + ' compared with another item on screen (e.g. "a lake 12.4 km around", "a Buddha statue about four times taller than the pine tree")',
+};
+
+function isScaleValueFirstSlotList({ narrationType, subKind, contentSwitch }) {
+  return contentSwitch.isScaleValueFirstEnabled && narrationType === NARRATION_TYPE_MAP.visualDescription
+    && subKind === VISUAL_DESCRIPTION_KIND_MAP.scale;
+}
+
 // 무발화 묘사는 발표자가 보라고 한 자료를 전한다. 구조도는 제목만으로는 무엇을 보는지 알 수 없어
 // 구성 요소와 연결 관계까지 말해야 하므로 사진 반응 묘사(8어절)보다 길게 받는다.
 const SILENCE_DESCRIPTION_SLOT_LIST = [
@@ -399,6 +424,7 @@ function readSlotList({ narrationType, subKind, origin = null, hasSecondClaim = 
   const isSilenceDescription = origin === NARRATION_ORIGIN_MAP.silence
     && narrationType === NARRATION_TYPE_MAP.visualDescription && subKind === VISUAL_DESCRIPTION_KIND_MAP.reaction;
   if (isSilenceDescription) return SILENCE_DESCRIPTION_SLOT_LIST;
+  if (isScaleValueFirstSlotList({ narrationType, subKind, contentSwitch })) return SCALE_VALUE_FIRST_SLOT_LIST;
   const factSlotList = contentSwitch.isFactCompleteEnabled ? FACT_COMPLETE_SLOT_MAP[narrationType]?.[subKind] : null;
   const baseSlotList = factSlotList || NARRATION_SLOT_MAP[narrationType]?.[subKind] || null;
   const slotList = baseSlotList && isScreenValueLabelSlotList({ narrationType, subKind, contentSwitch })
@@ -435,6 +461,7 @@ function readEnglishLabelMap({ narrationType, subKind, contentSwitch }) {
     ...(ENGLISH_SLOT_LABEL_MAP[narrationType]?.[subKind] || {}),
     ...(contentSwitch.isFactCompleteEnabled ? ENGLISH_FACT_COMPLETE_LABEL_MAP[narrationType]?.[subKind] : null),
     ...(isScreenValueLabelSlotList({ narrationType, subKind, contentSwitch }) ? { value: ENGLISH_SCREEN_VALUE_FIRST_VALUE_LABEL } : null),
+    ...(isScaleValueFirstSlotList({ narrationType, subKind, contentSwitch }) ? ENGLISH_SCALE_VALUE_FIRST_LABEL_MAP : null),
   };
 }
 

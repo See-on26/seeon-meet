@@ -55,7 +55,9 @@ function createVisualDescriptionAgent({ config, getCaptionLanguage = () => DEFAU
     });
     if (subKind !== VISUAL_DESCRIPTION_KIND_MAP.scale) return parsed;
     // 척도는 프롬프트에 실제로 들어간 화면 글자 양을 기록용으로 함께 돌려준다.
-    const { lineCount, charCount, numberLineCount } = buildScaleScreenTextBlock({ screenLineList, utterance, mergedAnchorList });
+    const { lineCount, charCount, numberLineCount } = buildScaleScreenTextBlock({
+      screenLineList, utterance, mergedAnchorList, contentSwitch,
+    });
     return { ...parsed, screenTextBlock: { lineCount, charCount, numberLineCount } };
   }
 

@@ -61,16 +61,20 @@ test('척도용 덩어리: 둘째 안내 줄이 척도용 문구이고, 숫자 �
   assert.equal(scaleBlock.numberLineCount, 2);
 });
 
-test('척도 프롬프트: OCR 줄이 있으면 청자 줄 바로 앞에 척도용 덩어리와 빈 줄을 넣는다', () => {
-  for (const language of ['ko', 'en']) {
-    const option = { subKind: SCALE, utterance: '저 전망대 정말 높죠', mergedAnchorList: ['저 전망대'], language };
-    const base = buildVisualDescriptionPrompt(option);
-    const withScreenText = buildVisualDescriptionPrompt({ ...option, screenLineList });
-    const block = buildScreenTextBlock({
-      lineList: screenLineList, keywordSourceList: ['저 전망대 정말 높죠', '저 전망대'], usage: SCREEN_TEXT_USAGE_MAP.scale,
-    }).text;
-    assert.ok(block, language);
-    assert.equal(withScreenText, insertBeforeListenerLine({ prompt: base, block }), language);
+test('척도 프롬프트: OCR 줄이 있으면 청자 줄 바로 앞에 척도용 덩어리와 빈 줄을 넣는다(척도 값 먼저를 켜도 끄도)', () => {
+  for (const isScaleValueFirstEnabled of [false, true]) {
+    for (const language of ['ko', 'en']) {
+      const contentSwitch = { isScaleValueFirstEnabled };
+      const option = { subKind: SCALE, utterance: '저 전망대 정말 높죠', mergedAnchorList: ['저 전망대'], language, contentSwitch };
+      const base = buildVisualDescriptionPrompt(option);
+      const withScreenText = buildVisualDescriptionPrompt({ ...option, screenLineList });
+      const block = buildScreenTextBlock({
+        lineList: screenLineList, keywordSourceList: ['저 전망대 정말 높죠', '저 전망대'],
+        usage: isScaleValueFirstEnabled ? SCREEN_TEXT_USAGE_MAP.scaleValue : SCREEN_TEXT_USAGE_MAP.scale,
+      }).text;
+      assert.ok(block, language);
+      assert.equal(withScreenText, insertBeforeListenerLine({ prompt: base, block }), `${isScaleValueFirstEnabled}/${language}`);
+    }
   }
 });
 
