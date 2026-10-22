@@ -23,6 +23,12 @@ const DEFAULT_FACT_CARD_AGENT_LIST = ['interpretation', 'scale'];
 // 카드 JSON 은 프롬프트로만 받는다. vLLM 의 json_schema 출력 모드는 이 서버에서 시험한 적이 없어 받지 않는다.
 const FACT_CARD_JSON_MODE_LIST = ['prompt'];
 const DEFAULT_FACT_CARD_JSON_MODE = 'prompt';
+// 그래프 값 어림(세로 막대·한 계열·값 라벨 없음). 수치 해설 때 근거 OCR 줄과 같은 프레임 화소로 막대 값을 잰다.
+// off = 하지 않음, log = 계산해 기록에만 남김(프롬프트·값 검사는 그대로), on = 수치 에이전트에 넘기고 값 검사에서 어림값을 인정.
+// 화면 글자 근거(SEEON_SCREEN_TEXT_GROUNDING)가 꺼져 있으면 OCR 줄이 없어 저절로 하지 않는다.
+const CHART_ESTIMATE_MODE_MAP = { off: 'off', log: 'log', on: 'on' };
+const CHART_ESTIMATE_MODE_LIST = Object.values(CHART_ESTIMATE_MODE_MAP);
+const DEFAULT_CHART_ESTIMATE_MODE = CHART_ESTIMATE_MODE_MAP.off;
 // 교차 모드 틈 후보 위치: asr = ASR 조각 끝 시각(지금 동작), audio = 앱이 잰 회의 소리의 무음 구간.
 const GAP_SOURCE_LIST = ['asr', 'audio'];
 const DEFAULT_GAP_SOURCE = 'asr';
@@ -111,6 +117,14 @@ function readFactCardJsonMode({ env }) {
   return DEFAULT_FACT_CARD_JSON_MODE;
 }
 
+function readChartEstimateMode({ env }) {
+  const mode = env.SEEON_CHART_ESTIMATE;
+  if (mode === undefined || mode === '') return DEFAULT_CHART_ESTIMATE_MODE;
+  if (CHART_ESTIMATE_MODE_LIST.includes(mode)) return mode;
+  console.warn(`[pipeline] SEEON_CHART_ESTIMATE="${mode}" 은 지원하지 않는 값입니다 — ${DEFAULT_CHART_ESTIMATE_MODE} 로 둡니다 (허용: ${CHART_ESTIMATE_MODE_LIST.join('·')})`);
+  return DEFAULT_CHART_ESTIMATE_MODE;
+}
+
 // 설정 화면에서 고른 값(회의마다 넘어온다)을 쓰고, 없거나 모르는 값이면 .env 로 정한 값을 쓴다.
 function resolveSlideTextBackend({ requested, fallback }) {
   return SLIDE_TEXT_BACKEND_LIST.includes(requested) ? requested : fallback;
@@ -166,6 +180,7 @@ function readPipelineConfig(env = process.env) {
     isFactCardEnabled: readFactCardSwitch({ env }) === 'on',
     factCardAgentList: readFactCardAgentList({ env }),
     factCardJsonMode: readFactCardJsonMode({ env }),
+    chartEstimateMode: readChartEstimateMode({ env }),
     gapSource: readGapSource({ env }),
     ocrUrl: resolveOcrUrl({ env, embedUrl }),
     bedrockRegion: env.SEEON_BEDROCK_REGION || DEFAULT_BEDROCK_REGION,
@@ -196,4 +211,5 @@ module.exports = {
   readPipelineConfig, DEFAULT_JUDGE_GPU_URL, DEFAULT_JUDGE_GPU_MODEL, ASR_LANGUAGE_LIST, DEFAULT_ASR_LANGUAGE, isAsrLanguage, JUDGE_BACKEND_LIST, DEFAULT_JUDGE_BACKEND,
   SLIDE_TEXT_BACKEND_LIST, DEFAULT_SLIDE_TEXT_BACKEND, resolveSlideTextBackend, GAP_SOURCE_LIST, DEFAULT_GAP_SOURCE,
   SCREEN_TEXT_GROUNDING_LIST, DEFAULT_SCREEN_TEXT_GROUNDING, FACT_CARD_AGENT_LIST, DEFAULT_FACT_CARD_AGENT_LIST,
+  CHART_ESTIMATE_MODE_MAP, CHART_ESTIMATE_MODE_LIST, DEFAULT_CHART_ESTIMATE_MODE,
 };

@@ -37,7 +37,7 @@ test('세션 시작에서 카드 저장소를 비운다', () => {
 
 test('pipeline-deixis: 카드 대기는 같은 프레임 OCR 대기와 함께 걸리고, 고른 카드는 따로 펼쳐 넘긴다', () => {
   const body = sliceHandler('pipeline-deixis', "ipcMain.handle('pipeline-command'");
-  assert.match(body, /const screenTextPromise = isScreenTextNarrationType\(narrationType\) && screenTextTask\s*\? screenTextTask\.waitForPrompt\(\)\s*: null;/);
+  assert.match(body, /const screenTextPromise = isScreenTextNarrationType\(narrationType\) && screenTextTask\s*\? screenTextTask\.waitForPrompt\(\{[\s\S]*?\}\)\s*: null;/);
   assert.match(body, /factCardStore\.waitUntil\(\{ slideLabel, untilPromise: screenTextPromise \}\)/);
   assert.match(body, /resolveFactCardUsage\(\{[\s\S]*?isEnabled: config\.isFactCardEnabled, agentList: config\.factCardAgentList,/);
   assert.match(body, /selectFactCards\(\{[\s\S]*?frameLineList: screenText\?\.lineList \|\| \[\], requestTs: ts, tokenizer: factCardTokenizer,/);

@@ -10,6 +10,9 @@ const {
   extractApproximateValueList, isNearApproximateValue, buildApproximateValueLine, SCREEN_VALUE_FIRST_RULE,
 } = require('./approximate-value');
 const { buildFactCardBlock, FACT_CARD_USAGE_MAP } = require('./fact-card-block');
+const {
+  buildChartEstimateBlock, readChartEstimateRuleException, CHART_ESTIMATE_SCREEN_VALUE_LINE,
+} = require('./chart-estimate-block');
 
 const DEFAULT_INTERPRETATION_MIN_WORD_COUNT = 6;
 const DEFAULT_INTERPRETATION_MAX_WORD_COUNT = 12;
@@ -72,11 +75,20 @@ function buildInterpretationScreenTextBlock({ screenLineList = [], utterance = '
   });
 }
 
+// 그래프 어림값이 있으면 "화면에 수치가 없으면 NONE" 앞에 어림값도 화면의 수치라는 줄을 둔다.
+const SCREEN_VALUE_ABSENT_RULE_PREFIX = '**화면에 수치가 없으면';
+
+function applyChartEstimateRuleList({ ruleList, hasChartEstimate }) {
+  if (!hasChartEstimate) return ruleList;
+  return ruleList.flatMap((line) => (line.startsWith(SCREEN_VALUE_ABSENT_RULE_PREFIX)
+    ? [CHART_ESTIMATE_SCREEN_VALUE_LINE, line] : [line]));
+}
+
 function buildInterpretationPrompt({ utterance, recentTranscript = '', subKind = null,
   minWordCount = DEFAULT_INTERPRETATION_MIN_WORD_COUNT,
   maxWordCount = DEFAULT_INTERPRETATION_MAX_WORD_COUNT,
   maxChars = null, describedElementList = [], mergedAnchorList = [], mergedClaimList = [],
-  screenLineList = [], factCardList = [], language = DEFAULT_CAPTION_LANGUAGE, contentSwitch = null }) {
+  screenLineList = [], factCardList = [], chartEstimate = null, language = DEFAULT_CAPTION_LANGUAGE, contentSwitch = null }) {
   const resolvedSwitch = resolveContentSwitch(contentSwitch);
   const effectiveMaxChars = Number.isFinite(maxChars) ? maxChars : computeMaxChars({ maxWordCount, language });
   const screenTextBlock = buildInterpretationScreenTextBlock({
@@ -87,9 +99,14 @@ function buildInterpretationPrompt({ utterance, recentTranscript = '', subKind =
   }));
   // 슬라이드 확정 때 만들어 둔 화면 사실 카드 중 발화와 가까운 것(factCardList). 카드가 없으면 빈 덩어리다.
   const factCardBlock = buildFactCardBlock({ cardList: factCardList, usage: FACT_CARD_USAGE_MAP.value });
-  const ruleList = INTERPRETATION_RULE_MAP[subKind]
-    || [...INTERPRETATION_RULE_MAP[INTERPRETATION_KIND_MAP.valueToMeaning],
-      ...INTERPRETATION_RULE_MAP[INTERPRETATION_KIND_MAP.claimToValue]];
+  const chartBlock = buildChartEstimateBlock({ chart: chartEstimate, language });
+  const hasChartEstimate = Boolean(chartBlock.text);
+  const ruleList = applyChartEstimateRuleList({
+    ruleList: INTERPRETATION_RULE_MAP[subKind]
+      || [...INTERPRETATION_RULE_MAP[INTERPRETATION_KIND_MAP.valueToMeaning],
+        ...INTERPRETATION_RULE_MAP[INTERPRETATION_KIND_MAP.claimToValue]],
+    hasChartEstimate,
+  });
   return [
     '이 이미지는 회의에서 공유 중인 화면이다.',
     `발표자가 방금 이렇게 말했다: "${(utterance || '').trim()}"`,
@@ -110,6 +127,8 @@ function buildInterpretationPrompt({ utterance, recentTranscript = '', subKind =
     factCardBlock.text ? `${factCardBlock.text}\n` : '',
     // 화면 글자 덩어리는 규칙 바로 앞에 빈 줄 하나를 두고 넣는다. 덩어리가 없으면 프롬프트는 글자 하나까지 그대로다.
     screenTextBlock.text ? `${screenTextBlock.text}\n` : '',
+    // 그래프 어림값은 화면 글자 덩어리 바로 뒤에 같은 빈 줄 규칙으로 넣는다. 어림값이 없으면 넣지 않는다.
+    hasChartEstimate ? `${chartBlock.text}\n` : '',
     '',
     '청자는 화면을 볼 수 없다.',
     SPEECH_GAP_DECIDED_RULE,
@@ -124,7 +143,7 @@ function buildInterpretationPrompt({ utterance, recentTranscript = '', subKind =
     }),
     '',
     '규칙:',
-    '(1) 화면에 실제로 보이는 값·문구만 쓴다. **추정하거나 지어내지 않는다.**',
+    `(1) 화면에 실제로 보이는 값·문구만 쓴다. **추정하거나 지어내지 않는다.**${hasChartEstimate ? readChartEstimateRuleException(language) : ''}`,
     resolvedSwitch.isScreenValueFirstEnabled ? SCREEN_VALUE_FIRST_RULE : '',
     `(2) 화면에서 근거를 찾을 수 없으면 "${GROUNDING_NONE_TOKEN}"만 출력한다.`,
     '(3) 발화 문장을 그대로 옮기지 마라. **핵심만 짧은 명사구로 간추린다.**',

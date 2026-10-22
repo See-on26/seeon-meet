@@ -1,6 +1,6 @@
 const fs = require('fs');
 const { ipcMain, BrowserWindow } = require('electron');
-const { readPipelineConfig, resolveSlideTextBackend } = require('./config');
+const { readPipelineConfig, resolveSlideTextBackend, CHART_ESTIMATE_MODE_MAP } = require('./config');
 const {
   NARRATION_TYPE_MAP, VISUAL_DESCRIPTION_KIND_MAP, SPEAKER_SOURCE_MAP, NARRATION_CLASS_MAP,
   INTERPRETATION_KIND_MAP,
@@ -51,7 +51,15 @@ const { createFactCardStore, FACT_CARD_STATUS_MAP } = require('./orchestrator/fa
 const {
   createFactCardTokenizer, selectFactCards, resolveFactCardUsage, formatFactCardSummary,
 } = require('./orchestrator/fact-card-select');
-const { verifyValuePresence, VALUE_PRESENCE_VERDICT_MAP, VALUE_CHECK_SOURCE_MAP } = require('./orchestrator/value-presence');
+const {
+  verifyValuePresence, approximateChartNarration, VALUE_PRESENCE_VERDICT_MAP, VALUE_CHECK_SOURCE_MAP,
+} = require('./orchestrator/value-presence');
+const {
+  createChartEstimator, detectTickSnapSuspect, toChartValueList, CHART_STATUS_MAP,
+} = require('./perception/chart-value-estimator');
+const {
+  createFrameDecoder, resolveNativeImage, createChartFrameSaver, buildChartFrameTag,
+} = require('./perception/frame-bitmap');
 const {
   createScreenTextGrounding, shouldStartScreenTextGrounding, isScreenTextNarrationType, finalizeScreenTextRecord,
   formatScreenTextSummary,
@@ -67,7 +75,7 @@ const { createQuestionRouter } = require('./context/question-router');
 const { formatQaHistory, buildPresetQa } = require('./context/qa-history');
 const { buildCurrentScreenContextText } = require('./context/current-screen-context');
 const { createQuestionAnswerer, readAnswerText, ANSWER_TEXT_KEY_MAP } = require('./context/question-answerer');
-const { OUT_DIR, CONTEXT_DIR } = require('../paths');
+const { OUT_DIR, CONTEXT_DIR, CHART_FRAMES_DIR } = require('../paths');
 
 const ASR_DRAIN_TIMEOUT_MS = 8000;
 const ASR_DRAIN_POLL_MS = 100;
@@ -239,9 +247,16 @@ function registerPipeline({ getViewerView, meetingArchive = null }) {
   const slideTextAgent = createSlideTextAgent({
     config, ocrClient, getBackend: () => sessionSlideTextBackend,
   });
+  // 그래프 어림(세로 막대)은 수치 해설 때 근거 OCR 줄과 같은 프레임 화소로 한다. log 는 기록만 남기고, on 은 수치 에이전트와 값 검사에도 쓴다.
+  const chartEstimator = config.chartEstimateMode === CHART_ESTIMATE_MODE_MAP.off ? null : createChartEstimator({
+    decoder: createFrameDecoder({ nativeImage: resolveNativeImage() }),
+    saveFrame: createChartFrameSaver({ dir: CHART_FRAMES_DIR }).save,
+  });
+  const isChartEstimateInPrompt = config.chartEstimateMode === CHART_ESTIMATE_MODE_MAP.on;
+  console.log(`[pipeline] 그래프 어림: ${config.chartEstimateMode}`);
   // 수치·척도 해설 근거 OCR 은 「화면 글자 읽기」 설정과 상관없이 돈다(그 설정은 슬라이드 전사 엔진만 고른다).
   const screenTextGrounding = createScreenTextGrounding({
-    ocrClient, isEnabled: () => config.isScreenTextGroundingEnabled,
+    ocrClient, isEnabled: () => config.isScreenTextGroundingEnabled, chartEstimator,
   });
   ipcMain.handle('pipeline-slide-text-backend-default', async () => ({ backend: config.slideTextBackend }));
   // 장마다 전사를 읽은 엔진(ocr·vlm). 사실 카드 값 검증 기록에 대조 원본으로 남긴다.
@@ -1046,8 +1061,12 @@ function registerPipeline({ getViewerView, meetingArchive = null }) {
 
       const narrationType = selectedCandidate?.type || NARRATION_TYPE_MAP.deixis;
       // 수치·척도 해설이면 판단 뒤 상한까지만 OCR 을 기다려 그 줄을 근거로 넘긴다. 늦거나 없으면 덩어리 없이(지금 프롬프트로) 만든다.
+      // 수치 해설이면 같은 자리에서 그래프 어림도 한다(꺼져 있으면 하지 않는다).
       const screenTextPromise = isScreenTextNarrationType(narrationType) && screenTextTask
-        ? screenTextTask.waitForPrompt()
+        ? screenTextTask.waitForPrompt({
+          withChart: narrationType === NARRATION_TYPE_MAP.interpretation,
+          frameTag: buildChartFrameTag({ ts, videoTimeMs: eventVideoTimeMs }),
+        })
         : null;
       // 사실 카드가 아직 만들어지는 중이면 같은 프레임 OCR 을 기다리는 동안만 함께 기다린다(새 대기 없음).
       // OCR 작업이 없으면(지시 해설, OCR 근거 꺼짐) 기다리지 않고 지금 준비된 카드만 쓴다.
@@ -1059,6 +1078,7 @@ function registerPipeline({ getViewerView, meetingArchive = null }) {
         ? factCardStore.waitUntil({ slideLabel, untilPromise: screenTextPromise })
         : null;
       const screenText = screenTextPromise ? await screenTextPromise : null;
+      const chartEstimate = isChartEstimateInPrompt && screenText?.chart?.status === CHART_STATUS_MAP.ok ? screenText.chart : null;
       const factCardState = factCardStatePromise ? await factCardStatePromise : null;
       const factCard = factCardState ? selectFactCards({
         state: factCardState, usage: factCardUsage, utterance,
@@ -1084,17 +1104,17 @@ function registerPipeline({ getViewerView, meetingArchive = null }) {
           screenLineList: screenText?.lineList || [],
         },
         [NARRATION_TYPE_MAP.deixis]: { hasPointingRegion, pointingOrderHint },
-        [NARRATION_TYPE_MAP.interpretation]: { screenLineList: screenText?.lineList || [] },
+        [NARRATION_TYPE_MAP.interpretation]: { screenLineList: screenText?.lineList || [], chartEstimate },
       };
       const agent = agentFieldMap[narrationType] || agentFieldMap[NARRATION_TYPE_MAP.deixis];
       const {
         text: generatedText, isGrounded, slotMap, rejectKind = null, rejectReason = '', rawContent = '',
-        screenTextBlock = null, factCardBlock = null, appliedBudget = null,
+        screenTextBlock = null, factCardBlock = null, chartBlock = null, appliedBudget = null,
       } = await agent.generate({
         ...generatorArgs, ...(extraArgByTypeMap[narrationType] || {}), ...factCardArg,
       });
       let text = generatedText;
-      const screenTextRecord = screenText ? finalizeScreenTextRecord({ record: screenText.record, screenTextBlock }) : null;
+      const screenTextRecord = screenText ? finalizeScreenTextRecord({ record: screenText.record, screenTextBlock, chartBlock }) : null;
       const factCardRecord = factCard
         ? { ...factCard.record, charCount: factCardBlock?.charCount ?? 0, waitedMs: factCardState.waitedMs }
         : null;
@@ -1128,6 +1148,8 @@ function registerPipeline({ getViewerView, meetingArchive = null }) {
           subKind: selectedCandidate?.subKind || INTERPRETATION_KIND_MAP.valueToMeaning,
           // 값이 없다고 나오면 지금 화면을 OCR 과 다른 엔진(VLM)으로 다시 읽어, 클릭으로 나타난 값과 OCR 오독을 함께 거른다.
           retranscribe: () => slideTextAgent.transcribeWithVlm({ jpegBuffer: frameSet.screenFrame }),
+          // 그래프 어림값을 프롬프트에 넣었을 때(on)만 화면에 적히지 않은 어림값을 있는 값으로 인정한다.
+          chartValueList: toChartValueList(chartEstimate),
         });
         const valueVerdict = await verifyValueOnSlide(slotMap.value);
         const verdictByValueMap = {
@@ -1135,12 +1157,18 @@ function registerPipeline({ getViewerView, meetingArchive = null }) {
           [VALUE_PRESENCE_VERDICT_MAP.absent]: DEBUG_VERDICT_MAP.skip,
           [VALUE_PRESENCE_VERDICT_MAP.unchecked]: DEBUG_VERDICT_MAP.info,
         };
+        const checkedSourceLabelMap = {
+          [VALUE_CHECK_SOURCE_MAP.frameOcr]: '같은 프레임 OCR', [VALUE_CHECK_SOURCE_MAP.chartEstimate]: '그래프 어림값',
+        };
+        // 그래프 어림값이 있는데 값 칸 숫자가 눈금 값이고 어림값과 다르면, 막대를 눈금으로 반올림해 말한 것으로 의심해 기록만 남긴다.
+        const isTickSnapSuspect = detectTickSnapSuspect({ value: slotMap.value, chart: screenText?.chart });
         markDebug({
           stage: DEBUG_STAGE_MAP.valueCheck, verdict: verdictByValueMap[valueVerdict.verdict], ts, narrationType,
           reason: `값 존재 검사 ${valueVerdict.verdict}`,
           detail: `값="${slotMap.value}" 슬라이드=${slideLabel || '-'} 전사=${slideText.status}`
-            + ` 대조=${valueVerdict.checkedSource === VALUE_CHECK_SOURCE_MAP.frameOcr ? '같은 프레임 OCR' : '저장 전사'}`
-            + `${valueVerdict.reason ? ` · ${valueVerdict.reason}` : ''} → "${text}"`,
+            + ` 대조=${checkedSourceLabelMap[valueVerdict.checkedSource] || '저장 전사'}`
+            + `${valueVerdict.reason ? ` · ${valueVerdict.reason}` : ''}`
+            + `${isTickSnapSuspect ? ' · 눈금값 의심(tickSnapSuspect)' : ''} → "${text}"`,
         });
         if (valueVerdict.verdict === VALUE_PRESENCE_VERDICT_MAP.absent) {
           await appendRecord({
@@ -1151,10 +1179,14 @@ function registerPipeline({ getViewerView, meetingArchive = null }) {
           });
           return { isOk: true, isGrounded: false };
         }
+        const chartCoreList = [...(valueVerdict.chartCoreList || [])];
+        let isSecondPairDropped = false;
         // 둘째 변화의 값이 화면에 없으면 둘째 쌍만 빼고 첫 쌍으로 읽는다. 첫 쌍은 에이전트가 쓴 전체 예산에 다시 맞춘다.
         if (slotMap.value2 && text.includes(slotMap.value2)) {
           const secondVerdict = await verifyValueOnSlide(slotMap.value2);
+          chartCoreList.push(...(secondVerdict.chartCoreList || []));
           if (secondVerdict.verdict === VALUE_PRESENCE_VERDICT_MAP.absent) {
+            isSecondPairDropped = true;
             const firstPair = assembleNarration({
               narrationType, subKind: selectedCandidate?.subKind, rawSlotMap: { ...slotMap, target2: '', value2: '' },
               maxWordCount: appliedBudget?.maxWordCount, maxChars: appliedBudget?.maxChars,
@@ -1167,6 +1199,30 @@ function registerPipeline({ getViewerView, meetingArchive = null }) {
             });
             text = firstPair?.text || text;
           }
+        }
+        // 그래프 어림값으로만 통과한 숫자는 "약"을 붙여 다시 조립한다. 붙일 수 없으면 어림을 사실처럼 말하게 되므로 버린다.
+        if (chartCoreList.length) {
+          const approximated = approximateChartNarration({
+            narrationType, subKind: selectedCandidate?.subKind || INTERPRETATION_KIND_MAP.valueToMeaning,
+            slotMap: isSecondPairDropped ? { ...slotMap, target2: '', value2: '' } : slotMap, coreList: chartCoreList,
+            hasSecondClaim: !isSecondPairDropped && (selectedCandidate?.mergedClaimList || []).length > 0,
+            maxWordCount: appliedBudget?.maxWordCount, maxChars: appliedBudget?.maxChars, language: getCaptionLanguage(),
+          });
+          markDebug({
+            stage: DEBUG_STAGE_MAP.valueCheck, verdict: approximated ? DEBUG_VERDICT_MAP.pass : DEBUG_VERDICT_MAP.skip, ts, narrationType,
+            reason: approximated ? '그래프 어림값 — 어림 표지 붙임' : '그래프 어림값 — 어림 표지를 붙이지 못해 버림',
+            detail: `어림 숫자=${chartCoreList.join(',')} → "${approximated?.text || text}"`,
+          });
+          if (!approximated) {
+            await appendRecord({
+              kind: RECORD_KIND_MAP.deixis, ts, utterance, caption: text, isGrounded: false, slideLabel,
+              narrationType, subKind: selectedCandidate?.subKind || null, skipReason: 'chart-estimate-unmarked',
+              ...(screenTextRecord ? { screenText: screenTextRecord } : {}),
+              ...(factCardRecord ? { factCard: factCardRecord } : {}),
+            });
+            return { isOk: true, isGrounded: false };
+          }
+          text = approximated.text;
         }
       }
       markDebug({
