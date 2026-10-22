@@ -43,6 +43,10 @@ const FACT_COMPLETE_RULE_LIST = [
   '    source 칸에 값을 읽은 줄을 머리글·제목과 함께 먼저 옮겨 적고, 대상·해석틀은 거기서 고른다. 화면에 없는 사실은 쓰지 않는다.',
 ];
 
+// 짧은 명사구로 간추리다 연도·분기부터 빼면 변화·비교 값이 언제의 것인지 알 수 없다. 발표자가 말한 시점이어도 남긴다.
+const TIME_MARK_RULE = '    시점(연도·분기·월·주)은 지우지 않는다 — 그 값·대상에 적혀 있으면 발표자가 말한 시점이어도 쓰고,'
+  + ' 어절이 모자라면 다른 꾸밈말을 먼저 줄인다.';
+
 // 같은 화면을 OCR 로 읽은 줄(screenLineList)로 프롬프트에 넣을 덩어리를 만든다. 줄 고르기는 발화와
 // 해설이 함께 다루는 표현(지시 구·둘째 변화 구)의 낱말을 본다. 줄이 없으면 빈 덩어리다.
 function buildInterpretationScreenTextBlock({ screenLineList = [], utterance = '', subKind = null,
@@ -103,6 +107,7 @@ function buildInterpretationPrompt({ utterance, recentTranscript = '', subKind =
     '(3) 발화 문장을 그대로 옮기지 마라. **핵심만 짧은 명사구로 간추린다.**',
     '    "이 상태가 달라집니다" → "준비 상태에 따른 차이"',
     '    지시어("이·그·저·여기·이런")는 넣지 않는다 — 청자는 그것을 볼 수 없다.',
+    resolvedSwitch.isTimeMarkEnabled ? TIME_MARK_RULE : '',
     ...(resolvedSwitch.isFactCompleteEnabled ? FACT_COMPLETE_RULE_LIST : []),
     `(참고: 조립 후 총 ${minWordCount}~${maxWordCount}어절, 최대 ${effectiveMaxChars}자 분량이다.)`,
     ...buildOutputLanguageRuleList({

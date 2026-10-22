@@ -5,6 +5,7 @@ const {
 const { NARRATION_ORIGIN_MAP } = require('../../contracts/narration-class');
 const { CAPTION_LANGUAGE_MAP } = require('../../contracts/caption-language');
 const { resolveContentSwitch } = require('./content-switch');
+const { isTimeMarkWord, hasAnyTimeMark, hasTimeAxisWord, readSingleTimeMark } = require('./time-mark');
 
 const DIGIT_HAS_FINAL_MAP = {
   0: true, 1: true, 2: false, 3: true, 4: false,
@@ -701,9 +702,16 @@ function assembleClaimPair({ target, value, language = CAPTION_LANGUAGE_MAP.ko }
 // 칸마다 상한이 있어도 칸을 이은 해설은 전체 예산을 넘을 수 있다. 첫 쌍이 전체 어절·글자 예산을 넘으면
 // 정보가 적은 쪽부터 줄인다: ① 값 항목마다 되풀이된 낱말을 빼고 ② 대상 칸 앞쪽 꾸밈말을 빼되 끝의 측정량 낱말은 남기고(최소 2어절)
 // ③ 그래도 넘치면 값 목록 뒤 항목부터 통째로 뺀다.
+// keepsTimeMark: 대상 칸 맨 앞은 대개 시점("2024년 상반기 …")이라 ②에서 가장 먼저 지워졌다. ②에서는 시점이 아닌 꾸밈말만 빼고,
+// 값 항목까지 줄여도 넘칠 때만 ④ 예전처럼 앞 낱말을 뺀다.
 const MIN_TARGET_WORD_COUNT = 2;
 
-function fitClaimPairToBudget({ target, value, maxWordCount, maxChars, language = CAPTION_LANGUAGE_MAP.ko }) {
+function dropFirstNonTimeModifier(wordList) {
+  const index = wordList.findIndex((word, position) => position < wordList.length - MIN_TARGET_WORD_COUNT && !isTimeMarkWord(word));
+  return index < 0 ? null : [...wordList.slice(0, index), ...wordList.slice(index + 1)];
+}
+
+function fitClaimPairToBudget({ target, value, maxWordCount, maxChars, language = CAPTION_LANGUAGE_MAP.ko, keepsTimeMark = false }) {
   const isOver = (text) => (Number.isFinite(maxWordCount) && countWord({ text }) > maxWordCount)
     || (Number.isFinite(maxChars) && text.length > maxChars);
   let itemList = splitItemList({ text: value });
@@ -713,14 +721,22 @@ function fitClaimPairToBudget({ target, value, maxWordCount, maxChars, language 
   });
   let fitted = build();
   if (isOver(fitted)) { itemList = dropRepeatedItemWord({ itemList, target }); fitted = build(); }
-  while (isOver(fitted) && targetWordList.length > MIN_TARGET_WORD_COUNT) { targetWordList = targetWordList.slice(1); fitted = build(); }
+  if (keepsTimeMark) {
+    for (let shorter = dropFirstNonTimeModifier(targetWordList); isOver(fitted) && shorter; shorter = dropFirstNonTimeModifier(targetWordList)) {
+      targetWordList = shorter; fitted = build();
+    }
+  }
+  while (!keepsTimeMark && isOver(fitted) && targetWordList.length > MIN_TARGET_WORD_COUNT) {
+    targetWordList = targetWordList.slice(1); fitted = build();
+  }
   while (isOver(fitted) && itemList.length > 1) { itemList.pop(); fitted = build(); }
+  while (isOver(fitted) && targetWordList.length > MIN_TARGET_WORD_COUNT) { targetWordList = targetWordList.slice(1); fitted = build(); }
   return fitted;
 }
 
 // 둘째 쌍은 대상과 수치가 다 있을 때만 붙이고, 두 쌍이 어절 예산을 넘으면 첫 쌍만 읽는다.
-function assembleClaimToValue({ slotMap, maxWordCount, maxChars, language = CAPTION_LANGUAGE_MAP.ko }) {
-  const first = fitClaimPairToBudget({ target: slotMap.target, value: slotMap.value, maxWordCount, maxChars, language });
+function assembleClaimToValue({ slotMap, maxWordCount, maxChars, language = CAPTION_LANGUAGE_MAP.ko, keepsTimeMark = false }) {
+  const first = fitClaimPairToBudget({ target: slotMap.target, value: slotMap.value, maxWordCount, maxChars, language, keepsTimeMark });
   if (!slotMap.target2 || !hasValueToken({ text: slotMap.value2 })) return first;
   const both = `${first}. ${assembleClaimPair({ target: slotMap.target2, value: slotMap.value2, language })}`;
   return Number.isFinite(maxWordCount) && countWord({ text: both }) > maxWordCount ? first : both;
@@ -764,6 +780,30 @@ function joinCaptionWithFact({ caption, fact, language = CAPTION_LANGUAGE_MAP.ko
     fittedFact = shortenPhrase({ text: fittedFact, language, maxWordCount: Math.max(0, countWord({ text: fittedFact }) - readOverCount()) });
   }
   return fittedFact ? `${fittedCaption}, ${fittedFact}` : fittedCaption;
+}
+
+// 근거 칸(지시 seen, 수치 source)에 적힌 시점이 하나뿐인데 읽히는 칸 어디에도 시점이 없으면 그 시점을 대상 칸 앞에 붙인다.
+// 모델이 칸 어절 수를 맞추느라 연도·분기를 먼저 빼서, 추이·비교 해설이 언제의 것인지 알 수 없었다.
+// 시점이 둘 이상이거나 "전년 대비"처럼 비교 기준으로 쓰였으면 어느 것이 대상의 것인지 모르므로 붙이지 않는다(time-mark.js).
+// 읽히는 칸이 이미 시간 축("월별 … 추이")을 말하면 근거 칸의 시점은 축의 한 칸일 수 있어 붙이지 않는다.
+const TIME_RESTORE_RULE_MAP = {
+  [NARRATION_TYPE_MAP.deixis]: {
+    [DEIXIS_FORM_MAP.simple]: { sourceKey: 'seen', targetKey: 'caption', readKeyList: ['caption', 'fact'] },
+    [DEIXIS_FORM_MAP.complete]: { sourceKey: 'seen', targetKey: 'caption', readKeyList: ['caption'] },
+  },
+  [NARRATION_TYPE_MAP.interpretation]: {
+    [INTERPRETATION_KIND_MAP.valueToMeaning]: { sourceKey: 'source', targetKey: 'frame', readKeyList: ['value', 'frame'] },
+    [INTERPRETATION_KIND_MAP.claimToValue]: { sourceKey: 'source', targetKey: 'target', readKeyList: ['target', 'value', 'target2', 'value2'] },
+  },
+};
+
+function restoreTimeMark({ narrationType, subKind, slotMap }) {
+  const rule = TIME_RESTORE_RULE_MAP[narrationType]?.[subKind];
+  if (!rule || !slotMap[rule.sourceKey] || !slotMap[rule.targetKey]) return slotMap;
+  const readText = rule.readKeyList.map((key) => slotMap[key] || '').join(' ');
+  if (hasAnyTimeMark(readText) || hasTimeAxisWord(readText)) return slotMap;
+  const mark = readSingleTimeMark(slotMap[rule.sourceKey]);
+  return mark ? { ...slotMap, [rule.targetKey]: `${mark} ${slotMap[rule.targetKey]}` } : slotMap;
 }
 
 function hasEmptyRequiredSlot({ slotList, slotMap }) {
@@ -823,8 +863,8 @@ const ENGLISH_NARRATION_ASSEMBLE_MAP = {
   },
   [NARRATION_TYPE_MAP.interpretation]: {
     [INTERPRETATION_KIND_MAP.valueToMeaning]: ({ slotMap }) => `${slotMap.value} means ${slotMap.frame}`,
-    [INTERPRETATION_KIND_MAP.claimToValue]: ({ slotMap, maxWordCount, maxChars }) => assembleClaimToValue({
-      slotMap, maxWordCount, maxChars, language: CAPTION_LANGUAGE_MAP.en,
+    [INTERPRETATION_KIND_MAP.claimToValue]: ({ slotMap, maxWordCount, maxChars, keepsTimeMark }) => assembleClaimToValue({
+      slotMap, maxWordCount, maxChars, language: CAPTION_LANGUAGE_MAP.en, keepsTimeMark,
     }),
   },
   [NARRATION_TYPE_MAP.visualDescription]: {
@@ -851,10 +891,12 @@ function assembleEnglishNarration({ narrationType, subKind, rawSlotMap, index, o
   const slotList = getSlotList({ narrationType, subKind, origin, hasSecondClaim, language: CAPTION_LANGUAGE_MAP.en, contentSwitch });
   const assemble = ENGLISH_NARRATION_ASSEMBLE_MAP[narrationType]?.[subKind];
   if (!slotList || !assemble) return null;
-  const slotMap = normalizeEnglishSlotMap({ slotList, rawSlotMap: pairClaimSlot({ narrationType, subKind, rawSlotMap }) });
-  if (hasEmptyRequiredSlot({ slotList, slotMap })) return null;
-  if (hasValuelessSlot({ slotList, slotMap })) return null;
-  const joined = assemble({ slotMap, index, maxWordCount, maxChars }).replace(/\s+/g, ' ').trim();
+  const normalizedSlotMap = normalizeEnglishSlotMap({ slotList, rawSlotMap: pairClaimSlot({ narrationType, subKind, rawSlotMap }) });
+  if (hasEmptyRequiredSlot({ slotList, slotMap: normalizedSlotMap })) return null;
+  if (hasValuelessSlot({ slotList, slotMap: normalizedSlotMap })) return null;
+  const keepsTimeMark = contentSwitch.isTimeMarkEnabled;
+  const slotMap = keepsTimeMark ? restoreTimeMark({ narrationType, subKind, slotMap: normalizedSlotMap }) : normalizedSlotMap;
+  const joined = assemble({ slotMap, index, maxWordCount, maxChars, keepsTimeMark }).replace(/\s+/g, ' ').trim();
   return { text: capitalizeFirst(dropRepeatedWordAtSeam({ text: joined })), slotMap };
 }
 
@@ -869,13 +911,15 @@ function assembleNarration({ narrationType, subKind, rawSlotMap, index = '', ori
   const slotList = getSlotList({ narrationType, subKind, origin, hasSecondClaim, contentSwitch: resolvedSwitch });
   const assemble = NARRATION_ASSEMBLE_MAP[narrationType]?.[subKind];
   if (!slotList || !assemble) return null;
-  const slotMap = normalizeSlotMap({
+  const normalizedSlotMap = normalizeSlotMap({
     slotList, rawSlotMap: pairClaimSlot({ narrationType, subKind, rawSlotMap }), contentSwitch: resolvedSwitch,
   });
-  if (hasEmptyRequiredSlot({ slotList, slotMap })) return null;
-  if (hasValuelessSlot({ slotList, slotMap })) return null;
-  if (hasInvalidTailSlot({ slotList, slotMap })) return null;
-  const joined = assemble({ slotMap, index, maxWordCount, maxChars }).replace(/\s+/g, ' ').trim();
+  if (hasEmptyRequiredSlot({ slotList, slotMap: normalizedSlotMap })) return null;
+  if (hasValuelessSlot({ slotList, slotMap: normalizedSlotMap })) return null;
+  if (hasInvalidTailSlot({ slotList, slotMap: normalizedSlotMap })) return null;
+  const keepsTimeMark = resolvedSwitch.isTimeMarkEnabled;
+  const slotMap = keepsTimeMark ? restoreTimeMark({ narrationType, subKind, slotMap: normalizedSlotMap }) : normalizedSlotMap;
+  const joined = assemble({ slotMap, index, maxWordCount, maxChars, keepsTimeMark }).replace(/\s+/g, ' ').trim();
   return { text: dropRepeatedWordAtSeam({ text: joined }), slotMap };
 }
 

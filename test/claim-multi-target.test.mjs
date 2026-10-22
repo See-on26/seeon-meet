@@ -86,7 +86,7 @@ test('수치 에이전트는 둘째 변화를 프롬프트·칸에 싣고 두 �
 });
 
 // 둘째 값이 화면에 없으면 main 이 둘째 쌍을 비우고 첫 쌍만 다시 조립한다. 예산 없이 다시 조립하면
-// 에이전트가 줄였던 첫 쌍("신규 가입자, 서울 1,200명, 부산 800명")이 칸 그대로 길게 되살아난다.
+// 에이전트가 줄였던 첫 쌍("올해 상반기 신규 가입자, 서울 1,200명")이 칸 그대로 길게 되살아난다.
 test('수치 에이전트는 실제로 쓴 전체 예산(언어 배율 적용값)을 돌려주고, 첫 쌍만 다시 조립할 때 그 예산으로 줄인다', async () => {
   globalThis.fetch = async () => {
     const content = JSON.stringify({
@@ -107,7 +107,8 @@ test('수치 에이전트는 실제로 쓴 전체 예산(언어 배율 적용값
     narrationType: 'interpretation', subKind: 'claim_to_value', rawSlotMap: { ...korean.slotMap, target2: '', value2: '' }, ...budget,
   }).text;
   assert.equal(reassemble({}), '올해 상반기 신규 가입자, 서울 1,200명, 부산 800명, 대구 500명', '예산 없이 다시 조립하면 길게 되살아난다');
-  assert.equal(reassemble(korean.appliedBudget), '신규 가입자, 서울 1,200명, 부산 800명');
+  // 대상 앞 시점("올해 상반기")은 예산을 맞출 때도 남긴다(시점 표기 지키기, 기본 켜짐).
+  assert.equal(reassemble(korean.appliedBudget), '올해 상반기 신규 가입자, 서울 1,200명');
 });
 
 test('main 은 둘째 값이 화면에 없어 첫 쌍만 다시 조립할 때 에이전트가 쓴 전체 예산을 넘긴다', () => {

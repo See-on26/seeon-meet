@@ -3,6 +3,8 @@
 const CONTENT_SWITCH_ENV_NAME_MAP = {
   // 식별 사실 완결: 지시 단순형에 식별 사실 칸(fact), 수치 해설에 근거 줄 칸(source)을 두고, 잘린 칸의 범위 끝("…까지")을 떼지 않는다.
   isFactCompleteEnabled: 'SEEON_FACT_COMPLETE_ENABLED',
+  // 시점 표기 지키기: 예산 맞추기에서 대상 칸의 시점 낱말을 빼지 않고, 근거 칸에 하나뿐인 시점이 해설에서 빠졌으면 되살린다.
+  isTimeMarkEnabled: 'SEEON_TIME_MARK_ENABLED',
 };
 
 function readContentSwitch(env = process.env) {

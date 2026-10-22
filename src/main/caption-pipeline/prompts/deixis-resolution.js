@@ -41,6 +41,9 @@ const FACT_COMPLETE_FORM_LINE_MAP = {
   [DEIXIS_FORM_MAP.complete]: '    완전형은 대상마다 그 사실을 이름 곁에 짧게 붙인다.',
 };
 
+// 어절 수를 맞추느라 연도·분기부터 빼면 추이·비교 자료가 언제의 것인지 알 수 없다. 발표자가 말한 시점이어도 남긴다.
+const TIME_MARK_RULE = '    시점(연도·분기·월·주)이 대상에 적혀 있으면 지우지 않는다 — 발표자가 말한 시점이어도 쓴다.';
+
 function readFormRuleList({ subKind, isFactCompleteEnabled }) {
   const simpleList = isFactCompleteEnabled ? DEIXIS_FACT_SIMPLE_FORM_RULE_LIST : DEIXIS_FORM_RULE_MAP.simple;
   if (subKind === DEIXIS_FORM_MAP.simple) return simpleList;
@@ -105,6 +108,7 @@ function buildGroundingPrompt({ utterance, recentTranscript, maxChars,
     '      좋음: "민감정보 포함 여부 항목"        ← 화면에 그대로 적혀 있다',
     '    수식을 길게 잇지 마라("~할 수 있는 ~하는 ~"). 화면 문구 + 자료 종류면 충분하다.',
     '    대상은 무엇인지(이름·값·뜻)로 쓴다. 상자·박스·도형·색 같은 화면 요소 이름으로 때우지 마라.',
+    resolvedSwitch.isTimeMarkEnabled ? TIME_MARK_RULE : '',
     '(5) "가리키며 설명함·보는 중·주목 중" 같은 동작 말을 붙이지 않는다. 가리켰다는 사실은 청자에게 아무 정보도 아니다 — 대상만 적는다.',
     '(6) 가리킨 대상에 항목명과 수치가 같이 있으면 둘 다 넣는다.',
     '    **대상 자신에 붙은 글자·수치만 쓴다.** 옆에 있는 상자·목록이라도 제목이 다른 지명·항목이면 그 내용은 대상의 것이 아니다'
