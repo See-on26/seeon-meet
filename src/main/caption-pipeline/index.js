@@ -70,6 +70,7 @@ const {
 } = require('./orchestrator/speech-roi');
 const { createSlideLayoutStore, createSharedOcrClient } = require('./orchestrator/speech-roi/slide-layout-store');
 const { createFrameImageOps } = require('./orchestrator/speech-roi/frame-image');
+const { createScreenChangeService } = require('./orchestrator/screen-change-service');
 const { createContextStore, toSlideMajor, LABEL_STATUS_MAP } = require('./context/context-store');
 const { createSlideLabeler } = require('./context/slide-labeler');
 const { createContextFileWriter } = require('./context/context-file');
@@ -157,7 +158,9 @@ function registerPipeline({ getViewerView, meetingArchive = null }) {
   const screenRegistry = createScreenRegistry();
   const slideTopicRegistry = createSlideTopicRegistry();
   const speakerRegistry = createSpeakerRegistry();
-  const narrationHistory = createNarrationHistory();
+  const narrationHistory = createNarrationHistory({
+    minIntervalMsByClassMap: { [NARRATION_CLASS_MAP.screenChange]: config.screenChangeMinIntervalMs },
+  });
   const silenceGate = createSilenceNarrationGate();
   const featureGate = createFeatureGate();
   const silenceNarrator = createSilenceNarrator({
@@ -326,6 +329,11 @@ function registerPipeline({ getViewerView, meetingArchive = null }) {
       });
     },
   });
+  // 같은 슬라이드 안 화면 변화 해설과 늦은 근거 재시도. SEEON_SCREEN_CHANGE=off(기본)이면 아무것도 하지 않는다.
+  const screenChange = createScreenChangeService({
+    config, agentFieldMap, ocrClient, narrationHistory, describedStore, captionDescribed, slideTextStore,
+    sendCaption, appendRecord, markDebug, getCaptionLanguage,
+  });
 
   async function sendCaption({ ts, text, source, slideLabel = null, isDedupeExempt = false,
     rationale = null, slotMap = null, hasPointingRegion = false,
@@ -349,7 +357,7 @@ function registerPipeline({ getViewerView, meetingArchive = null }) {
         stage: DEBUG_STAGE_MAP.toggle, verdict: DEBUG_VERDICT_MAP.skip, narrationType: source, ts,
         reason: '기능 꺼짐 — 캡션 내보내지 않음', detail: `분류=${resolvedClass} "${text}"`,
       });
-      return { isEmitted: false };
+      return { isEmitted: false, reason: 'feature_off' };
     }
     // 간격 억제: 어느 분류가 어느 분류를 얼마 동안 막는지는 orchestrator/blocking-policy.js 표가 정한다.
     const rate = narrationHistory.findRateLimited({ narrationClass: resolvedClass, ts, hasPointingRegion });
@@ -375,7 +383,7 @@ function registerPipeline({ getViewerView, meetingArchive = null }) {
           + ` (최소 ${rate.minIntervalMs / 1000}초 · ${NARRATION_CLASS_LABEL_MAP[resolvedClass] || resolvedClass}`
           + `${hasPointingRegion ? ', 필기 있음' : ''})`,
       });
-      return { isEmitted: false };
+      return { isEmitted: false, reason: 'rate-limited' };
     }
     const duplicate = isDedupeExempt
       ? { isDuplicate: false, matchedText: '', similarity: 0, reason: '', threshold: 0 }
@@ -393,7 +401,7 @@ function registerPipeline({ getViewerView, meetingArchive = null }) {
         detail: `"${text}" ≈ 기존 "${duplicate.matchedText}"`
           + ` (유사도 ${duplicate.similarity.toFixed(2)} ≥ 임계 ${duplicate.threshold})`,
       });
-      return { isEmitted: false };
+      return { isEmitted: false, reason: `duplicate:${duplicate.reason}` };
     }
     narrationHistory.remember({ text, source, ts, slotMap, slideLabel, narrationClass: resolvedClass });
     // Orchestrator 의 main 단계는 여기까지다(기능 끄기 → 차단 규칙 → 중복). 렌더러의 우선순위 대기 줄이 재생할 해설을 고르면
@@ -444,6 +452,7 @@ function registerPipeline({ getViewerView, meetingArchive = null }) {
     slideTextSourceMap.clear();
     slideLayoutStore.reset();
     boundaryTrigger.reset();
+    screenChange.reset();
     const meetingLanguage = applySessionMeetingLanguage({ asrLanguageSession, asrLanguage });
     sessionSlideTextBackend = resolveSlideTextBackend({ requested: slideTextBackend, fallback: config.slideTextBackend });
     sessionCaptionLanguage = resolveCaptionLanguage(captionLanguage);
@@ -451,10 +460,10 @@ function registerPipeline({ getViewerView, meetingArchive = null }) {
     devFlow.recorder.start({ sessionId, mode });
     contextGeneration += 1;
     contextStore.start({ sessionId, startedAt: Date.now() });
-    console.log(`[pipeline] ■ 캡처 세션 시작 (모드=${mode}, 받아쓰기=${meetingLanguage}, 캡션 언어=${sessionCaptionLanguage}, 화면 글자=${sessionSlideTextBackend}, ${sessionId}) — 중복 이력·화면 레지스트리 초기화`);
+    console.log(`[pipeline] ■ 캡처 세션 시작 (모드=${mode}, 받아쓰기=${meetingLanguage}, 캡션 언어=${sessionCaptionLanguage}, 화면 글자=${sessionSlideTextBackend}, 화면 변화=${screenChange.describeSessionText()}, ${sessionId}) — 중복 이력·화면 레지스트리 초기화`);
     markDebug({
       stage: DEBUG_STAGE_MAP.session, verdict: DEBUG_VERDICT_MAP.info,
-      reason: '세션 시작', detail: `모드=${mode} · 받아쓰기=${meetingLanguage} · 캡션 언어=${sessionCaptionLanguage} · 화면 글자=${sessionSlideTextBackend} · ${sessionId} · 기록=${recordStore.filePath}`,
+      reason: '세션 시작', detail: `모드=${mode} · 받아쓰기=${meetingLanguage} · 캡션 언어=${sessionCaptionLanguage} · 화면 글자=${sessionSlideTextBackend} · 화면 변화=${screenChange.describeSessionText()} · ${sessionId} · 기록=${recordStore.filePath}`,
     });
     if (speechRoi.isEnabled()) {
       markDebug({
@@ -464,7 +473,10 @@ function registerPipeline({ getViewerView, meetingArchive = null }) {
       });
     }
 
-    return { isOk: true, sessionId, recordPath: recordStore.filePath, gapSource: config.gapSource };
+    return {
+      isOk: true, sessionId, recordPath: recordStore.filePath, gapSource: config.gapSource,
+      screenChange: screenChange.describeSession(),
+    };
   });
 
   ipcMain.handle('pipeline-session-end', async () => {
@@ -722,6 +734,9 @@ function registerPipeline({ getViewerView, meetingArchive = null }) {
     }
   });
 
+  ipcMain.handle('pipeline-screen-change', async (_event, payload) => screenChange.handleChange(payload));
+  ipcMain.handle('pipeline-screen-change-baseline', async (_event, payload) => screenChange.handleBaseline(payload));
+
   ipcMain.handle('pipeline-slide-text', async (_event, { slideLabel, buffer }) => {
     const jpegBuffer = Buffer.from(buffer);
     const isStarted = slideTextStore.ensure({ slideLabel, jpegBuffer });
@@ -824,6 +839,7 @@ function registerPipeline({ getViewerView, meetingArchive = null }) {
     if (narrationClass === NARRATION_CLASS_MAP.speakerIdentity) speakerRegistry.reset();
     // 듣지 못한 무발화 해설이면 그 슬라이드의 "이미 냄" 기록을 지운다(슬라이드당 1회·분당 1회).
     if (narrationClass === NARRATION_CLASS_MAP.silenceBased) silenceGate.revert({ slideLabel });
+    if (narrationClass === NARRATION_CLASS_MAP.screenChange) screenChange.revert({ slideLabel });
     markDebug({
       stage: DEBUG_STAGE_MAP.queue, verdict: DEBUG_VERDICT_MAP.info, ts,
       reason: '재생 안 된 해설을 중복·재설명 기록에서 지움',
@@ -971,7 +987,7 @@ function registerPipeline({ getViewerView, meetingArchive = null }) {
     }
   });
 
-  ipcMain.handle('pipeline-deixis', async (_event, { ts, buffer, fullBuffer = null, utterance, recentTranscript, beforeTranscript, afterTranscript, hasPointingRegion, pointingOrderHint, slideLabel, wordBudgetMap, eventVideoTimeMs = null, triggerCandidateList = [], pointingRect = null }) => {
+  ipcMain.handle('pipeline-deixis', async (_event, { ts, buffer, fullBuffer = null, utterance, recentTranscript, beforeTranscript, afterTranscript, hasPointingRegion, pointingOrderHint, slideLabel, wordBudgetMap, eventVideoTimeMs = null, triggerCandidateList = [], pointingRect = null, frameTs = null }) => {
     let stage = PIPELINE_STAGE_MAP.judge;
     const startedAt = Date.now();
     const hasAnySpeech = [utterance, beforeTranscript, afterTranscript, recentTranscript]
@@ -1186,6 +1202,9 @@ function registerPipeline({ getViewerView, meetingArchive = null }) {
           detail: `${rejection.detailPrefix}발화="${utterance}" 세부=${selectedCandidate?.subKind || '-'} (${Date.now() - startedAt}ms)`
             + screenTextDetail + factCardDetail,
         });
+        screenChange.noteUnresolved({
+          ts, frameTs, slideLabel, narrationType, selectedCandidate, generatorArgs, rejectKind, beforeText, afterText,
+        });
         return { isOk: true, isGrounded: false };
       }
       if (narrationType === NARRATION_TYPE_MAP.interpretation && slotMap?.value) {
@@ -1227,6 +1246,9 @@ function registerPipeline({ getViewerView, meetingArchive = null }) {
             ...(screenTextRecord ? { screenText: screenTextRecord } : {}),
             ...(factCardRecord ? { factCard: factCardRecord } : {}),
             ...(speechRoiResult.record ? { speechRoi: speechRoiResult.record } : {}),
+          });
+          screenChange.noteUnresolved({
+            ts, frameTs, slideLabel, narrationType, selectedCandidate, generatorArgs, beforeText, afterText,
           });
           return { isOk: true, isGrounded: false };
         }

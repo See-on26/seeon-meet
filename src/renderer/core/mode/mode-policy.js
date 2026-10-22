@@ -1,7 +1,7 @@
 import {
   NARRATION_TYPE_MAP, PAGE_TRANSITION_KIND_MAP, DEIXIS_FORM_MAP,
   INTERPRETATION_KIND_MAP, VISUAL_DESCRIPTION_KIND_MAP, SPEAKER_IDENTITY_KIND_MAP,
-  USER_COMMAND_MAP,
+  USER_COMMAND_MAP, SCREEN_CHANGE_KIND_MAP,
 } from '../constants.js';
 
 export const MODE_MAP = {
@@ -121,6 +121,12 @@ export const NARRATION_WORD_RANGE_MAP = {
   [NARRATION_TYPE_MAP.speakerIdentity]: {
     [SPEAKER_IDENTITY_KIND_MAP.named]: { minWordCount: 2, maxWordCount: 3 },
     [SPEAKER_IDENTITY_KIND_MAP.positional]: { minWordCount: 3, maxWordCount: 5 },
+  },
+  // 화면 변화는 머리말("새로 표시,") 2어절 + 대상·값. 짧게 알리는 안내라 1.4~3.6초 안에 끝낸다.
+  [NARRATION_TYPE_MAP.screenChange]: {
+    [SCREEN_CHANGE_KIND_MAP.newText]: { minWordCount: 3, maxWordCount: 8 },
+    [SCREEN_CHANGE_KIND_MAP.highlight]: { minWordCount: 3, maxWordCount: 8 },
+    [SCREEN_CHANGE_KIND_MAP.newSlide]: { minWordCount: 4, maxWordCount: 10 },
   },
   [NARRATION_TYPE_MAP.userCommand]: {
     [USER_COMMAND_MAP.screenMaterial]: { minWordCount: 6, maxWordCount: 15 },

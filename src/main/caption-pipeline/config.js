@@ -1,4 +1,5 @@
 const { readContentSwitch } = require('./agents/shared/content-switch');
+const { SCREEN_CHANGE_KIND_MAP } = require('./contracts/narration-types');
 
 const DEFAULT_VLM_URL = 'http://127.0.0.1:8801/v1/chat/completions';
 
@@ -180,6 +181,64 @@ function readVlmMaxSoftTokens({ env }) {
   return null;
 }
 
+// 같은 슬라이드 안 화면 변화 해설. off 면 감지·OCR·재시도 기록을 하지 않아 지금과 같다.
+// shadow 는 감지·OCR 글자 차이·이미 말한 값 거르기까지 하고 기록만 남긴다(VLM·해설 없음). same_slide 는 같은 슬라이드
+// 변화 해설과 늦은 근거 재시도를 낸다. all 의 새 슬라이드 값 한 줄은 꺼 둔 전환 고지 자리에 해설을 다시 넣어 평가 조건을 바꾸므로
+// 만들지 않았다. all 을 주면 화면 변화 해설은 켜려는 뜻이라 same_slide 로 돌리고, 기록에도 same_slide 로 남긴다.
+const SCREEN_CHANGE_MODE_MAP = { off: 'off', shadow: 'shadow', sameSlide: 'same_slide' };
+const SCREEN_CHANGE_MODE_ALL = 'all';
+const SCREEN_CHANGE_MODE_LIST = Object.values(SCREEN_CHANGE_MODE_MAP);
+const DEFAULT_SCREEN_CHANGE_MODE = SCREEN_CHANGE_MODE_MAP.off;
+// 변화 해설끼리의 간격(분당 최대 3번)과 슬라이드당 상한.
+const DEFAULT_SCREEN_CHANGE_MIN_INTERVAL_MS = 20000;
+const DEFAULT_SCREEN_CHANGE_PER_SLIDE_MAX = 2;
+// 해설하는 사건 종류. visual(글자 없는 변화)은 오탐이 많아 기본으로 끈다.
+const SCREEN_CHANGE_KIND_LIST = [SCREEN_CHANGE_KIND_MAP.newText, SCREEN_CHANGE_KIND_MAP.highlight, SCREEN_CHANGE_KIND_MAP.visual];
+const DEFAULT_SCREEN_CHANGE_KIND_LIST = [SCREEN_CHANGE_KIND_MAP.newText, SCREEN_CHANGE_KIND_MAP.highlight];
+// VLM 에 보내는 그림: outline 은 바뀐 곳에 테두리를 그린 전체 화면(라벨·축 이름을 지킨다), crop 은 바뀐 곳만, full 은 그대로.
+const SCREEN_CHANGE_IMAGE_LIST = ['outline', 'crop', 'full'];
+const DEFAULT_SCREEN_CHANGE_IMAGE = 'outline';
+
+function readScreenChangeMode({ env }) {
+  const mode = env.SEEON_SCREEN_CHANGE;
+  if (mode === undefined || mode === '') return DEFAULT_SCREEN_CHANGE_MODE;
+  if (SCREEN_CHANGE_MODE_LIST.includes(mode)) return mode;
+  if (mode === SCREEN_CHANGE_MODE_ALL) {
+    console.warn(`[pipeline] SEEON_SCREEN_CHANGE="all" — 새 슬라이드 값 한 줄은 아직 없어 ${SCREEN_CHANGE_MODE_MAP.sameSlide} 로 돕니다(같은 슬라이드 변화 해설·늦은 근거 재시도)`);
+    return SCREEN_CHANGE_MODE_MAP.sameSlide;
+  }
+  console.warn(`[pipeline] SEEON_SCREEN_CHANGE="${mode}" 은 지원하지 않는 값입니다 — ${DEFAULT_SCREEN_CHANGE_MODE} 로 둡니다 (허용: ${SCREEN_CHANGE_MODE_LIST.join('·')})`);
+  return DEFAULT_SCREEN_CHANGE_MODE;
+}
+
+function readPositiveInteger({ env, envName, fallback }) {
+  const value = env[envName];
+  if (value === undefined || value === '') return fallback;
+  if (/^[1-9]\d*$/.test(value)) return Number(value);
+  console.warn(`[pipeline] ${envName}="${value}" 은 양의 정수가 아닙니다 — ${fallback} 로 둡니다`);
+  return fallback;
+}
+
+function readScreenChangeKindList({ env }) {
+  const value = env.SEEON_SCREEN_CHANGE_KINDS;
+  if (value === undefined || value === '') return [...DEFAULT_SCREEN_CHANGE_KIND_LIST];
+  const requestedList = value.split(',').map((kind) => kind.trim()).filter(Boolean);
+  const kindList = SCREEN_CHANGE_KIND_LIST.filter((kind) => requestedList.includes(kind));
+  const unknownList = requestedList.filter((kind) => !SCREEN_CHANGE_KIND_LIST.includes(kind));
+  if (unknownList.length) {
+    console.warn(`[pipeline] SEEON_SCREEN_CHANGE_KINDS 의 [${unknownList.join(', ')}] 는 모르는 종류라 뺍니다 (허용: ${SCREEN_CHANGE_KIND_LIST.join('·')})`);
+  }
+  return kindList.length ? kindList : [...DEFAULT_SCREEN_CHANGE_KIND_LIST];
+}
+
+function readScreenChangeImage({ env }) {
+  const image = env.SEEON_SCREEN_CHANGE_IMAGE;
+  if (image === undefined || image === '') return DEFAULT_SCREEN_CHANGE_IMAGE;
+  if (SCREEN_CHANGE_IMAGE_LIST.includes(image)) return image;
+  console.warn(`[pipeline] SEEON_SCREEN_CHANGE_IMAGE="${image}" 은 지원하지 않는 값입니다 — ${DEFAULT_SCREEN_CHANGE_IMAGE} 로 둡니다 (허용: ${SCREEN_CHANGE_IMAGE_LIST.join('·')})`);
+  return DEFAULT_SCREEN_CHANGE_IMAGE;
+}
+
 // OCR 은 임베딩 서비스에 붙어 있어 기본 주소를 임베딩 주소에서 만든다. 포트를 나누면 SEEON_OCR_URL 로 준다.
 function resolveOcrUrl({ env, embedUrl }) {
   if (env.SEEON_OCR_URL) return env.SEEON_OCR_URL;
@@ -236,6 +295,15 @@ function readPipelineConfig(env = process.env) {
     isScaleEnabled: env.SEEON_ROUTER_SCALE_ENABLED !== 'false',
     // 지시·수치·척도 해설 내용 개선 항목별 스위치(기본 켜짐). 항목과 환경변수 이름은 content-switch.js.
     contentSwitch: readContentSwitch(env),
+    screenChangeMode: readScreenChangeMode({ env }),
+    screenChangeMinIntervalMs: readPositiveInteger({
+      env, envName: 'SEEON_SCREEN_CHANGE_MIN_INTERVAL_MS', fallback: DEFAULT_SCREEN_CHANGE_MIN_INTERVAL_MS,
+    }),
+    screenChangePerSlideMax: readPositiveInteger({
+      env, envName: 'SEEON_SCREEN_CHANGE_PER_SLIDE_MAX', fallback: DEFAULT_SCREEN_CHANGE_PER_SLIDE_MAX,
+    }),
+    screenChangeKindList: readScreenChangeKindList({ env }),
+    screenChangeImage: readScreenChangeImage({ env }),
     hasBedrockCredentials:
       Boolean(env.AWS_BEARER_TOKEN_BEDROCK)
       || Boolean(env.AWS_ACCESS_KEY_ID && env.AWS_SECRET_ACCESS_KEY)
@@ -249,4 +317,5 @@ module.exports = {
   SCREEN_TEXT_GROUNDING_LIST, DEFAULT_SCREEN_TEXT_GROUNDING, FACT_CARD_AGENT_LIST, DEFAULT_FACT_CARD_AGENT_LIST,
   CHART_ESTIMATE_MODE_MAP, CHART_ESTIMATE_MODE_LIST, DEFAULT_CHART_ESTIMATE_MODE,
   SPEECH_ROI_MODE_LIST, DEFAULT_SPEECH_ROI_MODE, SPEECH_ROI_TYPE_LIST,
+  SCREEN_CHANGE_MODE_MAP, SCREEN_CHANGE_MODE_LIST, SCREEN_CHANGE_IMAGE_LIST, DEFAULT_SCREEN_CHANGE_MIN_INTERVAL_MS,
 };

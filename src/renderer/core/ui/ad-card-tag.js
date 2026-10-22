@@ -8,6 +8,7 @@ const CARD_LABEL_KEY_BY_CLASS_MAP = {
   [NARRATION_CLASS_MAP.speechBased]: 'card.speechBased',
   [NARRATION_CLASS_MAP.silenceBased]: 'card.silenceBased',
   [NARRATION_CLASS_MAP.speakerIdentity]: 'card.speakerIdentity',
+  [NARRATION_CLASS_MAP.screenChange]: 'card.screenChange',
   [NARRATION_CLASS_MAP.userCommand]: 'card.userCommand',
 };
 
@@ -20,6 +21,7 @@ const CLASS_BY_SOURCE_MAP = {
   [NARRATION_TYPE_MAP.interpretation]: NARRATION_CLASS_MAP.speechBased,
   [NARRATION_TYPE_MAP.speakerIdentity]: NARRATION_CLASS_MAP.speakerIdentity,
   [NARRATION_TYPE_MAP.userCommand]: NARRATION_CLASS_MAP.userCommand,
+  [NARRATION_TYPE_MAP.screenChange]: NARRATION_CLASS_MAP.screenChange,
 };
 
 export const DEFAULT_AD_CARD_TAG = Object.freeze({ aid: '·', labelKey: 'card.default' });

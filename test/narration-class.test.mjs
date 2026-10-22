@@ -27,6 +27,10 @@ test('시각 묘사는 출처에 따라 분류가 갈린다', () => {
   }), 'silence_based');
 });
 
+test('화면 변화 해설은 화면 변화 분류다', () => {
+  assert.equal(toNarrationClass({ narrationType: 'screen_change' }), 'screen_change');
+});
+
 test('모르는 유형은 null', () => {
   assert.equal(toNarrationClass({ narrationType: 'unknown' }), null);
   assert.equal(toNarrationClass({ narrationType: undefined }), null);

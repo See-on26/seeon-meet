@@ -17,6 +17,7 @@ const RECORD_KIND_MAP = {
   narration: 'narration',
   gap: 'gap',
   debug: 'debug',
+  screenChange: 'screen_change',
 };
 
 function createRecordStore({ outDir }) {

@@ -1,6 +1,6 @@
 const {
   NARRATION_TYPE_MAP, PAGE_TRANSITION_KIND_MAP, DEIXIS_FORM_MAP,
-  INTERPRETATION_KIND_MAP, VISUAL_DESCRIPTION_KIND_MAP, SPEAKER_IDENTITY_KIND_MAP,
+  INTERPRETATION_KIND_MAP, VISUAL_DESCRIPTION_KIND_MAP, SPEAKER_IDENTITY_KIND_MAP, SCREEN_CHANGE_KIND_MAP,
 } = require('../../contracts/narration-types');
 const { NARRATION_ORIGIN_MAP } = require('../../contracts/narration-class');
 const { CAPTION_LANGUAGE_MAP } = require('../../contracts/caption-language');
@@ -220,6 +220,19 @@ const NARRATION_SLOT_MAP = {
       { key: 'position', label: '타일 위치 (예: 왼쪽 위, 가운데, 오른쪽 아래)', minWordCount: 1, maxWordCount: 2 },
     ],
   },
+  // 같은 슬라이드 안 화면 변화. 값은 화면 글자 그대로 받아야 해서 다듬지 않는다(구 끝 자르기 없음).
+  [NARRATION_TYPE_MAP.screenChange]: {
+    [SCREEN_CHANGE_KIND_MAP.newText]: [
+      { key: 'target', label: '새로 나타난 값이 무엇의 값인지 — 화면에 적힌 라벨·항목 이름 (예: 3분기 매출, 정답)', minWordCount: 1, maxWordCount: 4, isPhrase: true },
+      { key: 'value', label: '화면에 적힌 값 그대로 — 숫자·단위·보기 번호를 바꾸지 않는다 (예: 42억 원, 3번)', minWordCount: 1, maxWordCount: 4 },
+    ],
+    [SCREEN_CHANGE_KIND_MAP.highlight]: [
+      { key: 'target', label: '새로 강조된(색칠·테두리·체크) 항목의 이름 — 화면에 적힌 그대로 (예: 보기 3번 서울)', minWordCount: 1, maxWordCount: 4, isPhrase: true },
+    ],
+    [SCREEN_CHANGE_KIND_MAP.visual]: [
+      { key: 'target', label: '새로 나타난 그림·도형이 무엇인지 (예: 지역별 매출 막대 그래프)', minWordCount: 1, maxWordCount: 5, isPhrase: true },
+    ],
+  },
 };
 
 // 식별 사실 완결(SEEON_FACT_COMPLETE_ENABLED). 해설이 대상은 맞혀도 그 대상을 가르는 세부(개수·범위의 처음과 끝·조건·지명·
@@ -367,6 +380,18 @@ const ENGLISH_SLOT_LABEL_MAP = {
     },
     [SPEAKER_IDENTITY_KIND_MAP.positional]: {
       position: 'tile position in English (e.g. top left, center, bottom right)',
+    },
+  },
+  [NARRATION_TYPE_MAP.screenChange]: {
+    [SCREEN_CHANGE_KIND_MAP.newText]: {
+      target: 'what the newly shown value is for — the label or item name on screen (e.g. Q3 revenue, answer)',
+      value: 'the value exactly as written on screen — keep numbers, units and option numbers unchanged (e.g. 4.2 billion won, No. 3)',
+    },
+    [SCREEN_CHANGE_KIND_MAP.highlight]: {
+      target: 'the name of the item newly highlighted (colored, outlined or checked), as written on screen (e.g. option 3 Seoul)',
+    },
+    [SCREEN_CHANGE_KIND_MAP.visual]: {
+      target: 'what the newly shown picture or shape is (e.g. regional sales bar chart)',
     },
   },
 };
@@ -902,6 +927,12 @@ const NARRATION_ASSEMBLE_MAP = {
     [SPEAKER_IDENTITY_KIND_MAP.named]: ({ slotMap }) => `${slotMap.speakerName}님이 말합니다`,
     [SPEAKER_IDENTITY_KIND_MAP.positional]: ({ slotMap }) => `${slotMap.position} 참가자가 말합니다`,
   },
+  // 머리말은 청자가 발화 해설이 아니라 화면 갱신임을 알게 한다.
+  [NARRATION_TYPE_MAP.screenChange]: {
+    [SCREEN_CHANGE_KIND_MAP.newText]: ({ slotMap }) => `새로 표시, ${slotMap.target} ${slotMap.value}`,
+    [SCREEN_CHANGE_KIND_MAP.highlight]: ({ slotMap }) => `강조 표시, ${slotMap.target}`,
+    [SCREEN_CHANGE_KIND_MAP.visual]: ({ slotMap }) => `새로 표시, ${slotMap.target}`,
+  },
 };
 
 // 영어 캡션의 조립 틀. 고정 문구(머리말·연결어)는 시스템이 붙이고, 칸에는 화면에서 읽은 구만 들어간다.
@@ -937,6 +968,11 @@ const ENGLISH_NARRATION_ASSEMBLE_MAP = {
     [SPEAKER_IDENTITY_KIND_MAP.positional]: ({ slotMap }) => (
       `The participant at the ${String(slotMap.position || '').replace(ENGLISH_LEADING_ARTICLE_PATTERN, '')} is speaking`
     ),
+  },
+  [NARRATION_TYPE_MAP.screenChange]: {
+    [SCREEN_CHANGE_KIND_MAP.newText]: ({ slotMap }) => `Now shown: ${slotMap.target} ${slotMap.value}`,
+    [SCREEN_CHANGE_KIND_MAP.highlight]: ({ slotMap }) => `Highlighted: ${slotMap.target}`,
+    [SCREEN_CHANGE_KIND_MAP.visual]: ({ slotMap }) => `Now shown: ${slotMap.target}`,
   },
 };
 

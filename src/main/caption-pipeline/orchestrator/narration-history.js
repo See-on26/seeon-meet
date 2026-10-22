@@ -1,9 +1,13 @@
 const { normalizeNarrationClass, findBlockingRule, resolveMinIntervalMs } = require('./blocking-policy');
+const { NARRATION_TYPE_MAP } = require('../contracts/narration-types');
 
 const DEFAULT_SIMILARITY_THRESHOLD = 0.58;
 const PAGE_TRANSITION_SIMILARITY_THRESHOLD = 0.70;
 const PAGE_TRANSITION_SOURCE = 'page-transition';
 const DEFAULT_MAX_ENTRY = 400;
+// 화면 변화 해설은 같은 대상의 값이 바뀐 것(차트 갱신·새 결과)이나 새로 강조된 항목을 알린다.
+// 그 값(값이 없는 강조면 항목 이름)을 담은 앞 해설만 중복으로 본다.
+const VALUE_AWARE_SOURCE_LIST = [NARRATION_TYPE_MAP.screenChange];
 
 const TARGET_OVERLAP_THRESHOLD = 0.5;
 
@@ -43,6 +47,8 @@ function createNarrationHistory({
   pageTransitionThreshold = PAGE_TRANSITION_SIMILARITY_THRESHOLD,
   targetOverlapThreshold = TARGET_OVERLAP_THRESHOLD,
   maxEntry = DEFAULT_MAX_ENTRY,
+  // 차단 규칙 표의 간격 대신 쓸 분류별 간격(설정으로 바꾼 값).
+  minIntervalMsByClassMap = {},
 } = {}) {
   let entryList = [];
 
@@ -83,9 +89,12 @@ function createNarrationHistory({
       return { isDuplicate: false, matchedText: '', similarity: 0, reason: '', threshold };
     }
     const targetTokenSet = buildTargetTokenSet({ slotMap });
+    const valueKey = VALUE_AWARE_SOURCE_LIST.includes(source)
+      ? normalizeNarration({ text: slotMap?.value ?? slotMap?.target }) : '';
     let best = { matchedText: '', similarity: 0 };
     let bestTarget = { matchedText: '', similarity: 0 };
     for (const entry of entryList) {
+      if (valueKey && !entry.normalized.includes(valueKey)) continue;
       if (entry.normalized === normalized) {
         return {
           isDuplicate: true, matchedText: entry.text, similarity: 1, reason: 'exact', threshold,
@@ -118,7 +127,8 @@ function createNarrationHistory({
   function findRateLimited({ narrationClass = null, ts = Date.now(), hasPointingRegion = false }) {
     const rule = findBlockingRule({ narrationClass });
     if (!rule) return { isRateLimited: false, sinceMs: Infinity, minIntervalMs: 0, blockedByClass: null };
-    const minIntervalMs = resolveMinIntervalMs({ rule, hasPointingRegion });
+    const overrideMs = minIntervalMsByClassMap[normalizeNarrationClass({ narrationClass })];
+    const minIntervalMs = Number.isFinite(overrideMs) ? overrideMs : resolveMinIntervalMs({ rule, hasPointingRegion });
     let blocker = null;
     for (const entry of entryList) {
       if (!rule.blockedByClassList.includes(entry.narrationClass)) continue;

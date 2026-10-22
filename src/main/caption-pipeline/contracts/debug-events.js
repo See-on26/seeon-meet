@@ -17,6 +17,7 @@ const DEBUG_STAGE_MAP = {
   silence: 'silence',
   queue: 'queue',
   toggle: 'toggle',
+  screenChange: 'screen_change',
 };
 
 const DEBUG_VERDICT_MAP = { pass: 'pass', skip: 'skip', fail: 'fail', info: 'info' };

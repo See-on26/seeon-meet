@@ -26,6 +26,7 @@ export const NARRATION_TYPE_MAP = {
   visualDescription: 'visual_description',
   userCommand: 'user_command',
   speakerIdentity: 'speaker_identity',
+  screenChange: 'screen_change',
 };
 
 export const NARRATION_CLASS_MAP = {
@@ -35,6 +36,7 @@ export const NARRATION_CLASS_MAP = {
   speechBased: 'speech_based',
   silenceBased: 'silence_based',
   speakerIdentity: 'speaker_identity',
+  screenChange: 'screen_change',
 };
 
 // AD 카드 코드. main contracts/narration-class.js 의 AD_CODE_BY_CLASS_MAP 과 같은 사본이다.
@@ -44,6 +46,7 @@ export const AD_CODE_BY_CLASS_MAP = {
   [NARRATION_CLASS_MAP.speechBased]: 'A3',
   [NARRATION_CLASS_MAP.silenceBased]: 'A4',
   [NARRATION_CLASS_MAP.speakerIdentity]: 'A5',
+  [NARRATION_CLASS_MAP.screenChange]: 'A6',
   [NARRATION_CLASS_MAP.userCommand]: 'Q',
 };
 
@@ -75,6 +78,14 @@ export const VISUAL_DESCRIPTION_KIND_MAP = {
 export const SPEAKER_IDENTITY_KIND_MAP = {
   named: 'named',
   positional: 'positional',
+};
+
+// 화면 변화 해설의 하위 종류. main contracts/narration-types.js 의 SCREEN_CHANGE_KIND_MAP 과 같은 사본이다.
+export const SCREEN_CHANGE_KIND_MAP = {
+  newText: 'new_text',
+  highlight: 'highlight',
+  visual: 'visual',
+  newSlide: 'new_slide',
 };
 
 export const SPEAKER_SOURCE_MAP = {
@@ -123,6 +134,7 @@ export const DEBUG_STAGE_MAP = {
   silence: 'silence',
   queue: 'queue',
   toggle: 'toggle',
+  screenChange: 'screen_change',
 };
 
 export const DEBUG_VERDICT_MAP = { pass: 'pass', skip: 'skip', fail: 'fail', info: 'info' };
