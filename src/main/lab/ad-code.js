@@ -9,6 +9,7 @@ const AD_LABEL_BY_CLASS_MAP = {
   [NARRATION_CLASS_MAP.silenceBased]: '무발화 기반',
   [NARRATION_CLASS_MAP.speakerIdentity]: '화자 식별',
   [NARRATION_CLASS_MAP.userCommand]: '질문 답',
+  [NARRATION_CLASS_MAP.screenChange]: '화면 변화',
 };
 
 // 재생 분류가 없는 옛 기록만 해설 유형으로 분류를 찾는다. 시각 묘사는 유형만으로 경로(척도·무발화·사진 단독)를 알 수 없어 넣지 않는다.
@@ -18,6 +19,7 @@ const CLASS_BY_TYPE_MAP = {
   [NARRATION_TYPE_MAP.interpretation]: NARRATION_CLASS_MAP.speechBased,
   [NARRATION_TYPE_MAP.speakerIdentity]: NARRATION_CLASS_MAP.speakerIdentity,
   [NARRATION_TYPE_MAP.userCommand]: NARRATION_CLASS_MAP.userCommand,
+  [NARRATION_TYPE_MAP.screenChange]: NARRATION_CLASS_MAP.screenChange,
 };
 
 function resolveAdClass({ narrationClass = null, type = null }) {
