@@ -1642,10 +1642,13 @@ async function showArchiveMeeting({ id }) {
   $('archiveDetailTitle').focus();
 }
 
-// 개발자 모드: 로고를 2초 안에 5번 누르면 이번 회의의 파이프라인 흐름 창(단계별 통과/미통과)을 연다.
+// 개발자 모드: 로고를 2초 안에 5번 누르면 이번 회의의 파이프라인 흐름 창(단계별 통과/미통과)을 열고,
+// 설정 패널에 개발자 진단 영역(캡션 파이프라인·화면 글자 읽기·캡처 상태)을 보인다. 앱을 다시 켜면 다시 숨는다.
 const logoTapCounter = createLogoTapCounter();
 $('brandLogo').addEventListener('click', () => {
-  if (logoTapCounter.tap()) window.seeon.openDevFlow().catch(() => {});
+  if (!logoTapCounter.tap()) return;
+  $('devSettingsSection').hidden = false;
+  window.seeon.openDevFlow().catch(() => {});
 });
 
 $('archiveBtn').addEventListener('click', () => {

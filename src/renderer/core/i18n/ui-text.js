@@ -106,6 +106,7 @@ export const UI_TEXT_MAP = {
     'shortcut.macControl': '맥도 Control 키',
 
     'settings.title': '사용자 설정',
+    'settings.devSectionTitle': '개발자 진단',
     'settings.captionPipeline': '캡션 파이프라인',
     'settings.featureGroupAriaLabel': '기능 켜기·끄기',
     'settings.captionLanguage': '캡션 언어',
@@ -335,6 +336,7 @@ export const UI_TEXT_MAP = {
     'shortcut.macControl': 'Control key on Mac too',
 
     'settings.title': 'Settings',
+    'settings.devSectionTitle': 'Developer diagnostics',
     'settings.captionPipeline': 'Caption pipeline',
     'settings.featureGroupAriaLabel': 'Turn features on or off',
     'settings.captionLanguage': 'Caption language',
