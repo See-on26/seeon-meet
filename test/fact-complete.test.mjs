@@ -186,13 +186,16 @@ test('범위 끝: 상한에서 잘린 지시·수치 칸은 숫자에 붙은 "�
   }
 });
 
-test('범위 끝: 값→의미 해석틀은 뒤에 조사가 붙어("…부터를 의미") 범위 끝을 남기지 않는다 — 끈 것과 같다', () => {
+test('범위 끝: 값→의미 해석틀은 넘치면 앞 꾸밈말을 버리므로 "…부터를 의미"처럼 범위 시작으로 끝나지 않는다', () => {
+  // 해석틀은 뒤에 "를 의미"가 붙는다. 끝에서 자르면 "…2019년부터를 의미"가 되므로 앞을 버리고 끝 명사를 남긴다.
   const meaning = (contentSwitch) => assembleNarration({
     narrationType: 'interpretation', subKind: 'value_to_meaning', contentSwitch,
     rawSlotMap: { value: '73%', frame: 'A사 기업가치 성장률 작년 대비 2019년부터 연평균' },
   }).text;
-  assert.ok(!meaning(ON).includes('부터'), meaning(ON));
-  assert.equal(meaning(ON), meaning({ isFactCompleteEnabled: false, isTimeMarkEnabled: false, isScreenValueFirstEnabled: false, isScaleValueFirstEnabled: false }));
+  for (const contentSwitch of [ON, { isFactCompleteEnabled: false, isTimeMarkEnabled: false, isScreenValueFirstEnabled: false, isScaleValueFirstEnabled: false }]) {
+    assert.doesNotMatch(meaning(contentSwitch), /부터를 의미/, meaning(contentSwitch));
+    assert.match(meaning(contentSwitch), /연평균을 의미$/, meaning(contentSwitch));
+  }
 });
 
 test('지시 프롬프트: 켜면 fact 칸과 가르는 사실 규칙을 안내하고, 형식 예시의 caption·fact 는 seen 낱말로만 쓴다', () => {
