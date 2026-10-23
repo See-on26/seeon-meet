@@ -47,6 +47,7 @@ import { MicQuestionController, MIC_PHASE_MAP } from '../core/command/mic-questi
 import { CaptionNarrator } from '../core/audio-renderer/caption-narrator.js';
 import { NarrationMixer } from '../core/audio-renderer/narration-mixer.js';
 import { buildMeetReloadNotice } from '../core/ui/meet-reload-notice.js';
+import { describeGpuTunnelStatus } from '../core/ui/gpu-tunnel-label.js';
 import { buildSlideTransitionNotice } from '../core/ui/slide-transition-notice.js';
 import { resolveAdCardTag } from '../core/ui/ad-card-tag.js';
 import {
@@ -1515,6 +1516,7 @@ function applyCaptionLanguageToUi({ language }) {
   renderSlideTextBackendOptions();
   buildQuestionPresetChips();
   buildQuestionPresetEditor();
+  rerenderGpuTunnelStatus();
 }
 
 // 선택 상자는 스크린리더가 바뀐 값을 읽으므로 화면 알림만 띄운다.
@@ -1674,8 +1676,16 @@ window.seeon.onMeetReloaded(({ reason, target }) => {
 });
 
 // GPU 서버 터널 상태: 처음 한 번 물어 오고, 이후에는 main 이 바뀔 때마다 알려 준다.
-function renderGpuTunnelStatus({ label }) {
-  $('stGpuTunnel').textContent = label;
+// 캡션 언어가 바뀌면 마지막으로 받은 상태를 그 언어로 다시 쓴다.
+let lastGpuTunnelStatus = null;
+
+function renderGpuTunnelStatus(snapshot) {
+  lastGpuTunnelStatus = snapshot;
+  $('stGpuTunnel').textContent = describeGpuTunnelStatus({ ...snapshot, t }) || '–';
+}
+
+function rerenderGpuTunnelStatus() {
+  if (lastGpuTunnelStatus) renderGpuTunnelStatus(lastGpuTunnelStatus);
 }
 window.seeon.getGpuTunnelStatus().then(renderGpuTunnelStatus).catch(() => {});
 window.seeon.onGpuTunnelStatus(renderGpuTunnelStatus);

@@ -164,13 +164,14 @@
     #settingsPanel h4 { margin: 0 0 10px; font-size: 13px; font-weight: 700; }
     .set-row { display: flex; align-items: center; justify-content: space-between; gap: 10px; padding: 7px 0; }
     .set-row + .set-row { border-top: 1px solid var(--hairline); }
-    .set-row .label { font-size: 13px; color: var(--ink-80); }
+    .set-row .label { min-width: 0; font-size: 13px; color: var(--ink-80); }
     .set-row .value { font-size: 12px; color: var(--ink-48); }
     .set-toggle { padding: 4px 12px; border-radius: 999px; border: 1px solid var(--hairline-strong); background: var(--parchment); color: var(--ink-80); font-size: 12px; font-weight: 600; }
     .set-toggle.on { background: var(--ink); border-color: var(--ink); color: #fff; }
     .set-toggle[aria-disabled="true"] { opacity: 0.45; cursor: not-allowed; }
     #featureToggleList + .set-row { border-top: 1px solid var(--hairline); }
-    .set-select { padding: 4px 8px; border-radius: 8px; border: 1px solid var(--hairline-strong); background: var(--parchment); color: var(--ink-80); font: inherit; font-size: 12px; font-weight: 600; }
+    /* 선택지 이름이 길어도(영어 등) 패널 밖으로 나가지 않게 폭을 줄 안에 묶고, 넘치는 글자는 말줄임으로 자른다. */
+    .set-select { flex: 0 1 auto; min-width: 0; max-width: 60%; text-overflow: ellipsis; padding: 4px 8px; border-radius: 8px; border: 1px solid var(--hairline-strong); background: var(--parchment); color: var(--ink-80); font: inherit; font-size: 12px; font-weight: 600; }
     .set-select[aria-disabled="true"] { opacity: 0.45; cursor: not-allowed; }
     #captionLanguageNote, #slideTextBackendNote, #questionPresetNote { margin-top: 0; }
     #questionPresetSection { border-top: 1px solid var(--hairline); margin-top: 7px; }

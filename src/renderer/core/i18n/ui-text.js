@@ -129,6 +129,20 @@ export const UI_TEXT_MAP = {
     'status.playingVideoOnly': '재생 중 (video만! audio track 없음)',
     'status.captureFailed': '실패: {message}',
 
+    'gpuTunnel.off': '꺼짐',
+    'gpuTunnel.noKey': '키 없음',
+    'gpuTunnel.external': '외부 터널',
+    'gpuTunnel.connecting': '연결 중',
+    'gpuTunnel.connected': '연결됨',
+    'gpuTunnel.reconnecting': '다시 연결 중',
+    'gpuTunnel.withReason': '{status} ({reason})',
+    'gpuTunnel.reason.hostKeyMismatch': '서버 지문 불일치',
+    'gpuTunnel.reason.authFailed': '인증 실패',
+    'gpuTunnel.reason.keyInvalid': '키 형식 오류',
+    'gpuTunnel.reason.timeout': '응답 없음',
+    'gpuTunnel.reason.network': '네트워크 오류',
+    'gpuTunnel.reason.disconnected': '연결 끊김',
+
     'prep.collecting': '회의 소리를 모으는 중입니다',
     'prep.remaining': '{seconds}초 후 시작됩니다',
 
@@ -344,6 +358,20 @@ export const UI_TEXT_MAP = {
     'status.playingVideoOnly': 'Playing (video only! no audio track)',
     'status.captureFailed': 'Failed: {message}',
 
+    'gpuTunnel.off': 'Off',
+    'gpuTunnel.noKey': 'No key',
+    'gpuTunnel.external': 'External tunnel',
+    'gpuTunnel.connecting': 'Connecting',
+    'gpuTunnel.connected': 'Connected',
+    'gpuTunnel.reconnecting': 'Reconnecting',
+    'gpuTunnel.withReason': '{status} ({reason})',
+    'gpuTunnel.reason.hostKeyMismatch': 'server fingerprint mismatch',
+    'gpuTunnel.reason.authFailed': 'authentication failed',
+    'gpuTunnel.reason.keyInvalid': 'invalid key format',
+    'gpuTunnel.reason.timeout': 'no response',
+    'gpuTunnel.reason.network': 'network error',
+    'gpuTunnel.reason.disconnected': 'disconnected',
+
     'prep.collecting': 'Collecting meeting audio',
     'prep.remaining': 'Starting in {seconds} seconds',
 
@@ -366,7 +394,7 @@ export const UI_TEXT_MAP = {
     'captionLanguage.nonDefault': 'Caption language: {language}',
     'captionLanguage.startNotice': '{notice}. You can change it in settings after stopping capture.',
 
-    'slideText.vlm': 'VLM (screen understanding model)',
+    'slideText.vlm': 'VLM (vision model)',
     'slideText.ocr': 'OCR (text recognition)',
     'slideText.locked': 'The screen text reading method can only be changed before you start meeting capture',
     'slideText.changed': 'Screen text reading: {backend} — applies from the next meeting capture',

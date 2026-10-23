@@ -1,6 +1,7 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
+import { createRequire } from 'node:module';
 import {
   UI_TEXT_MAP, DEFAULT_UI_LANGUAGE, createUiText, defaultUiText, applyUiTextToDom,
 } from '../src/renderer/core/i18n/ui-text.js';
@@ -16,6 +17,7 @@ import {
   SLIDE_TEXT_BACKEND_OPTION_LIST, SLIDE_TEXT_BACKEND_LABEL_MAP, readSlideTextBackendLabel,
 } from '../src/renderer/core/mode/slide-text-backend-store.js';
 import { buildMeetReloadNotice } from '../src/renderer/core/ui/meet-reload-notice.js';
+import { describeGpuTunnelStatus } from '../src/renderer/core/ui/gpu-tunnel-label.js';
 import { buildSlideTransitionNotice } from '../src/renderer/core/ui/slide-transition-notice.js';
 import { formatMeetingLabel } from '../src/renderer/core/archive/meeting-label.js';
 import { MicQuestionController } from '../src/renderer/core/command/mic-question-controller.js';
@@ -288,7 +290,7 @@ test('main.js 는 캡션 언어로 번역기를 만들어 시작할 때와 언�
   for (const call of [
     'document.documentElement.lang = language', 'applyUiTextToDom', 'setToggleUi', 'setPauseUi', 'syncToggleAvailability',
     'renderModeButtons', 'buildFeatureToggleList', 'renderSlideTextBackendOptions', 'buildQuestionPresetChips',
-    'buildQuestionPresetEditor',
+    'buildQuestionPresetEditor', 'rerenderGpuTunnelStatus',
   ]) assert.ok(applyBody.includes(call), call);
 });
 
@@ -330,10 +332,30 @@ test('기본 질문 프리셋은 화면 언어의 이름으로 보이고, 한국
 });
 
 test('화면 글자 읽기 선택지 이름을 영어로도 만들고, 한국어 이름표는 그대로다', () => {
-  assert.equal(readSlideTextBackendLabel({ backend: 'vlm', t: tEn }), 'VLM (screen understanding model)');
+  assert.equal(readSlideTextBackendLabel({ backend: 'vlm', t: tEn }), 'VLM (vision model)', '설정 패널 한 줄에 들어가는 길이');
   assert.equal(readSlideTextBackendLabel({ backend: 'ocr', t: tEn }), 'OCR (text recognition)');
   assert.deepEqual(SLIDE_TEXT_BACKEND_LABEL_MAP, { vlm: 'VLM(화면 이해 모델)', ocr: 'OCR(글자 인식)' });
   for (const backend of SLIDE_TEXT_BACKEND_OPTION_LIST) assert.ok(readSlideTextBackendLabel({ backend, t: tEn }), backend);
+});
+
+test('GPU 서버 상태를 화면 언어로 쓰고, 한국어는 main 의 상태 문구와 같다', () => {
+  const { describeTunnelStatus, TUNNEL_STATUS_MAP, TUNNEL_REASON_MAP } = createRequire(import.meta.url)('../src/main/gpu-tunnel/tunnel-status.js');
+  const snapshotList = [
+    ...Object.values(TUNNEL_STATUS_MAP).map((status) => ({ status, reason: null })),
+    ...Object.values(TUNNEL_REASON_MAP).map((reason) => ({ status: TUNNEL_STATUS_MAP.reconnecting, reason })),
+  ];
+  for (const snapshot of snapshotList) {
+    const label = describeTunnelStatus(snapshot);
+    assert.equal(describeGpuTunnelStatus({ ...snapshot, label, t: tKo }), label, JSON.stringify(snapshot));
+    const english = describeGpuTunnelStatus({ ...snapshot, label, t: tEn });
+    assert.ok(english && !HANGUL_PATTERN.test(english), `${JSON.stringify(snapshot)} → ${english}`);
+  }
+  assert.equal(describeGpuTunnelStatus({ status: TUNNEL_STATUS_MAP.external, label: '외부 터널', t: tEn }), 'External tunnel');
+  assert.equal(describeGpuTunnelStatus({
+    status: TUNNEL_STATUS_MAP.reconnecting, reason: TUNNEL_REASON_MAP.authFailed, label: '다시 연결 중 (인증 실패)', t: tEn,
+  }), 'Reconnecting (authentication failed)');
+  assert.equal(describeGpuTunnelStatus({ status: 'unknown_status', label: '새 상태', t: tEn }), '새 상태',
+    '모르는 상태 코드면 main 이 만든 문구를 그대로 쓴다');
 });
 
 test('Meet 새로고침·화면 전환 안내를 영어로도 만든다', () => {
