@@ -14,6 +14,7 @@ export const FLOW_TYPE_OPTION_LIST = [
   { key: 'silence', label: '무발화 기반' },
   { key: 'user_command', label: '질문 답' },
   { key: 'speaker_identity', label: '화자 식별' },
+  { key: 'screen_change', label: '화면 변화' },
   { key: 'unknown', label: '기타' },
 ];
 

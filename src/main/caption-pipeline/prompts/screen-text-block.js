@@ -6,12 +6,27 @@ const { GROUNDING_NONE_TOKEN } = require('../agents/shared/caption-parser');
 const SCREEN_TEXT_MAX_CHARS = 600;
 
 // 덩어리를 받는 해설. 둘째 안내 줄만 다르다 — 수치는 값·항목 이름을, 척도는 대상·비교 대상 이름과 적힌 크기 값을 확인한다.
-const SCREEN_TEXT_USAGE_MAP = { value: 'value', scale: 'scale' };
+// scaleValue: 척도 값 먼저(켜짐)의 척도 해설 — 통계 패널·툴팁·범례에 적힌 값을 확인하게 한다.
+const SCREEN_TEXT_USAGE_MAP = { value: 'value', scale: 'scale', scaleValue: 'scale_value' };
 const SCREEN_TEXT_INTRO_LINE = '참고: 아래는 같은 화면을 글자 인식기(OCR)로 읽은 글자다. 위에서 아래 순서이고, 같은 높이에 있는 다른 칸의 글자가 한 줄로 이어졌을 수 있다.';
 const SCREEN_TEXT_USAGE_LINE_MAP = {
   [SCREEN_TEXT_USAGE_MAP.value]: '  값·항목 이름의 철자는 여기서 확인하되, 어느 값이 어느 항목의 것인지는 반드시 이미지에서 확인한다. 이미지와 다르면 이미지를 따른다.',
   [SCREEN_TEXT_USAGE_MAP.scale]: '  대상·비교 대상의 이름과 화면에 적힌 크기·길이 값은 여기서 확인하되, 어느 글자가 어느 대상의 것인지는 반드시 이미지에서 확인한다. 이미지와 다르면 이미지를 따른다.',
+  [SCREEN_TEXT_USAGE_MAP.scaleValue]: '  대상·비교 대상의 이름과 화면에 글자로 적힌 값(통계 패널·툴팁·범례·데이터 라벨·눈금)은 여기서 확인하되, 어느 글자가 어느 대상의 것인지는 반드시 이미지에서 확인한다. 이미지와 다르면 이미지를 따른다.',
 };
+// 척도 해설이 먼저 읽을 통계 줄(합계·평균·최댓값 등). 발화 낱말이 없어도 상한 안에 먼저 넣는다.
+// 최대·최고·최소·최저는 뒤에 다른 낱말이 붙으면("최고경영자", "최대한", "최소화") 통계가 아니고,
+// 영어 max·min 은 뒤에 수나 ":"가 올 때만 통계다("5 min"의 min 은 분이다).
+const STAT_KEYWORD_PATTERN = new RegExp([
+  '평균|합계|총계|총합|총액|누적|중앙값',
+  '(?:최대|최고|최소|최저)(?:값|치|점|가)?(?![가-힣])',
+  '\\b(?:max|min)\\b\\s*[:=]?\\s*[-+]?\\d',
+  '\\b(?:avg|average|mean|total|sum|median)\\b',
+].join('|'), 'i');
+
+function isStatLine(text) {
+  return STAT_KEYWORD_PATTERN.test(String(text || ''));
+}
 const QUOTE_FENCE = '"""';
 
 const HANGUL_PATTERN = /[가-힣]/;
@@ -97,11 +112,12 @@ function toTrimmedTextList(lineList) {
 
 // 상한 안에서 ① 발화 낱말·숫자가 든 줄 → ② 숫자가 있는 줄 → ③ 나머지 순으로 고르고, 고른 줄은 원래의 위→아래 순서로 돌려준다.
 // 위에서부터 자르면 글자 많은 화면 아래쪽에 있는 말한 대상의 줄이 빠진다.
-function selectScreenTextLineList({ lineList, keywordSourceList = [], maxChars = SCREEN_TEXT_MAX_CHARS }) {
+// isPriorityLine: 발화 낱말이 없어도 ①로 올릴 줄(발화의 어림 값에 가까운 수가 든 줄 등).
+function selectScreenTextLineList({ lineList, keywordSourceList = [], maxChars = SCREEN_TEXT_MAX_CHARS, isPriorityLine = null }) {
   const textList = toTrimmedTextList(lineList);
   const { wordList, numberCoreList } = extractKeywordList(keywordSourceList);
   const readTier = (text) => {
-    if (isKeywordLine({ text, wordList, numberCoreList })) return 0;
+    if (isKeywordLine({ text, wordList, numberCoreList }) || isPriorityLine?.(text)) return 0;
     return DIGIT_PATTERN.test(text) ? 1 : 2;
   };
   const tierList = textList.map(readTier);
@@ -120,8 +136,8 @@ function selectScreenTextLineList({ lineList, keywordSourceList = [], maxChars =
 // isClaimToValue: 변화·비교(claim_to_value)이면 숫자 줄이 있을 때 "수치 없음" 거절을 막는 문장을 붙인다.
 // 값→의미·척도에는 붙이지 않고, 말한 수가 적힌 줄을 짚어 주지도 않는다(줄이 섞이면 엉뚱한 줄을 짚는다).
 function buildScreenTextBlock({ lineList, keywordSourceList = [], isClaimToValue = false,
-  usage = SCREEN_TEXT_USAGE_MAP.value, maxChars = SCREEN_TEXT_MAX_CHARS }) {
-  const selectedList = selectScreenTextLineList({ lineList, keywordSourceList, maxChars });
+  usage = SCREEN_TEXT_USAGE_MAP.value, maxChars = SCREEN_TEXT_MAX_CHARS, isPriorityLine = null }) {
+  const selectedList = selectScreenTextLineList({ lineList, keywordSourceList, maxChars, isPriorityLine });
   if (!selectedList.length) return { text: '', lineCount: 0, charCount: 0, numberLineCount: 0 };
   const numberLineCount = selectedList.filter((text) => DIGIT_PATTERN.test(text)).length;
   const blockLineList = [
@@ -141,5 +157,5 @@ function buildScreenTextBlock({ lineList, keywordSourceList = [], isClaimToValue
 }
 
 module.exports = {
-  buildScreenTextBlock, selectScreenTextLineList, extractKeywordList, SCREEN_TEXT_MAX_CHARS, SCREEN_TEXT_USAGE_MAP,
+  buildScreenTextBlock, selectScreenTextLineList, extractKeywordList, isStatLine, SCREEN_TEXT_MAX_CHARS, SCREEN_TEXT_USAGE_MAP,
 };

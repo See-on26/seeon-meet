@@ -105,9 +105,17 @@ test('짝짓기: 영어 캡션도 같은 규칙으로 짝짓는다', () => {
 });
 
 test('전체 예산: 조립한 해설이 어절 예산을 넘으면 되풀이 낱말 → 대상 앞 꾸밈말(끝 2어절은 남김) → 값 뒤 항목 순으로 줄인다', () => {
+  // 시점 표기 지키기를 끄면 대상 앞 시점("올해 상반기")도 꾸밈말로 뺀다. 켠 동작은 time-mark.test.mjs 가 본다.
   assert.equal(
-    claim({ target: '올해 상반기 신규 가입자', value: '서울 1,200명, 부산 800명, 대구 500명', maxWordCount: 6 }),
+    claim({ target: '올해 상반기 신규 가입자', value: '서울 1,200명, 부산 800명, 대구 500명', maxWordCount: 6,
+      contentSwitch: { isTimeMarkEnabled: false } }),
     '신규 가입자, 서울 1,200명, 부산 800명',
+  );
+  assert.equal(
+    claim({ target: '올해 상반기 신규 가입자', value: '서울 1,200명, 부산 800명, 대구 500명', maxWordCount: 6,
+      contentSwitch: { isTimeMarkEnabled: true } }),
+    '올해 상반기 신규 가입자, 서울 1,200명',
+    '켜면(기본) 시점을 남기고 값 뒤 항목을 뺀다',
   );
   assert.equal(
     claim({ target: '올해 상반기 신규 가입자', value: '서울 1,200명, 부산 800명, 대구 500명' }),

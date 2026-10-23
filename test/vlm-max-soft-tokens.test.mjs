@@ -86,3 +86,15 @@ test('요청: 설정에 값이 있으면 실제로 보내는 몸통에 들어가
   })));
   assert.equal('mm_processor_kwargs' in JSON.parse(bodyList[1]), false);
 });
+
+// 발화 ROI 는 해설 요청 하나에 [화면 전체, 확대] 두 장을 넣는다. 이미지 토큰 상한은 요청 단위라 두 장에 함께 걸린다.
+test('몸통: 두 장이면 글 앞에 [첫째, 둘째] 순서로 넣고, 상한 칸은 한 번만 넣는다', () => {
+  const zoomBuffer = Buffer.from('zoom-bytes');
+  const body = buildVlmRequestBody({ jpegBufferList: [jpegBuffer, zoomBuffer], vlmModel: 'm', prompt: 'p', maxSoftTokens: 560 });
+  assert.deepEqual(body.mm_processor_kwargs, { max_soft_tokens: 560 });
+  assert.deepEqual(body.messages[0].content.map((block) => block.type), ['image_url', 'image_url', 'text']);
+  assert.equal(body.messages[0].content[0].image_url.url, imageUrl);
+  assert.equal(body.messages[0].content[1].image_url.url, `data:image/jpeg;base64,${zoomBuffer.toString('base64')}`);
+  const withoutLimit = buildVlmRequestBody({ jpegBufferList: [jpegBuffer, zoomBuffer], vlmModel: 'm', prompt: 'p' });
+  assert.equal('mm_processor_kwargs' in withoutLimit, false);
+});

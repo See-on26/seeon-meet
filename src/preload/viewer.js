@@ -55,9 +55,22 @@ contextBridge.exposeInMainWorld('seeon', {
   requestSlideText({ slideLabel, buffer }) {
     return ipcRenderer.invoke('pipeline-slide-text', { slideLabel, buffer: new Uint8Array(buffer) });
   },
-  sendPipelineDeixis({ ts, buffer, fullBuffer = null, utterance, recentTranscript, beforeTranscript = '', afterTranscript = '', hasPointingRegion = false, pointingOrderHint = '', slideLabel = null, wordBudgetMap = null, eventVideoTimeMs = null, triggerCandidateList = [] }) {
+  sendPipelineDeixis({ ts, buffer, fullBuffer = null, utterance, recentTranscript, beforeTranscript = '', afterTranscript = '', hasPointingRegion = false, pointingOrderHint = '', slideLabel = null, wordBudgetMap = null, eventVideoTimeMs = null, triggerCandidateList = [], pointingRect = null, frameTs = null }) {
     return ipcRenderer.invoke('pipeline-deixis',
-      { ts, buffer: new Uint8Array(buffer), fullBuffer: fullBuffer ? new Uint8Array(fullBuffer) : null, utterance, recentTranscript, beforeTranscript, afterTranscript, hasPointingRegion, pointingOrderHint, slideLabel, wordBudgetMap, eventVideoTimeMs, triggerCandidateList });
+      { ts, buffer: new Uint8Array(buffer), fullBuffer: fullBuffer ? new Uint8Array(fullBuffer) : null, utterance, recentTranscript, beforeTranscript, afterTranscript, hasPointingRegion, pointingOrderHint, slideLabel, wordBudgetMap, eventVideoTimeMs, triggerCandidateList, pointingRect, frameTs });
+  },
+  // 같은 슬라이드 안 화면 변화 사건. buffer 는 깨끗한 전체 화면(OCR·기준용), vlmBuffer 는 VLM 에 보낼 그림(테두리·잘라 냄)이다.
+  sendScreenChange({ ts, slideLabel, buffer, vlmBuffer = null, regionNorm = null, changedRatio = null, cellCount = null,
+    firstSeenTs = null, firstSeenVideoTimeMs = null, recentTranscript = '', wordBudget = null, imageMode = null }) {
+    return ipcRenderer.invoke('pipeline-screen-change', {
+      ts, slideLabel, buffer: new Uint8Array(buffer), vlmBuffer: vlmBuffer ? new Uint8Array(vlmBuffer) : null,
+      regionNorm, changedRatio, cellCount, firstSeenTs, firstSeenVideoTimeMs, recentTranscript, wordBudget, imageMode,
+    });
+  },
+  sendScreenChangeBaseline({ ts, slideLabel, buffer, isSlideStart = false, slideStartTs = null, eventVideoTimeMs = null }) {
+    return ipcRenderer.invoke('pipeline-screen-change-baseline', {
+      ts, slideLabel, buffer: new Uint8Array(buffer), isSlideStart, slideStartTs, eventVideoTimeMs,
+    });
   },
   sendPipelineCommand({ ts, buffer, command = null, questionText = null, questionLabel = '', recentTranscript = '', wordBudget = null, eventVideoTimeMs = null }) {
     return ipcRenderer.invoke('pipeline-command',

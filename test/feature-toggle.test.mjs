@@ -114,6 +114,8 @@ test('꺼진 기능을 재생 분류로 바꾼다 — 요약은 해설이 아니
   assert.equal(store.isClassOn('speaker_identity'), false);
   assert.equal(store.isClassOn('deixis'), true);
   assert.equal(store.isClassOn(undefined), true);
+  // 화면 변화 해설은 토글 목록에 없어 평가 설정(전환·화자·요약 끔)에서도 env 대로 켜진다.
+  assert.equal(store.isClassOn('screen_change'), true);
 });
 
 test('Ctrl+Q·Ctrl+W 는 main 에서도 렌더러와 같은 기능 토글로 읽는다', () => {

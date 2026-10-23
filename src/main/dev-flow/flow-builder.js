@@ -14,6 +14,7 @@ const FLOW_TYPE_MAP = {
   silence: 'silence',
   userCommand: 'user_command',
   speakerIdentity: 'speaker_identity',
+  screenChange: 'screen_change',
   unknown: 'unknown',
 };
 
@@ -25,6 +26,7 @@ const FLOW_TYPE_LABEL_MAP = {
   [FLOW_TYPE_MAP.silence]: '무발화 기반',
   [FLOW_TYPE_MAP.userCommand]: '질문 답',
   [FLOW_TYPE_MAP.speakerIdentity]: '화자 식별',
+  [FLOW_TYPE_MAP.screenChange]: '화면 변화',
   [FLOW_TYPE_MAP.unknown]: '기타',
 };
 
@@ -37,6 +39,7 @@ const AGENT_LABEL_MAP = {
   [FLOW_TYPE_MAP.silence]: '무발화 기반 설명 에이전트',
   [FLOW_TYPE_MAP.userCommand]: '심화 질의응답 에이전트',
   [FLOW_TYPE_MAP.speakerIdentity]: '화자 식별 에이전트',
+  [FLOW_TYPE_MAP.screenChange]: '화면 변화 설명 에이전트',
   [FLOW_TYPE_MAP.unknown]: 'VLM',
 };
 // 사진 단독 화면의 묘사는 시각 묘사 에이전트가 만들지만 재생 분류가 페이지 전환이라 페이지 전환 설명 에이전트에 딸린 것으로 보인다.
@@ -171,7 +174,8 @@ function classifyEntry(entry) {
   if (stage === 'asr') return ENTRY_ROLE_MAP.asr;
   if (SESSION_STAGE_LIST.includes(stage)) return ENTRY_ROLE_MAP.session;
   if (stage === 'toggle' && verdict === 'info') return ENTRY_ROLE_MAP.session;
-  if ((stage === 'value_check' || stage === 'question') && !narrationType) return ENTRY_ROLE_MAP.session;
+  // 화면 변화 기준 화면·감지기 거름 집계는 사건이 아니라 머리 영역에 둔다(사건 기록은 화면 변화 유형이 붙는다).
+  if ((stage === 'value_check' || stage === 'question' || stage === 'screen_change') && !narrationType) return ENTRY_ROLE_MAP.session;
   if (stage === 'slide') {
     if (!narrationType) return ENTRY_ROLE_MAP.session;
     if (SLIDE_TOPIC_PATTERN.test(reason || '')) return ENTRY_ROLE_MAP.core;
@@ -370,6 +374,8 @@ function resolveTypeKey({ group, caption }) {
     || entryList.filter((entry) => entry.stage === 'router' && entry.verdict === 'pass' && isUtteranceTyped(entry)).at(-1)
     || entryList.filter(isUtteranceTyped).at(-1);
   if (typed) return typed.narrationType;
+  // 늦은 근거 재시도는 원래 에이전트 기록(위)이 유형을 정하고, 같은 슬라이드 변화 해설만 화면 변화 흐름이다.
+  if (hasStage(group, ['screen_change'])) return FLOW_TYPE_MAP.screenChange;
   if (hasStage(group, ['screen_dependency', 'budget', 'router', 'judge'])) return FLOW_TYPE_MAP.deixis;
   const captionType = normalizeNarrationType(caption?.source);
   return FLOW_TYPE_LABEL_MAP[captionType] ? captionType : FLOW_TYPE_MAP.unknown;
@@ -425,7 +431,7 @@ function buildStepListForEntry({ entry, typeKey }) {
   switch (entry.stage) {
     case 'silence': return buildSilenceStepList({ entry });
     case 'slide': return [buildSlideStep({ entry })];
-    case 'vlm': case 'speaker': return [buildAgentStep({ entry, typeKey })];
+    case 'vlm': case 'speaker': case 'screen_change': return [buildAgentStep({ entry, typeKey })];
     case 'screen_dependency':
       return [createStep({ entry, stepKind: STEP_KIND_MAP.trigger, label: STAGE_LABEL_MAP.screen_dependency, summary: readField(entry.detail, '근거') ? `근거="${readField(entry.detail, '근거')}"` : null })];
     case 'budget': {

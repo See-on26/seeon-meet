@@ -38,14 +38,14 @@ test('경로를 알 수 없는 시각 묘사와 모르는 값은 기본 카드�
   assert.deepEqual(resolveAdCardTag({}), DEFAULT_AD_CARD_TAG);
 });
 
-test('재생 분류 6종의 카드 라벨은 아키텍처 이름이고 영어 라벨도 있다', () => {
+test('재생 분류 7종의 카드 라벨은 아키텍처 이름이고 영어 라벨도 있다', () => {
   const labelOf = (language, narrationClass) => UI_TEXT_MAP[language][resolveAdCardTag({ narrationClass }).labelKey];
   const classList = Object.values(NARRATION_CLASS_MAP);
   assert.deepEqual(classList.map((narrationClass) => labelOf('ko', narrationClass)), [
-    '질문 답', '페이지 전환', '지시 대상', '발화 기반', '무발화 기반', '화자 식별',
+    '질문 답', '페이지 전환', '지시 대상', '발화 기반', '무발화 기반', '화자 식별', '화면 변화',
   ]);
   assert.deepEqual(classList.map((narrationClass) => labelOf('en', narrationClass)), [
-    'Answer', 'Page change', 'Pointed item', 'Speech-based', 'Silence-based', 'Speaker',
+    'Answer', 'Page change', 'Pointed item', 'Speech-based', 'Silence-based', 'Speaker', 'Screen change',
   ]);
 });
 

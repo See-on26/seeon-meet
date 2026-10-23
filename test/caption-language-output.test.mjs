@@ -110,7 +110,9 @@ test('칸 출력 형식: 영어는 영어 칸 설명·단어 수·NONE 꼴, 한�
   assert.match(english, /"seen": what is actually visible/);
   assert.match(english, /"caption": the narration read to the listener/);
   assert.match(english, /"seen": .* — 0–38 words/);
-  assert.match(english, /"caption": .* — 2–14 words/);
+  // 식별 사실 칸이 켜져 있으면(기본) caption 은 2~5어절로 안내하고 fact(0~3어절)를 따로 받는다.
+  assert.match(english, /"caption": .* — 2–10 words/);
+  assert.match(english, /"fact": .* — 0–6 words/);
   assert.match(english, /NONE: \(reason\)/);
   assert.match(english, /Chinese characters/);
   assert.doesNotMatch(english, /조사|관형형|어절/);
@@ -327,7 +329,7 @@ test('에이전트: 캡션 언어를 읽어 프롬프트·조립에 넘긴다(�
   let promptList = mockVlm(['{"seen":"two-year sales trend table","caption":"the two-year sales trend table"}']);
   const deixis = await agentFieldMap[NARRATION_TYPE_MAP.deixis].generate({ jpegBuffer, utterance: '여기 보시면', subKind: DEIXIS_FORM_MAP.simple });
   assert.ok(promptList[0].includes(RULE_MARK));
-  assert.match(promptList[0], /2–14 words/);
+  assert.match(promptList[0], /2–10 words/);
   assert.equal(deixis.text, 'The two-year sales trend table');
 
   promptList = mockVlm(['{"value":"73%","frame":"year-over-year valuation growth rate"}']);

@@ -12,9 +12,10 @@ const { createNarrationHistory } = require('../src/main/caption-pipeline/orchest
 // seen 은 가리킨 곳에 보이는 것을 먼저 옮겨 적게 하는 근거 칸이고 읽히지 않는다.
 const deixis = (subKind, rawSlotMap) => assembleNarration({ narrationType: 'deixis', subKind, rawSlotMap });
 
-test('지시 칸은 단순형·완전형 모두 seen(근거, 읽지 않음) + caption 이고, caption 상한은 예전 칸 합(7·10어절)과 같다', () => {
+// 식별 사실 칸을 켠 단순형(seen·caption·fact)은 fact-complete.test.mjs 가 본다.
+test('식별 사실 칸을 끄면 지시 칸은 단순형·완전형 모두 seen(근거, 읽지 않음) + caption 이고, caption 상한은 예전 칸 합(7·10어절)과 같다', () => {
   for (const [subKind, maxWordCount] of [['simple', 7], ['complete', 10]]) {
-    const slotList = getSlotList({ narrationType: 'deixis', subKind });
+    const slotList = getSlotList({ narrationType: 'deixis', subKind, contentSwitch: { isFactCompleteEnabled: false } });
     assert.deepEqual(slotList.map((slot) => slot.key), ['seen', 'caption'], subKind);
     assert.equal(slotList[0].isDiagnostic, true, subKind);
     assert.equal(slotList[1].minWordCount, 2, subKind);

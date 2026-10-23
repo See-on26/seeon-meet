@@ -15,6 +15,7 @@ const CLASS_BY_TYPE_MAP = {
   [NARRATION_TYPE_MAP.interpretation]: NARRATION_CLASS_MAP.speechBased,
   [NARRATION_TYPE_MAP.userCommand]: NARRATION_CLASS_MAP.userCommand,
   [NARRATION_TYPE_MAP.speakerIdentity]: NARRATION_CLASS_MAP.speakerIdentity,
+  [NARRATION_TYPE_MAP.screenChange]: NARRATION_CLASS_MAP.screenChange,
 };
 
 // 시각 묘사는 같은 에이전트가 세 경로에서 쓰인다: 라우터의 척도(발화 기반),
@@ -34,7 +35,8 @@ function toNarrationClass({ narrationType, origin = NARRATION_ORIGIN_MAP.router 
 }
 
 // AD 카드·내보내기의 코드. 아키텍처 에이전트(=재생 분류)마다 하나다. A 는 자동 AD, Q 는 질문 답(수동 AD)이다.
-// A1~A5 는 결과보고서 생성 Layer 순서(페이지 전환 · 지시 대상 · 발화 기반 · 무발화 기반 · 화자 식별)를 따른다.
+// A1~A5 는 결과보고서 생성 Layer 순서(페이지 전환 · 지시 대상 · 발화 기반 · 무발화 기반 · 화자 식별)를 따르고,
+// A6 은 같은 슬라이드 안 화면 변화 해설이다.
 // 렌더러 core/constants.js 에 같은 사본이 있다(test/contracts-parity.test.mjs).
 const AD_CODE_BY_CLASS_MAP = {
   [NARRATION_CLASS_MAP.pageTransition]: 'A1',
@@ -42,6 +44,7 @@ const AD_CODE_BY_CLASS_MAP = {
   [NARRATION_CLASS_MAP.speechBased]: 'A3',
   [NARRATION_CLASS_MAP.silenceBased]: 'A4',
   [NARRATION_CLASS_MAP.speakerIdentity]: 'A5',
+  [NARRATION_CLASS_MAP.screenChange]: 'A6',
   [NARRATION_CLASS_MAP.userCommand]: 'Q',
 };
 
