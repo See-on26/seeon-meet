@@ -4,11 +4,9 @@ const path = require('path');
 
 const TUNNEL_MODE_MAP = { auto: 'auto', off: 'off' };
 
-const DEFAULT_SSH_HOST = '<서버 주소>';
+// GPU 서버 주소·계정·호스트 키 지문은 저장소에 두지 않고 .env(SEEON_GPU_SSH_HOST·SEEON_GPU_SSH_USER·
+// SEEON_GPU_SSH_HOST_FINGERPRINT)로만 받는다. 하나라도 없으면 터널을 열지 않는다. 포트를 주지 않으면 SSH 기본 포트다.
 const DEFAULT_SSH_PORT = 22;
-const DEFAULT_SSH_USER = '@GPU_USER@';
-// GPU 서버 ED25519 호스트 키 지문. 다르면 중간자일 수 있어 연결하지 않는다.
-const DEFAULT_HOST_FINGERPRINT = '<서버 호스트 키 지문>';
 
 // 설치본은 앱 전용 키를 resources 폴더에 이 이름으로 넣는다.
 const PACKAGED_KEY_FILE_NAME = 'gpu-tunnel-key';
@@ -52,12 +50,17 @@ function readTunnelConfig({
 } = {}) {
   return {
     mode: readTunnelMode(env),
-    host: env.SEEON_GPU_SSH_HOST || DEFAULT_SSH_HOST,
+    host: env.SEEON_GPU_SSH_HOST || null,
     port: readSshPort(env),
-    username: env.SEEON_GPU_SSH_USER || DEFAULT_SSH_USER,
+    username: env.SEEON_GPU_SSH_USER || null,
     keyPath: resolveKeyPath({ env, isPackaged, resourcesPath, fileExists, homeDir }),
-    hostFingerprint: env.SEEON_GPU_SSH_HOST_FINGERPRINT || DEFAULT_HOST_FINGERPRINT,
+    // 서버 호스트 키 지문. 실제 서버 키와 다르면 중간자일 수 있어 연결하지 않는다.
+    hostFingerprint: env.SEEON_GPU_SSH_HOST_FINGERPRINT || null,
   };
+}
+
+function isServerConfigured(tunnelConfig) {
+  return Boolean(tunnelConfig.host && tunnelConfig.username && tunnelConfig.hostFingerprint);
 }
 
 function readLocalPort(url) {
@@ -80,6 +83,5 @@ function buildForwardList({ pipelineConfig }) {
 }
 
 module.exports = {
-  readTunnelConfig, buildForwardList, TUNNEL_MODE_MAP,
-  DEFAULT_SSH_HOST, DEFAULT_SSH_PORT, DEFAULT_SSH_USER, DEFAULT_HOST_FINGERPRINT, PACKAGED_KEY_FILE_NAME,
+  readTunnelConfig, buildForwardList, isServerConfigured, TUNNEL_MODE_MAP, DEFAULT_SSH_PORT, PACKAGED_KEY_FILE_NAME,
 };
