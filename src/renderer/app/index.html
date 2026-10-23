@@ -164,16 +164,19 @@
     #settingsPanel h4 { margin: 0 0 10px; font-size: 13px; font-weight: 700; }
     .set-row { display: flex; align-items: center; justify-content: space-between; gap: 10px; padding: 7px 0; }
     .set-row + .set-row { border-top: 1px solid var(--hairline); }
-    .set-row .label { font-size: 13px; color: var(--ink-80); }
+    .set-row .label { min-width: 0; font-size: 13px; color: var(--ink-80); }
     .set-row .value { font-size: 12px; color: var(--ink-48); }
     .set-toggle { padding: 4px 12px; border-radius: 999px; border: 1px solid var(--hairline-strong); background: var(--parchment); color: var(--ink-80); font-size: 12px; font-weight: 600; }
     .set-toggle.on { background: var(--ink); border-color: var(--ink); color: #fff; }
     .set-toggle[aria-disabled="true"] { opacity: 0.45; cursor: not-allowed; }
     #featureToggleList + .set-row { border-top: 1px solid var(--hairline); }
-    .set-select { padding: 4px 8px; border-radius: 8px; border: 1px solid var(--hairline-strong); background: var(--parchment); color: var(--ink-80); font: inherit; font-size: 12px; font-weight: 600; }
+    /* 선택지 이름이 길어도(영어 등) 패널 밖으로 나가지 않게 폭을 줄 안에 묶고, 넘치는 글자는 말줄임으로 자른다. */
+    .set-select { flex: 0 1 auto; min-width: 0; max-width: 60%; text-overflow: ellipsis; padding: 4px 8px; border-radius: 8px; border: 1px solid var(--hairline-strong); background: var(--parchment); color: var(--ink-80); font: inherit; font-size: 12px; font-weight: 600; }
     .set-select[aria-disabled="true"] { opacity: 0.45; cursor: not-allowed; }
     #captionLanguageNote, #slideTextBackendNote, #questionPresetNote { margin-top: 0; }
     #questionPresetSection { border-top: 1px solid var(--hairline); margin-top: 7px; }
+    #devSettingsSection { border-top: 1px solid var(--hairline-strong); margin-top: 12px; padding-top: 12px; }
+    #devSettingsSection[hidden] { display: none; }
     .set-mini { padding: 3px 9px; border-radius: 8px; border: 1px solid var(--hairline-strong); background: var(--parchment); color: var(--ink-80); font-size: 11px; font-weight: 600; }
     .preset-row { display: flex; align-items: center; gap: 6px; padding: 3px 0; }
     .preset-key { flex: none; width: 44px; font-size: 11px; font-weight: 700; color: var(--ink-48); }
@@ -313,21 +316,12 @@
 
   <div id="settingsPanel" hidden>
     <h4 data-ui-text="settings.title">사용자 설정</h4>
-    <div class="set-row">
-      <span class="label" data-ui-text="settings.captionPipeline">캡션 파이프라인</span>
-      <input type="checkbox" id="pipeChk" checked />
-    </div>
     <div id="featureToggleList" role="group" aria-label="기능 켜기·끄기" data-ui-text-aria-label="settings.featureGroupAriaLabel"></div>
     <div class="set-row">
       <label class="label" for="captionLanguageSelect" data-ui-text="settings.captionLanguage">캡션 언어</label>
       <select id="captionLanguageSelect" class="set-select" aria-describedby="captionLanguageNote"></select>
     </div>
     <div class="set-note" id="captionLanguageNote" data-ui-text="settings.captionLanguageNote">해설·질문 답·요약을 들려줄 언어예요. 회의 말은 한국어·영어를 자동으로 알아들어요. 회의 캡처 중에는 바꿀 수 없어요.</div>
-    <div class="set-row">
-      <label class="label" for="slideTextBackendSelect" data-ui-text="settings.slideTextBackend">화면 글자 읽기</label>
-      <select id="slideTextBackendSelect" class="set-select" aria-describedby="slideTextBackendNote"></select>
-    </div>
-    <div class="set-note" id="slideTextBackendNote" data-ui-text="settings.slideTextBackendNote">OCR 은 글자 인식 서버로 읽고, 응답이 없으면 VLM 으로 읽어요. 회의 캡처 중에는 바꿀 수 없어요.</div>
     <div id="questionPresetSection" role="group" aria-labelledby="questionPresetTitle">
       <div class="set-row">
         <span class="label" id="questionPresetTitle" data-ui-text="settings.questionPresetTitle">질문 프리셋 (Ctrl+1~9)</span>
@@ -336,14 +330,27 @@
       <div id="questionPresetList"></div>
       <div class="set-note" id="questionPresetNote" data-ui-text="settings.questionPresetNote">고친 칸은 바로 저장돼요. 칸을 비우거나 ×로 지우면 뒤 번호가 하나씩 당겨져요. 9개까지 넣을 수 있어요.</div>
     </div>
-    <div class="set-status">
-      <b data-ui-text="status.capture">캡처</b><span id="stCapture">off</span>
-      <b data-ui-text="status.resolution">해상도</b><span id="stRes">–</span>
-      <b data-ui-text="status.narration">화면 해설 내레이션</b><span id="stDelay">–</span>
-      <b data-ui-text="status.buffer">버퍼</b><span id="stBuffer">–</span>
-      <b data-ui-text="status.gpuServer">GPU 서버</b><span id="stGpuTunnel">–</span>
-    </div>
     <div class="set-note" id="modeNote"></div>
+    <!-- 점검용 항목은 개발자 모드(로고 5번)를 열 때만 보인다. 스크린리더 사용자가 설정을 위에서부터 들을 때 고를 것만 듣게 한다. -->
+    <section id="devSettingsSection" role="group" aria-labelledby="devSettingsTitle" hidden>
+      <h4 id="devSettingsTitle" data-ui-text="settings.devSectionTitle">개발자 진단</h4>
+      <div class="set-row">
+        <span class="label" data-ui-text="settings.captionPipeline">캡션 파이프라인</span>
+        <input type="checkbox" id="pipeChk" checked />
+      </div>
+      <div class="set-row">
+        <label class="label" for="slideTextBackendSelect" data-ui-text="settings.slideTextBackend">화면 글자 읽기</label>
+        <select id="slideTextBackendSelect" class="set-select" aria-describedby="slideTextBackendNote"></select>
+      </div>
+      <div class="set-note" id="slideTextBackendNote" data-ui-text="settings.slideTextBackendNote">OCR 은 글자 인식 서버로 읽고, 응답이 없으면 VLM 으로 읽어요. 회의 캡처 중에는 바꿀 수 없어요.</div>
+      <div class="set-status">
+        <b data-ui-text="status.capture">캡처</b><span id="stCapture">off</span>
+        <b data-ui-text="status.resolution">해상도</b><span id="stRes">–</span>
+        <b data-ui-text="status.narration">화면 해설 내레이션</b><span id="stDelay">–</span>
+        <b data-ui-text="status.buffer">버퍼</b><span id="stBuffer">–</span>
+        <b data-ui-text="status.gpuServer">GPU 서버</b><span id="stGpuTunnel">–</span>
+      </div>
+    </section>
   </div>
 
   <div id="prepOverlay" hidden>
