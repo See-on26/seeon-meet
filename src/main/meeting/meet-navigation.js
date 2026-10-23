@@ -1,7 +1,8 @@
 const MEET_HOME_URL = 'https://meet.google.com/';
 
-// 회의 코드(abc-defg-hij)가 붙은 Meet 주소. 렌더러 constants.js 의 MEET_MEETING_URL_PATTERN 과 같은 규칙이다.
-const MEET_MEETING_URL_PATTERN = /^https:\/\/meet\.google\.com\/[a-z]{3}-[a-z]{4}-[a-z]{3}/;
+// 회의 코드(abc-defg-hij)가 도메인 바로 뒤나 meet/ 아래(meet/abc-defg-hij)에 붙은 Meet 주소.
+// 렌더러 constants.js 의 MEET_MEETING_URL_PATTERN 과 같은 규칙이다.
+const MEET_MEETING_URL_PATTERN = /^https:\/\/meet\.google\.com\/(?:meet\/)?[a-z]{3}-[a-z]{4}-[a-z]{3}/;
 
 // 회의 화면 안에서 열어도 되는 곳. 로그인은 회의 화면 안에서 끝나야 쿠키가 회의 세션에 남는다.
 const IN_VIEW_HOST_SET = new Set(['meet.google.com', 'accounts.google.com']);

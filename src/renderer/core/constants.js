@@ -12,7 +12,9 @@ export const ROI_COLOR_MAP = {
   [ROI_TYPE_MAP.camera]: '#e0a815',
 };
 
-export const MEET_MEETING_URL_PATTERN = /^https:\/\/meet\.google\.com\/[a-z]{3}-[a-z]{4}-[a-z]{3}/;
+// 회의 코드(abc-defg-hij)가 도메인 바로 뒤나 meet/ 아래(meet/abc-defg-hij)에 붙은 Meet 주소.
+// main meeting/meet-navigation.js 와 같은 규칙이다.
+export const MEET_MEETING_URL_PATTERN = /^https:\/\/meet\.google\.com\/(?:meet\/)?[a-z]{3}-[a-z]{4}-[a-z]{3}/;
 
 // Meet 새로고침이 회의를 다시 불렀는지, 회의 밖이라 첫 화면으로 돌아갔는지. main meeting/meet-reload.js 와 같은 값이다.
 export const MEET_RELOAD_TARGET_MAP = { meeting: 'meeting', home: 'home' };
