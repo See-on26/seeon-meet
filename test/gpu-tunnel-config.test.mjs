@@ -5,8 +5,7 @@ import path from 'node:path';
 
 const require = createRequire(import.meta.url);
 const {
-  readTunnelConfig, buildForwardList, TUNNEL_MODE_MAP,
-  DEFAULT_SSH_HOST, DEFAULT_SSH_PORT, DEFAULT_SSH_USER, DEFAULT_HOST_FINGERPRINT, PACKAGED_KEY_FILE_NAME,
+  readTunnelConfig, buildForwardList, isServerConfigured, TUNNEL_MODE_MAP, DEFAULT_SSH_PORT, PACKAGED_KEY_FILE_NAME,
 } = require('../src/main/gpu-tunnel/tunnel-config.js');
 const { computeHostKeyFingerprint, isHostKeyFingerprintMatch } = require('../src/main/gpu-tunnel/host-key.js');
 const {
@@ -17,6 +16,8 @@ const { readPipelineConfig } = require('../src/main/caption-pipeline/config.js')
 // ssh-keygen 으로 만든 일회용 ed25519 공개 키와 `ssh-keygen -lf` 가 보여 준 지문.
 const SAMPLE_HOST_KEY_BASE64 = 'AAAAC3NzaC1lZDI1NTE5AAAAIO9fCJ5JyDmyj8hFZWB3z3v/D7aiPOmo/ZzMZwJv32KO';
 const SAMPLE_HOST_KEY_FINGERPRINT = 'SHA256:O4mnAwWxaj6HXUWQLocIy5DFenjdK6WShmDBWDeyo/o';
+// 위 공개 키와 다른 아무 지문.
+const OTHER_HOST_FINGERPRINT = 'SHA256:AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA';
 
 const RESOURCES_PATH = '/Applications/SEEON.app/Contents/Resources';
 const PACKAGED_KEY_PATH = path.join(RESOURCES_PATH, PACKAGED_KEY_FILE_NAME);
@@ -27,17 +28,23 @@ function fileExistsAmong(pathList) {
 
 afterEach(() => { mock.restoreAll(); });
 
-test('설정 기본값: auto, 팀 GPU 서버 주소·포트·계정·지문', () => {
+test('설정 기본값: auto, 서버 주소·계정·지문은 코드에 두지 않고 비워 두며 포트는 SSH 기본 22', () => {
   const config = readTunnelConfig({ env: {}, fileExists: () => false });
   assert.equal(config.mode, TUNNEL_MODE_MAP.auto);
-  assert.equal(config.host, '<서버 주소>');
+  assert.equal(config.host, null);
+  assert.equal(config.username, null);
+  assert.equal(config.hostFingerprint, null);
   assert.equal(config.port, 22);
-  assert.equal(config.username, '@GPU_USER@');
-  assert.equal(config.hostFingerprint, '<서버 호스트 키 지문>');
-  assert.equal(DEFAULT_SSH_HOST, config.host);
-  assert.equal(DEFAULT_SSH_PORT, config.port);
-  assert.equal(DEFAULT_SSH_USER, config.username);
-  assert.equal(DEFAULT_HOST_FINGERPRINT, config.hostFingerprint);
+  assert.equal(DEFAULT_SSH_PORT, 22);
+  assert.equal(isServerConfigured(config), false);
+});
+
+test('설정: 주소·계정·지문이 모두 있어야 서버 설정이 된 것으로 본다', () => {
+  const env = { SEEON_GPU_SSH_HOST: 'gpu.example.com', SEEON_GPU_SSH_USER: 'tester', SEEON_GPU_SSH_HOST_FINGERPRINT: 'SHA256:abc' };
+  assert.equal(isServerConfigured(readTunnelConfig({ env, fileExists: () => false })), true);
+  for (const key of Object.keys(env)) {
+    assert.equal(isServerConfigured(readTunnelConfig({ env: { ...env, [key]: '' }, fileExists: () => false })), false, key);
+  }
 });
 
 test('설정: 환경변수로 주소·포트·계정·지문을 바꾼다', () => {
@@ -63,7 +70,7 @@ test('설정: SEEON_GPU_TUNNEL=off 면 off, 모르는 값은 경고하고 auto',
   assert.match(warn.mock.calls[0].arguments[0], /SEEON_GPU_TUNNEL/);
 });
 
-test('설정: SSH 포트가 숫자가 아니면 경고하고 기본 포트', () => {
+test('설정: SSH 포트가 숫자가 아니면 경고하고 기본 포트(22)', () => {
   const warn = mock.method(console, 'warn', () => {});
   assert.equal(readTunnelConfig({ env: { SEEON_GPU_SSH_PORT: 'abc' }, fileExists: () => false }).port, 22);
   assert.equal(warn.mock.callCount(), 1);
@@ -158,7 +165,7 @@ test('지문 비교: 같으면 통과, 다르거나 비어 있으면 거부, 끝
   const hostKey = Buffer.from(SAMPLE_HOST_KEY_BASE64, 'base64');
   assert.equal(isHostKeyFingerprintMatch({ hostKey, expectedFingerprint: SAMPLE_HOST_KEY_FINGERPRINT }), true);
   assert.equal(isHostKeyFingerprintMatch({ hostKey, expectedFingerprint: ` ${SAMPLE_HOST_KEY_FINGERPRINT}= ` }), true);
-  assert.equal(isHostKeyFingerprintMatch({ hostKey, expectedFingerprint: DEFAULT_HOST_FINGERPRINT }), false);
+  assert.equal(isHostKeyFingerprintMatch({ hostKey, expectedFingerprint: OTHER_HOST_FINGERPRINT }), false);
   assert.equal(isHostKeyFingerprintMatch({ hostKey, expectedFingerprint: '' }), false);
   assert.equal(isHostKeyFingerprintMatch({ hostKey: Buffer.alloc(0), expectedFingerprint: SAMPLE_HOST_KEY_FINGERPRINT }), false);
 });
@@ -180,6 +187,7 @@ test('화면 표시: 상태마다 한국어 한 줄, 다시 연결 중이면 이
   assert.equal(describeTunnelStatus({ status: TUNNEL_STATUS_MAP.connecting }), '연결 중');
   assert.equal(describeTunnelStatus({ status: TUNNEL_STATUS_MAP.external }), '외부 터널');
   assert.equal(describeTunnelStatus({ status: TUNNEL_STATUS_MAP.noKey }), '키 없음');
+  assert.equal(describeTunnelStatus({ status: TUNNEL_STATUS_MAP.notConfigured }), '서버 설정 없음');
   assert.equal(describeTunnelStatus({ status: TUNNEL_STATUS_MAP.off }), '꺼짐');
   assert.equal(
     describeTunnelStatus({ status: TUNNEL_STATUS_MAP.reconnecting, reason: TUNNEL_REASON_MAP.authFailed, retryInMs: 4000 }),

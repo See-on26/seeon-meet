@@ -14,7 +14,7 @@ const {
 } = require('../src/main/caption-pipeline/trigger/kiwi-model.js');
 
 const ENV_FILE_PATH = '/secure/seeon/.env';
-const TUNNEL_KEY_PATH = '/secure/keystore/seeon-app-tunnel';
+const TUNNEL_KEY_PATH = '/secure/keys/app-tunnel-key';
 const KIWI_MODEL_DIR = '/build/vendor/kiwi-model';
 const KIWI_MODEL_PATH_LIST = KIWI_MODEL_FILE_LIST.map((name) => path.join(KIWI_MODEL_DIR, name));
 const KIWI_RESOURCE = { from: KIWI_MODEL_DIR, to: PACKAGED_KIWI_MODEL_DIR_NAME, filter: KIWI_MODEL_FILE_LIST };

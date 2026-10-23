@@ -1,5 +1,6 @@
 const TUNNEL_STATUS_MAP = {
   off: 'off',
+  notConfigured: 'not_configured',
   noKey: 'no_key',
   external: 'external',
   connecting: 'connecting',
@@ -18,6 +19,7 @@ const TUNNEL_REASON_MAP = {
 
 const TUNNEL_STATUS_LABEL_MAP = {
   [TUNNEL_STATUS_MAP.off]: '꺼짐',
+  [TUNNEL_STATUS_MAP.notConfigured]: '서버 설정 없음',
   [TUNNEL_STATUS_MAP.noKey]: '키 없음',
   [TUNNEL_STATUS_MAP.external]: '외부 터널',
   [TUNNEL_STATUS_MAP.connecting]: '연결 중',

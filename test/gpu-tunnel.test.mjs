@@ -9,7 +9,8 @@ const require = createRequire(import.meta.url);
 const { createGpuTunnel } = require('../src/main/gpu-tunnel/gpu-tunnel.js');
 const { registerGpuTunnel } = require('../src/main/gpu-tunnel/index.js');
 const { TUNNEL_STATUS_MAP, TUNNEL_REASON_MAP } = require('../src/main/gpu-tunnel/tunnel-status.js');
-const { DEFAULT_HOST_FINGERPRINT } = require('../src/main/gpu-tunnel/tunnel-config.js');
+// 시험용 서버 지문. 가짜 클라이언트가 받는 키와 맞지 않으므로 지문 검사는 늘 거부한다.
+const TEST_HOST_FINGERPRINT = 'SHA256:AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA';
 
 const FAKE_PRIVATE_KEY = Buffer.from('fake-private-key');
 
@@ -86,7 +87,7 @@ async function readUntilClose(socket) {
 
 const BASE_TUNNEL_CONFIG = {
   mode: 'auto', host: 'gpu.example.com', port: 2222, username: 'tester',
-  keyPath: '/keys/app-key', hostFingerprint: DEFAULT_HOST_FINGERPRINT,
+  keyPath: '/keys/app-key', hostFingerprint: TEST_HOST_FINGERPRINT,
 };
 
 const cleanupList = [];
@@ -121,6 +122,21 @@ test('SEEON_GPU_TUNNEL=off 면 포트도 SSH 도 열지 않는다', async () => 
   const probeServer = net.createServer().listen(localPort, '127.0.0.1');
   await once(probeServer, 'listening');
   await new Promise((resolve) => probeServer.close(resolve));
+});
+
+test('서버 주소·계정·지문 중 하나라도 없으면 not_configured 로 두고 포트도 SSH 도 열지 않는다', async () => {
+  for (const key of ['host', 'username', 'hostFingerprint']) {
+    const localPort = await findFreePort();
+    const { tunnel, clientList } = makeTunnel({
+      tunnelConfig: { ...BASE_TUNNEL_CONFIG, [key]: null }, forwardList: [{ localPort, remotePort: 8802 }],
+    });
+    await tunnel.start();
+    assert.equal(tunnel.getStatus().status, TUNNEL_STATUS_MAP.notConfigured, key);
+    assert.equal(clientList.length, 0, key);
+    const probeServer = net.createServer().listen(localPort, '127.0.0.1');
+    await once(probeServer, 'listening');
+    await new Promise((resolve) => probeServer.close(resolve));
+  }
 });
 
 test('키가 없으면 no_key 로 두고 SSH 를 열지 않는다', async () => {

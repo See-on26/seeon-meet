@@ -1,6 +1,6 @@
 const fs = require('fs');
 const net = require('net');
-const { TUNNEL_MODE_MAP } = require('./tunnel-config');
+const { TUNNEL_MODE_MAP, isServerConfigured } = require('./tunnel-config');
 const { computeHostKeyFingerprint, isHostKeyFingerprintMatch } = require('./host-key');
 const {
   TUNNEL_STATUS_MAP, TUNNEL_REASON_MAP, computeReconnectDelayMs, classifyTunnelError, describeTunnelStatus,
@@ -223,6 +223,13 @@ function createGpuTunnel({
     isStarted = true;
     if (tunnelConfig.mode === TUNNEL_MODE_MAP.off) {
       setStatus({ status: TUNNEL_STATUS_MAP.off, detail: 'SEEON_GPU_TUNNEL=off' });
+      return;
+    }
+    if (!isServerConfigured(tunnelConfig)) {
+      setStatus({
+        status: TUNNEL_STATUS_MAP.notConfigured,
+        detail: 'GPU 서버 주소·계정·지문(SEEON_GPU_SSH_HOST·SEEON_GPU_SSH_USER·SEEON_GPU_SSH_HOST_FINGERPRINT)이 .env 에 없어 터널을 열지 않습니다. 외부 터널을 켜 두면 그대로 동작합니다',
+      });
       return;
     }
     if (!tunnelConfig.keyPath) {

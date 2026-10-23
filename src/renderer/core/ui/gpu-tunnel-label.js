@@ -5,6 +5,7 @@ import { defaultUiText } from '../i18n/ui-text.js';
 // 코드 값은 main gpu-tunnel/tunnel-status.js 의 TUNNEL_STATUS_MAP·TUNNEL_REASON_MAP 과 같다.
 const STATUS_TEXT_KEY_MAP = {
   off: 'gpuTunnel.off',
+  not_configured: 'gpuTunnel.notConfigured',
   no_key: 'gpuTunnel.noKey',
   external: 'gpuTunnel.external',
   connecting: 'gpuTunnel.connecting',
