@@ -25,6 +25,15 @@ test('수치 해설(수치 → 뜻)은 지금처럼 "값은 해석틀을 의미"
     rawSlotMap: { value: '73%', frame: '작년 대비 재고 회전율' } }), '73%는 작년 대비 재고 회전율을 의미');
 });
 
+test('수치 해설의 해석틀이 상한보다 길면 앞 꾸밈말을 버리고 끝의 핵심 명사구를 남긴다', () => {
+  const meaning = (frame) => assemble({ narrationType: 'interpretation', subKind: 'value_to_meaning',
+    rawSlotMap: { value: '75%', frame } });
+  assert.equal(meaning('팬데믹 이후 화상회의로 영구 전환된 기업 회의 비중'), '75%는 영구 전환된 기업 회의 비중을 의미',
+    '앞에서 자르면 핵심 명사(비중)가 빠지고 "영구를 의미"처럼 뜻이 틀어진다');
+  assert.equal(meaning('화상회의로 영구 전환된 기업 회의 비중'), '75%는 영구 전환된 기업 회의 비중을 의미');
+  assert.equal(meaning('올해 1분기 작년 대비 A사 기업가치 성장률'), '75%는 작년 대비 A사 기업가치 성장률을 의미');
+});
+
 test('지시 해설은 상황 칸 없이 대상 내용(caption)만 읽는다', () => {
   assert.equal(assemble({ narrationType: 'deixis', subKind: 'simple',
     rawSlotMap: { seen: '응답 품질 변화 표', caption: '응답 품질 변화 표' } }), '응답 품질 변화 표');
