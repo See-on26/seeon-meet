@@ -362,6 +362,7 @@ test('흐름 유형 이름은 아키텍처 에이전트 묶음 이름이고, 흐
     silence: '무발화 기반',
     user_command: '질문 답',
     speaker_identity: '화자 식별',
+    screen_change: '화면 변화',
     unknown: '기타',
   });
   assert.deepEqual(

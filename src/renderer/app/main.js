@@ -1,7 +1,7 @@
 import {
   CROP_JPEG_QUALITY, NARRATION_TYPE_MAP, NARRATION_CLASS_MAP,
   PAGE_TRANSITION_KIND_MAP, USER_COMMAND_MAP, SUMMARY_TOGGLE_KEY,
-  MEET_MEETING_URL_PATTERN, SPEAKER_SOURCE_MAP, DEBUG_STAGE_MAP, DEBUG_VERDICT_MAP,
+  MEET_MEETING_URL_PATTERN, SPEAKER_SOURCE_MAP, DEBUG_STAGE_MAP, DEBUG_VERDICT_MAP, SCREEN_CHANGE_KIND_MAP,
 } from '../core/constants.js';
 import {
   MODE_MAP, DWELL_MS, IS_DELAY_BUFFER_ENABLED,
@@ -75,6 +75,8 @@ import { PointingLocator, describeDirection } from '../core/trigger/pointing-loc
 import { createRecentPointingMemory } from '../core/trigger/recent-pointing.js';
 import { createPointingMotionTracker } from '../core/trigger/pointing-motion-tracker.js';
 import { SlideHistogramGate } from '../core/trigger/slide-histogram-gate.js';
+import { createScreenChangeDetector } from '../core/trigger/screen-change-detector.js';
+import { convertToGrayscale } from '../core/trigger/ssim.js';
 import { createSlideCandidateGate } from '../core/trigger/slide-candidate-gate.js';
 import { SlideEmbeddingRegistry } from '../core/trigger/slide-embedding-registry.js';
 import { SlideDwellGate, DWELL_STATE_MAP } from '../core/trigger/slide-dwell-gate.js';
@@ -89,7 +91,7 @@ import {
 import { MeetCaptureSession } from '../core/capture/meet-capture-session.js';
 import { fitWithinLongEdge } from '../core/capture/frame-scale.js';
 import { captureWhenSettled } from '../core/capture/settled-capture.js';
-import { captureDeixisFrameSet } from '../core/capture/deixis-frame-set.js';
+import { captureDeixisFrameSet, toPointingRect } from '../core/capture/deixis-frame-set.js';
 import { wallToVideoTimeMs, resolveSpeechEndWallTs, attachCandidateEventVideoTime } from '../core/capture/video-time.js';
 import { createLogoTapCounter } from '../core/dev/logo-tap-counter.js';
 
@@ -636,6 +638,17 @@ function isSpeculativeMode() {
 }
 let isConfirmingSlide = false;
 const slideCandidateGate = createSlideCandidateGate();
+// 같은 슬라이드 안 화면 변화 감지기. 세션 시작 응답의 화면 변화 모드(SEEON_SCREEN_CHANGE)가 off 면 만들지 않는다.
+const SCREEN_CHANGE_MODE_OFF = 'off';
+const SCREEN_CHANGE_MODE_SHADOW = 'shadow';
+// 감지기가 거른 사건(되돌아감·커서·영상·스크롤·가리킴)은 표본마다 생겨 사건별로 남기지 않고 30초마다 세어 남긴다.
+const SCREEN_CHANGE_SKIP_FLUSH_MS = 30000;
+const SCREEN_CHANGE_OUTLINE_COLOR = '#ff2020';
+let screenChangeSession = null;
+let screenChangeDetector = null;
+let screenChangeSlideStart = null;
+let screenChangeSkipCountMap = {};
+let lastScreenChangeSkipFlushAt = 0;
 let hasWarnedLocalEmbedding = false;
 let lastGateLogAt = 0;
 let pointingSampleTimer = null;
@@ -726,6 +739,7 @@ function syncRoiGeneration({ ts }) {
   pointingLocator.reset();
   recentPointingMemory.reset();
   pointingMotionTracker.reset();
+  screenChangeDetector?.reset();
   lastPointingMotionAt = -Infinity;
   if (shouldResetDwell) slideDwellGate.reset();
   roiChangeSuppressUntil = ts + ROI_CHANGE_SUPPRESS_MS;
@@ -755,6 +769,117 @@ function samplePointingFrame() {
   pointingLocator.sample({ imageData, ts });
   detectSlideTransition({ imageData, ts });
   attachPointingMotion();
+  sampleScreenChange({ imageData, ts });
+}
+
+function toWallTs(perfTs) {
+  return Date.now() - (performance.now() - perfTs);
+}
+
+function flushScreenChangeSkipCount({ ts }) {
+  if (ts - lastScreenChangeSkipFlushAt < SCREEN_CHANGE_SKIP_FLUSH_MS) return;
+  lastScreenChangeSkipFlushAt = ts;
+  const countList = Object.entries(screenChangeSkipCountMap);
+  if (!countList.length) return;
+  screenChangeSkipCountMap = {};
+  markDebug({
+    stage: DEBUG_STAGE_MAP.screenChange, verdict: DEBUG_VERDICT_MAP.info,
+    reason: '화면 변화 감지기 거름(30초 집계)', detail: countList.map(([reason, count]) => `${reason}=${count}`).join(' '),
+  });
+}
+
+// 같은 슬라이드 안 변화: 칸 차이가 굳은 순간을 감지기가 고르면 화면을 찍어 main 에 보낸다. 해설할지는 main 이 정한다.
+function sampleScreenChange({ imageData, ts }) {
+  if (!screenChangeDetector) return;
+  const slideLabel = slideRegistry.currentLabel();
+  if (!slideLabel) return;
+  const result = screenChangeDetector.sample({
+    gray: convertToGrayscale(imageData), width: imageData.width, height: imageData.height, ts,
+    videoTimeMs: captureSource.videoTimeMs,
+    excludedCellMask: pointingLocator.findConstantChangeCells({ nowTs: ts }),
+    // 펜·레이저처럼 여러 칸을 옮겨 다니는 움직임만 가리킴으로 본다. 한 자리에 값이 뜬 변화도 가리킴 표본기에는 영역으로 잡혀
+    // 마지막 영역 시각(lastPointingMotionAt)으로 거르면 모든 변화가 가리킴이 된다.
+    isPointingActive: pointingMotionTracker.isMoving({ nowTs: ts }),
+    isConfirming: isConfirmingSlide,
+  });
+  if (result.skipReason) screenChangeSkipCountMap[result.skipReason] = (screenChangeSkipCountMap[result.skipReason] || 0) + 1;
+  flushScreenChangeSkipCount({ ts });
+  if (result.isBaselineCommitted) {
+    sendScreenChangeBaseline({ slideLabel, isSlideStart: result.isSlideStart })
+      .catch((error) => console.warn('[screen-change] 기준 화면 전송 오류', error));
+  }
+  if (result.event) {
+    reportScreenChange({ event: result.event, slideLabel })
+      .catch((error) => console.warn('[screen-change] 변화 전송 오류', error));
+  }
+}
+
+async function canvasToJpeg(canvas) {
+  const blob = await new Promise((resolve) => canvas.toBlob(resolve, 'image/jpeg', CROP_JPEG_QUALITY));
+  return blob ? blob.arrayBuffer() : null;
+}
+
+// 깨끗한 전체 화면(OCR·기준용)과 VLM 그림을 같은 영상 프레임에서 만든다. outline 은 바뀐 곳에 테두리를 그린 전체 화면이다
+// (잘린 그림은 라벨·축 이름을 잃는다). crop 은 바뀐 곳만, full 은 따로 만들지 않는다.
+async function captureScreenChangeFrameSet({ rectNorm, imageMode }) {
+  const frame = getFrameRegionPx();
+  if (!frame || !captureSource.liveVideo) return null;
+  const canvas = document.createElement('canvas');
+  const { width, height } = fitWithinLongEdge({ width: frame.w, height: frame.h });
+  canvas.width = width;
+  canvas.height = height;
+  const context = canvas.getContext('2d');
+  context.drawImage(captureSource.liveVideo, frame.x, frame.y, frame.w, frame.h, 0, 0, width, height);
+  const buffer = await canvasToJpeg(canvas);
+  if (imageMode === 'crop') return { buffer, vlmBuffer: await captureRegionJpeg(narrowToPointingRegion(frame, rectNorm)) };
+  if (imageMode !== 'outline') return { buffer, vlmBuffer: null };
+  const lineWidth = Math.max(3, Math.round(Math.min(width, height) * 0.006));
+  const pad = lineWidth * 2;
+  const x0 = Math.max(0, rectNorm.x * width - pad);
+  const y0 = Math.max(0, rectNorm.y * height - pad);
+  const x1 = Math.min(width, (rectNorm.x + rectNorm.w) * width + pad);
+  const y1 = Math.min(height, (rectNorm.y + rectNorm.h) * height + pad);
+  context.strokeStyle = SCREEN_CHANGE_OUTLINE_COLOR;
+  context.lineWidth = lineWidth;
+  context.strokeRect(x0, y0, x1 - x0, y1 - y0);
+  return { buffer, vlmBuffer: await canvasToJpeg(canvas) };
+}
+
+async function reportScreenChange({ event, slideLabel }) {
+  if (!screenChangeSession || roiStore.isLayoutSettling()) return;
+  const sessionSeq = experimentSeq;
+  const isShadow = screenChangeSession.mode === SCREEN_CHANGE_MODE_SHADOW;
+  const wordBudget = buildWordBudget({ narrationType: NARRATION_TYPE_MAP.screenChange, subKind: SCREEN_CHANGE_KIND_MAP.newText });
+  if (wordBudget.isDroppable && !isShadow) {
+    markDebug({
+      stage: DEBUG_STAGE_MAP.budget, verdict: DEBUG_VERDICT_MAP.skip, narrationType: NARRATION_TYPE_MAP.screenChange,
+      reason: '어절 예산이 유형 하한 미달 → 드롭', detail: `화면 변화 · 모드=${getCurrentMode()} 하한=${wordBudget.minWordCount}어절`,
+    });
+    return;
+  }
+  const frameSet = await captureScreenChangeFrameSet({
+    rectNorm: event.rect, imageMode: isShadow ? null : screenChangeSession.image,
+  });
+  if (!frameSet?.buffer || !captureSource.isActive || sessionSeq !== experimentSeq) return;
+  await window.seeon.sendScreenChange({
+    ts: Date.now(), slideLabel, buffer: frameSet.buffer, vlmBuffer: frameSet.vlmBuffer,
+    regionNorm: event.rect, changedRatio: event.changedRatio, cellCount: event.cellCount,
+    firstSeenTs: toWallTs(event.firstSeenTs), firstSeenVideoTimeMs: event.firstSeenVideoTimeMs,
+    recentTranscript: transcriptWindow.getBefore({ nowTs: performance.now(), windowMs: SILENCE_TRANSCRIPT_WINDOW_MS }),
+    wordBudget, imageMode: screenChangeSession.image,
+  });
+}
+
+// 감지기가 기준으로 삼은 화면을 main 에 보내 OCR 기준으로도 쓴다. 새 슬라이드 기준 화면이면 그 슬라이드가 시작된 시각을 함께 보낸다.
+async function sendScreenChangeBaseline({ slideLabel, isSlideStart }) {
+  const sessionSeq = experimentSeq;
+  const buffer = await captureFrameJpeg();
+  if (!buffer || !captureSource.isActive || sessionSeq !== experimentSeq) return;
+  const slideStart = isSlideStart && screenChangeSlideStart?.slideLabel === slideLabel ? screenChangeSlideStart : null;
+  await window.seeon.sendScreenChangeBaseline({
+    ts: Date.now(), slideLabel, buffer, isSlideStart: Boolean(slideStart), slideStartTs: slideStart?.wallTs ?? null,
+    eventVideoTimeMs: captureSource.videoTimeMs,
+  });
 }
 
 function detectSlideTransition({ imageData, ts }) {
@@ -803,6 +928,8 @@ async function confirmSlideCandidate({ isFirst, imageData }) {
   }
   if (!decision.isNew && !decision.isRevisit) return;
   pointingLocator.resetChangeHistory();
+  screenChangeSlideStart = { slideLabel: decision.label, wallTs: Date.now() };
+  screenChangeDetector?.setBaseline({ ts: performance.now(), isSlideStart: true });
   const isRevisit = Boolean(decision.isRevisit);
   if (decision.isNew && buffer) {
     window.seeon.requestSlideText({ slideLabel: decision.label, buffer }).catch(() => {});
@@ -1117,6 +1244,8 @@ async function runDeixisDecision(firedDecision) {
   lastDeixisDecidedAt = performance.now();
   const mode = getCurrentMode();
   const sessionSeq = experimentSeq;
+  // 판정 화면을 찍기 시작한 시각. 이 뒤에 화면이 바뀌었는지로 늦은 근거 재시도를 짝짓는다.
+  const frameTs = Date.now();
   const [{ buffer, fullBuffer }, decision] = await Promise.all([
     captureDeixisFrameSetWhenSettled(firedDecision.region), firedDecision.whenSealed ?? firedDecision,
   ]);
@@ -1187,10 +1316,13 @@ async function runDeixisDecision(firedDecision) {
     reason: '지시 후보 발행',
     detail: `트리거="${label}" 발화="${utterance || '(없음)'}" 영역=${region ? '포인팅' : '프레임 전체'} 슬라이드=${slideRegistry.currentLabel() || '-'}`,
   });
+  // 잘린 그림이 있을 때만 그 영역의 비율 상자를 함께 보낸다(main 의 발화 ROI 가 발화로 찾은 곳과 견준다).
+  const pointingRect = fullBuffer
+    ? toPointingRect({ subRegion: firedDecision.region, margin: POINTING_CROP_MARGIN }) : null;
   const result = await window.seeon.sendPipelineDeixis({
     ts, buffer, fullBuffer, utterance, recentTranscript, beforeTranscript: before, afterTranscript: after,
     hasPointingRegion: Boolean(region), pointingOrderHint, slideLabel: slideRegistry.currentLabel(),
-    wordBudgetMap, eventVideoTimeMs, triggerCandidateList: candidateList,
+    wordBudgetMap, eventVideoTimeMs, triggerCandidateList: candidateList, pointingRect, frameTs,
   }).catch(() => null);
 
   const isNarrated = Boolean(result?.isOk && result.isGrounded);
@@ -2056,6 +2188,7 @@ function resumeExperiment() {
   pointingLocator.reset();
   recentPointingMemory.reset();
   pointingMotionTracker.reset();
+  screenChangeDetector?.reset();
   silenceTrigger.reset({ nowPerf: performance.now() });
 
   lastPointingMotionAt = -Infinity;
@@ -2087,6 +2220,12 @@ async function attemptStartExperiment() {
     currentSessionId = sessionResult?.sessionId || null;
     gapSource = sessionResult?.gapSource === GAP_CANDIDATE_SOURCE_MAP.audio
       ? GAP_CANDIDATE_SOURCE_MAP.audio : GAP_CANDIDATE_SOURCE_MAP.asr;
+    const screenChangeMode = sessionResult?.screenChange?.mode;
+    screenChangeSession = screenChangeMode && screenChangeMode !== SCREEN_CHANGE_MODE_OFF ? sessionResult.screenChange : null;
+    screenChangeDetector = screenChangeSession ? createScreenChangeDetector() : null;
+    screenChangeSlideStart = null;
+    screenChangeSkipCountMap = {};
+    lastScreenChangeSkipFlushAt = performance.now();
 
     const contextPolicy = getModePolicy({ mode: getCurrentMode() });
     const lookaheadMs = computeLookaheadMs({ mode: getCurrentMode() });
@@ -2212,6 +2351,7 @@ function stopExperiment() {
       if (speakerPollTimer) { clearInterval(speakerPollTimer); speakerPollTimer = null; }
     }],
     ['포인팅 로컬라이저', () => { pointingLocator.reset(); recentPointingMemory.reset(); pointingMotionTracker.reset(); }],
+    ['화면 변화 감지기', () => { screenChangeDetector = null; screenChangeSession = null; screenChangeSlideStart = null; }],
     ['슬라이드 히스토그램 게이트', () => { histogramGate.reset(); slideCandidateGate.reset(); }],
     ['슬라이드 레지스트리', () => {
       slideRegistry.reset(); slideEventVideoTimeMap.clear(); slideTransitionWallTsMap.clear(); transitionOrderGate.reset();

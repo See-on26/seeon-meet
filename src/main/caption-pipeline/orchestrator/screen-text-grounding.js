@@ -4,6 +4,7 @@
 const { NARRATION_TYPE_MAP } = require('../contracts/narration-types');
 const { NARRATION_BY_TRIGGER_TYPE_MAP } = require('../router/unified-router');
 const { OCR_MIN_MEAN_SCORE, OCR_MAX_VERTICAL_BOX_RATIO } = require('../agents/slide-text-agent');
+const { summarizeChartResult, CHART_STATUS_MAP, CHART_SKIP_REASON_MAP } = require('../perception/chart-value-estimator');
 
 // 판단 LLM 이 끝난 뒤 OCR 을 더 기다리는 상한. 서버 처리는 장당 0.3~0.7초(글자 많은 장 1.2초)라 대부분 판단 중에 끝난다.
 const SCREEN_TEXT_WAIT_MS = 1000;
@@ -63,20 +64,28 @@ function buildSkippedRecord(skipReason) {
 
 function createSkippedTask(skipReason) {
   return {
-    waitForPrompt: async () => ({ lineList: [], record: buildSkippedRecord(skipReason) }),
+    waitForPrompt: async () => ({ lineList: [], record: buildSkippedRecord(skipReason), chart: null }),
     peekFrameText: () => null,
+    peekLayout: () => null,
   };
 }
 
-function createScreenTextGrounding({ ocrClient, isEnabled = () => true, waitMs = SCREEN_TEXT_WAIT_MS, now = Date.now }) {
+// 기록에 남길 그래프 어림 칸. 어림하지 않았으면(수치 해설이 아니거나 꺼짐) 칸을 넣지 않는다.
+// frameTag(요청 시각-영상 시각)로 어느 순간의 화면을 어림했는지 남긴다.
+const withChartRecord = ({ chart, frameTag }) => (chart
+  ? { chart: { ...summarizeChartResult(chart), ...(frameTag ? { frameTag } : {}) } } : {});
+
+// chartEstimator: 그래프 어림기(꺼져 있으면 null). 수치 해설일 때만(withChart) 같은 프레임과 OCR 줄로 한 번 어림한다.
+function createScreenTextGrounding({ ocrClient, isEnabled = () => true, waitMs = SCREEN_TEXT_WAIT_MS, now = Date.now,
+  chartEstimator = null }) {
   // 판단 LLM 을 부르기 전에 부른다. 돌려받은 작업은 수치·척도 해설일 때만 기다리고(waitForPrompt), 값 검사는 끝난 결과만 본다(peekFrameText).
   function start({ jpegBuffer }) {
     if (!isEnabled()) return createSkippedTask(SCREEN_TEXT_SKIP_REASON_MAP.disabled);
     if (!ocrClient) return createSkippedTask('ocr_error:OCR 클라이언트 없음');
     const startedAt = now();
-    const state = { isSettled: false, evaluation: null, skipReason: null, ocrMs: null };
-    const settle = ({ evaluation = null, skipReason }) => {
-      Object.assign(state, { isSettled: true, evaluation, skipReason, ocrMs: now() - startedAt });
+    const state = { isSettled: false, evaluation: null, skipReason: null, ocrMs: null, result: null };
+    const settle = ({ evaluation = null, skipReason, result = null }) => {
+      Object.assign(state, { isSettled: true, evaluation, skipReason, ocrMs: now() - startedAt, result });
     };
     let recognizePromise;
     try {
@@ -87,14 +96,31 @@ function createScreenTextGrounding({ ocrClient, isEnabled = () => true, waitMs =
     const settledPromise = recognizePromise.then(
       (result) => {
         const evaluation = evaluateOcrResult(result);
-        settle({ evaluation, skipReason: evaluation.skipReason });
+        settle({ evaluation, skipReason: evaluation.skipReason, result });
       },
       (error) => settle({
         skipReason: error?.isBypassed ? SCREEN_TEXT_SKIP_REASON_MAP.bypass : `ocr_error:${error?.message || error}`,
       }),
     );
 
-    async function waitForPrompt() {
+    // 그래프 어림은 판단 뒤 OCR 을 기다린 그 자리에서 한 번만 한다. OCR 이 늦거나 쓸 수 없으면 어림값 없이(ocr_unusable) 간다.
+    // 어림기의 예외는 삼켜 error 로 남긴다 — 해설을 막지 않는다.
+    let chartResult = null;
+    function readChart({ lineList, frameTag }) {
+      if (chartResult) return chartResult;
+      if (!lineList.length) {
+        chartResult = { status: CHART_STATUS_MAP.skip, skipReason: CHART_SKIP_REASON_MAP.ocrUnusable };
+        return chartResult;
+      }
+      try {
+        chartResult = chartEstimator.estimate({ jpegBuffer, lineList, frameTag });
+      } catch (error) {
+        chartResult = { status: CHART_STATUS_MAP.skip, skipReason: CHART_SKIP_REASON_MAP.error, errorMessage: error?.message || String(error) };
+      }
+      return chartResult;
+    }
+
+    async function waitForPrompt({ withChart = false, frameTag = null } = {}) {
       const waitStartedAt = now();
       if (!state.isSettled) {
         let timer = null;
@@ -102,10 +128,15 @@ function createScreenTextGrounding({ ocrClient, isEnabled = () => true, waitMs =
         clearTimeout(timer);
       }
       const waitedMs = now() - waitStartedAt;
+      const isChartWanted = withChart && Boolean(chartEstimator);
       if (!state.isSettled) {
-        return { lineList: [], record: { ...buildSkippedRecord(SCREEN_TEXT_SKIP_REASON_MAP.late), waitedMs } };
+        const chart = isChartWanted ? readChart({ lineList: [], frameTag }) : null;
+        return {
+          lineList: [], record: { ...buildSkippedRecord(SCREEN_TEXT_SKIP_REASON_MAP.late), waitedMs, ...withChartRecord({ chart, frameTag }) }, chart,
+        };
       }
       const lineList = state.evaluation?.lineList || [];
+      const chart = isChartWanted ? readChart({ lineList, frameTag }) : null;
       return {
         lineList,
         record: {
@@ -113,7 +144,9 @@ function createScreenTextGrounding({ ocrClient, isEnabled = () => true, waitMs =
           totalLineCount: state.evaluation?.totalLineCount ?? 0,
           meanScore: state.evaluation?.meanScore ?? null,
           ocrMs: state.ocrMs, waitedMs, skipReason: state.skipReason,
+          ...withChartRecord({ chart, frameTag }),
         },
+        chart,
       };
     }
 
@@ -124,31 +157,52 @@ function createScreenTextGrounding({ ocrClient, isEnabled = () => true, waitMs =
       return state.evaluation.lineList.filter(isConfidentLine).map((line) => line.text.trim()).join('\n');
     }
 
-    return { waitForPrompt, peekFrameText };
+    // 발화 ROI 가 쓰는 같은 프레임 줄 위치. 끝난 결과만 보고 기다리지 않는다. 평균 점수 문턱은 두지 않고(줄 점수로 따로 가중한다)
+    // 세로 글씨가 많은 화면만 거른다. 줄 좌표는 보낸 JPEG 화소이고 imageWidth·imageHeight 가 그 크기다.
+    function peekLayout() {
+      if (!state.isSettled || !state.result || !Array.isArray(state.result.lineList)) return null;
+      if (state.result.verticalBoxRatio >= OCR_MAX_VERTICAL_BOX_RATIO) return null;
+      const { lineList, imageWidth = null, imageHeight = null } = state.result;
+      return { lineList, imageWidth, imageHeight };
+    }
+
+    return { waitForPrompt, peekFrameText, peekLayout };
   }
 
   return { start };
 }
 
 // 기록(수치·척도 해설 레코드·흐름 창)에 남길 화면 글자 요약. 줄 수·글자 수는 프롬프트에 실제로 들어간 양이다.
-function finalizeScreenTextRecord({ record, screenTextBlock = null }) {
+// 그래프 어림 칸에는 어림값이 프롬프트에 실제로 들어갔는지(chartBlock)를 붙인다.
+function finalizeScreenTextRecord({ record, screenTextBlock = null, chartBlock = null }) {
   const lineCount = screenTextBlock?.lineCount ?? 0;
   const charCount = screenTextBlock?.charCount ?? 0;
+  const chartField = record.chart ? { chart: { ...record.chart, isInPrompt: Boolean(chartBlock?.barCount) } } : {};
   if (record.source === SCREEN_TEXT_SOURCE_MAP.fresh && !lineCount) {
     return {
       ...record, source: SCREEN_TEXT_SOURCE_MAP.none, lineCount, charCount, skipReason: SCREEN_TEXT_SKIP_REASON_MAP.overCharLimit,
+      ...chartField,
     };
   }
-  return { ...record, lineCount, charCount };
+  return { ...record, lineCount, charCount, ...chartField };
+}
+
+function formatChartSummary(chart) {
+  if (!chart) return '';
+  if (chart.status !== CHART_STATUS_MAP.ok) return ` · 그래프 어림=건너뜀(${chart.skipReason || '-'})`;
+  const valueText = (chart.valueList || [])
+    .map((entry) => `${entry.label ? `${entry.label} ` : ''}약 ${entry.value}${chart.unit || ''}`).join(' · ');
+  return ` · 그래프 어림=ok 막대${chart.barCount} [${valueText}] ${chart.isSnapped ? '눈금선' : '눈금선 없음'}`
+    + ` 풀기 ${chart.decodeMs}ms 분석 ${chart.estimateMs}ms ${chart.isInPrompt ? '프롬프트 넣음' : '기록만'}`;
 }
 
 function formatScreenTextSummary(record) {
   if (!record) return '화면 글자=없음';
   if (record.source === SCREEN_TEXT_SOURCE_MAP.fresh) {
     return `화면 글자=같은 프레임 OCR ${record.lineCount}/${record.totalLineCount}줄 ${record.charCount}자`
-      + ` 점수 ${record.meanScore} OCR ${record.ocrMs}ms 대기 ${record.waitedMs}ms`;
+      + ` 점수 ${record.meanScore} OCR ${record.ocrMs}ms 대기 ${record.waitedMs}ms${formatChartSummary(record.chart)}`;
   }
-  return `화면 글자=없음(${record.skipReason || '-'}${record.waitedMs ? `, 대기 ${record.waitedMs}ms` : ''})`;
+  return `화면 글자=없음(${record.skipReason || '-'}${record.waitedMs ? `, 대기 ${record.waitedMs}ms` : ''})${formatChartSummary(record.chart)}`;
 }
 
 module.exports = {

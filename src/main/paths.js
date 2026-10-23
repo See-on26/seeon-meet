@@ -31,6 +31,9 @@ const SUMMARIES_DIR = path.join(OUT_DIR, 'summaries');
 
 const CONTEXT_DIR = path.join(OUT_DIR, 'context');
 
+// 그래프 어림(SEEON_CHART_ESTIMATE log·on)에 쓴 전체 화면 프레임. 어림값이 맞는지 사람이 나중에 눈으로 확인한다.
+const CHART_FRAMES_DIR = path.join(OUT_DIR, 'chart-frames');
+
 function resolveSlideDir({ sessionId, major }) {
   const slideDirName = `slide-${major}`;
   return sessionId
@@ -41,5 +44,5 @@ function resolveSlideDir({ sessionId, major }) {
 module.exports = {
   resolveOutDir, OUT_DIR, FRAMES_DIR, ROI_LOG,
   DEIXIS_FRAMES_DIR, DEIXIS_NARRATED_DIR, DEIXIS_SKIPPED_DIR,
-  SLIDES_DIR, SUMMARIES_DIR, resolveSlideDir, CONTEXT_DIR,
+  SLIDES_DIR, SUMMARIES_DIR, resolveSlideDir, CONTEXT_DIR, CHART_FRAMES_DIR,
 };

@@ -55,6 +55,7 @@ export const UI_TEXT_MAP = {
     'card.speechBased': '발화 기반',
     'card.silenceBased': '무발화 기반',
     'card.speakerIdentity': '화자 식별',
+    'card.screenChange': '화면 변화',
     'card.userCommand': '질문 답',
     'card.default': '화면 해설',
 
@@ -286,6 +287,7 @@ export const UI_TEXT_MAP = {
     'card.speechBased': 'Speech-based',
     'card.silenceBased': 'Silence-based',
     'card.speakerIdentity': 'Speaker',
+    'card.screenChange': 'Screen change',
     'card.userCommand': 'Answer',
     'card.default': 'Screen description',
 

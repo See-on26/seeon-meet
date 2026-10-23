@@ -9,6 +9,7 @@ export const NARRATION_PRIORITY_MAP = {
   [NARRATION_CLASS_MAP.speakerIdentity]: 1,
   [NARRATION_CLASS_MAP.silenceBased]: 2,
   [NARRATION_CLASS_MAP.speechBased]: 3,
+  [NARRATION_CLASS_MAP.screenChange]: 3,
   [NARRATION_CLASS_MAP.deixis]: 4,
 };
 

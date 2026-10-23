@@ -13,8 +13,9 @@ const scale = (rawSlotMap, option = {}) => assembleNarration({
   narrationType: 'visual_description', subKind: 'scale', rawSlotMap, ...option,
 });
 
-test('척도 칸은 caption 하나이고 상한은 척도 어절 예산(8어절)이다', () => {
-  const slotList = getSlotList({ narrationType: 'visual_description', subKind: 'scale' });
+// 척도 값 먼저를 켠 칸(reading·caption)은 scale-value-first.test.mjs 가 본다.
+test('척도 값 먼저를 끄면 척도 칸은 caption 하나이고 상한은 척도 어절 예산(8어절)이다', () => {
+  const slotList = getSlotList({ narrationType: 'visual_description', subKind: 'scale', contentSwitch: { isScaleValueFirstEnabled: false } });
   assert.deepEqual(slotList.map((slot) => slot.key), ['caption']);
   assert.equal(slotList[0].minWordCount, 3);
   assert.equal(slotList[0].maxWordCount, 8);

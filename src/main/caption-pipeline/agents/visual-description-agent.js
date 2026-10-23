@@ -4,9 +4,12 @@ const {
 } = require('./shared/caption-parser');
 const { requestVlmContent } = require('./shared/vlm-gateway');
 const { scaleWordBudget } = require('./shared/narration-format');
+const { resolveContentSwitch } = require('./shared/content-switch');
+const { toZoomImageArgs, toZoomPromptArgs } = require('./shared/zoom-image');
 const {
   buildVisualDescriptionPrompt, buildScaleScreenTextBlock, DEFAULT_VISUAL_WORD_RANGE_MAP,
 } = require('../prompts/visual-description');
+const { buildFactCardBlock, FACT_CARD_USAGE_MAP } = require('../prompts/fact-card-block');
 const { DEFAULT_CAPTION_LANGUAGE } = require('../contracts/caption-language');
 const { NARRATION_ORIGIN_MAP } = require('../contracts/narration-class');
 
@@ -28,7 +31,8 @@ const VISUAL_DESCRIPTION_TEMPERATURE = 0.3;
 function createVisualDescriptionAgent({ config, getCaptionLanguage = () => DEFAULT_CAPTION_LANGUAGE }) {
   async function generate({ jpegBuffer, subKind = VISUAL_DESCRIPTION_KIND_MAP.reaction,
     utterance = '', recentTranscript = '', minWordCount, maxWordCount,
-    describedElementList = [], mergedAnchorList = [], origin = null, screenLineList = [], language = getCaptionLanguage() }) {
+    describedElementList = [], mergedAnchorList = [], origin = null, screenLineList = [], factCardList = [],
+    language = getCaptionLanguage(), zoomJpegBuffer = null, zoomKind = null, zoomTerm = null }) {
     const defaultRange = DEFAULT_VISUAL_WORD_RANGE_MAP[subKind]
       || DEFAULT_VISUAL_WORD_RANGE_MAP[VISUAL_DESCRIPTION_KIND_MAP.reaction];
     // 렌더러의 어절 예산을 캡션 언어의 단어 수로 바꾼다(영어는 상한을 ENGLISH_WORD_SCALE 배로, 한국어는 그대로). 받지 못한 값은 기본 범위를 바꾼다.
@@ -39,22 +43,34 @@ function createVisualDescriptionAgent({ config, getCaptionLanguage = () => DEFAU
     }
     const effectiveMaxWordCount = Number.isFinite(maxWordCount) ? maxWordCount : defaultRange.maxWordCount;
     const effectiveMaxChars = computeMaxChars({ maxWordCount: effectiveMaxWordCount, language });
+    const contentSwitch = resolveContentSwitch(config?.contentSwitch);
+    // 확대 그림(발화 ROI)은 척도 해설만 받는다. 반응·무발화 묘사는 지금처럼 한 장이다.
+    const zoomArgs = { zoomJpegBuffer: subKind === VISUAL_DESCRIPTION_KIND_MAP.scale ? zoomJpegBuffer : null, zoomKind, zoomTerm };
     const content = await requestVlmContent({
-      config, jpegBuffer, label: AGENT_LABEL, temperature: VISUAL_DESCRIPTION_TEMPERATURE, maxTokens: SLOT_AGENT_MAX_TOKENS,
+      config, ...toZoomImageArgs({ jpegBuffer, zoomJpegBuffer: zoomArgs.zoomJpegBuffer }), label: AGENT_LABEL,
+      temperature: VISUAL_DESCRIPTION_TEMPERATURE, maxTokens: SLOT_AGENT_MAX_TOKENS,
       prompt: buildVisualDescriptionPrompt({
         subKind, utterance, recentTranscript, minWordCount, maxWordCount,
-        maxChars: effectiveMaxChars, describedElementList, mergedAnchorList, origin, screenLineList, language,
+        maxChars: effectiveMaxChars, describedElementList, mergedAnchorList, origin, screenLineList, factCardList, language, contentSwitch,
+        ...toZoomPromptArgs(zoomArgs),
       }),
     });
     const parsed = parseSlotCaption({
       content: wrapPlainSilenceContent({ content, origin }),
       narrationType: NARRATION_TYPE_MAP.visualDescription, subKind, origin,
-      maxChars: effectiveMaxChars, maxWordCount: effectiveMaxWordCount, language,
+      maxChars: effectiveMaxChars, maxWordCount: effectiveMaxWordCount, language, contentSwitch,
     });
     if (subKind !== VISUAL_DESCRIPTION_KIND_MAP.scale) return parsed;
-    // 척도는 프롬프트에 실제로 들어간 화면 글자 양을 기록용으로 함께 돌려준다.
-    const { lineCount, charCount, numberLineCount } = buildScaleScreenTextBlock({ screenLineList, utterance, mergedAnchorList });
-    return { ...parsed, screenTextBlock: { lineCount, charCount, numberLineCount } };
+    // 척도는 프롬프트에 실제로 들어간 화면 글자·사실 카드 양을 기록용으로 함께 돌려준다.
+    const { lineCount, charCount, numberLineCount } = buildScaleScreenTextBlock({
+      screenLineList, utterance, mergedAnchorList, contentSwitch,
+    });
+    const factCardBlock = buildFactCardBlock({ cardList: factCardList, usage: FACT_CARD_USAGE_MAP.scale });
+    return {
+      ...parsed,
+      screenTextBlock: { lineCount, charCount, numberLineCount },
+      factCardBlock: { cardCount: factCardBlock.cardCount, charCount: factCardBlock.charCount },
+    };
   }
 
   return { generate };

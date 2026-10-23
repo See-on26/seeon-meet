@@ -5,6 +5,7 @@ const NARRATION_TYPE_MAP = {
   visualDescription: 'visual_description',
   userCommand: 'user_command',
   speakerIdentity: 'speaker_identity',
+  screenChange: 'screen_change',
 };
 
 const PAGE_TRANSITION_KIND_MAP = {
@@ -37,6 +38,15 @@ const SPEAKER_IDENTITY_KIND_MAP = {
   positional: 'positional',
 };
 
+// 화면 변화 해설의 하위 종류. new_text 는 새로 뜬 글자, highlight 는 기존 글자에 색칠·테두리·체크,
+// visual 은 글자 없는 변화(사진·도형), new_slide 는 새 슬라이드의 값 한 줄이다.
+const SCREEN_CHANGE_KIND_MAP = {
+  newText: 'new_text',
+  highlight: 'highlight',
+  visual: 'visual',
+  newSlide: 'new_slide',
+};
+
 const SPEAKER_SOURCE_MAP = {
   dom: 'dom',
   vlm: 'vlm',
@@ -56,10 +66,11 @@ const NARRATION_CLASS_MAP = {
   speechBased: 'speech_based',
   silenceBased: 'silence_based',
   speakerIdentity: 'speaker_identity',
+  screenChange: 'screen_change',
 };
 
 module.exports = {
   NARRATION_TYPE_MAP, PAGE_TRANSITION_KIND_MAP, DEIXIS_FORM_MAP,
   DEIXIS_REFERENCE_MAP, INTERPRETATION_KIND_MAP, VISUAL_DESCRIPTION_KIND_MAP,
-  SPEAKER_IDENTITY_KIND_MAP, SPEAKER_SOURCE_MAP, USER_COMMAND_MAP, NARRATION_CLASS_MAP,
+  SPEAKER_IDENTITY_KIND_MAP, SPEAKER_SOURCE_MAP, USER_COMMAND_MAP, NARRATION_CLASS_MAP, SCREEN_CHANGE_KIND_MAP,
 };

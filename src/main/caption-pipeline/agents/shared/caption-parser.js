@@ -83,8 +83,8 @@ function buildEnglishSlotOutputInstruction({ slotList, extraFieldList }) {
 }
 
 function buildSlotOutputInstruction({ narrationType, subKind, origin = null, extraFieldList = [], hasSecondClaim = false,
-  language = CAPTION_LANGUAGE_MAP.ko }) {
-  const slotList = getSlotList({ narrationType, subKind, origin, hasSecondClaim, language });
+  language = CAPTION_LANGUAGE_MAP.ko, contentSwitch = null }) {
+  const slotList = getSlotList({ narrationType, subKind, origin, hasSecondClaim, language, contentSwitch });
   if (!slotList) return '';
   if (language === CAPTION_LANGUAGE_MAP.en) return buildEnglishSlotOutputInstruction({ slotList, extraFieldList });
   return [
@@ -172,7 +172,7 @@ function parseSlotCaption(option) {
 }
 
 function parseSlotCaptionContent({ content, narrationType, subKind, origin = null, index = '', maxChars, maxWordCount,
-  hasSecondClaim = false, language = CAPTION_LANGUAGE_MAP.ko }) {
+  hasSecondClaim = false, language = CAPTION_LANGUAGE_MAP.ko, contentSwitch = null }) {
   if (typeof content !== 'string') return buildRejection({ rejectKind: REJECT_KIND_MAP.format });
   const cleaned = content.replace(/```(?:json)?/g, '').trim();
 
@@ -185,6 +185,7 @@ function parseSlotCaptionContent({ content, narrationType, subKind, origin = nul
     try {
       const assembled = assembleNarration({
         narrationType, subKind, rawSlotMap: JSON.parse(jsonMatch[0]), index, origin, hasSecondClaim, maxWordCount, maxChars, language,
+        contentSwitch,
       });
       if (assembled) return { ...assembled, isGrounded: true };
 
@@ -196,6 +197,7 @@ function parseSlotCaptionContent({ content, narrationType, subKind, origin = nul
     const assembled = salvagedSlotMap
       && assembleNarration({
         narrationType, subKind, rawSlotMap: salvagedSlotMap, index, origin, hasSecondClaim, maxWordCount, maxChars, language,
+        contentSwitch,
       });
     if (assembled) return { ...assembled, isGrounded: true };
     return buildRejection({ rejectKind: REJECT_KIND_MAP.format, content });
