@@ -32,18 +32,18 @@ const readSource = (relativePath) => fs.readFileSync(new URL(`../${relativePath}
 
 // ── 설정 ──
 
-test('설정: 발화 ROI 는 제품 기본 꺼짐, 유형은 지시·수치·척도, 지시 OCR 꺼짐, 가리킴 짝 켬', () => {
+test('설정: 발화 ROI 는 제품 기본 켜짐, 유형은 지시·수치·척도, 지시 OCR 꺼짐, 가리킴 짝 켬', () => {
   const warn = mock.method(console, 'warn', () => {});
   assert.deepEqual(SPEECH_ROI_MODE_LIST, ['on', 'off']);
-  assert.equal(DEFAULT_SPEECH_ROI_MODE, 'off');
+  assert.equal(DEFAULT_SPEECH_ROI_MODE, 'on');
   assert.deepEqual(SPEECH_ROI_TYPE_LIST, ['deixis', 'interpretation', 'visual_description']);
   const config = readPipelineConfig({});
-  assert.equal(config.speechRoiMode, 'off');
+  assert.equal(config.speechRoiMode, 'on');
   assert.deepEqual(config.speechRoiTypeList, SPEECH_ROI_TYPE_LIST);
   assert.equal(config.isSpeechRoiFrameOcrEnabled, false);
   assert.equal(config.isSpeechRoiPointingPairEnabled, true);
   const emptyConfig = readPipelineConfig({ SEEON_SPEECH_ROI: '', SEEON_SPEECH_ROI_TYPES: '', SEEON_SPEECH_ROI_FRAME_OCR: '', SEEON_SPEECH_ROI_POINTING_PAIR: '' });
-  assert.equal(emptyConfig.speechRoiMode, 'off');
+  assert.equal(emptyConfig.speechRoiMode, 'on');
   assert.deepEqual(emptyConfig.speechRoiTypeList, SPEECH_ROI_TYPE_LIST);
   assert.equal(warn.mock.callCount(), 0);
 });
@@ -62,7 +62,8 @@ test('설정: 올바른 값은 그대로 읽는다', () => {
 
 test('설정: 모르는 값은 값마다 경고하고 기본값으로 둔다(유형 목록은 모르는 유형만 뺀다)', () => {
   const warn = mock.method(console, 'warn', () => {});
-  assert.equal(readPipelineConfig({ SEEON_SPEECH_ROI: 'ON' }).speechRoiMode, 'off');
+  assert.equal(readPipelineConfig({ SEEON_SPEECH_ROI: 'ON' }).speechRoiMode, 'on');
+  assert.equal(readPipelineConfig({ SEEON_SPEECH_ROI: 'off' }).speechRoiMode, 'off');
   assert.deepEqual(readPipelineConfig({ SEEON_SPEECH_ROI_TYPES: 'deixis,scale' }).speechRoiTypeList, ['deixis']);
   assert.deepEqual(readPipelineConfig({ SEEON_SPEECH_ROI_TYPES: 'scale' }).speechRoiTypeList, SPEECH_ROI_TYPE_LIST);
   assert.equal(readPipelineConfig({ SEEON_SPEECH_ROI_FRAME_OCR: 'yes' }).isSpeechRoiFrameOcrEnabled, false);

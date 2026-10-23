@@ -16,23 +16,24 @@ function withWarnList(run) {
   }
 }
 
-test('SEEON_SCREEN_CHANGE 가 없으면 꺼짐(off)이고 나머지는 설계 기본값이다', () => {
+test('SEEON_SCREEN_CHANGE 가 없으면 같은 슬라이드 변화 해설(same_slide)이고 나머지는 설계 기본값이다', () => {
   const config = readPipelineConfig({});
-  assert.equal(config.screenChangeMode, SCREEN_CHANGE_MODE_MAP.off);
+  assert.equal(config.screenChangeMode, SCREEN_CHANGE_MODE_MAP.sameSlide);
   assert.equal(config.screenChangeMinIntervalMs, 20000);
   assert.equal(config.screenChangePerSlideMax, 2);
   assert.deepEqual(config.screenChangeKindList, ['new_text', 'highlight']);
   assert.equal(config.screenChangeImage, 'outline');
 });
 
-test('shadow·same_slide 는 그대로 받는다', () => {
+test('off·shadow·same_slide 는 그대로 받는다', () => {
+  assert.equal(readPipelineConfig({ SEEON_SCREEN_CHANGE: 'off' }).screenChangeMode, 'off');
   assert.equal(readPipelineConfig({ SEEON_SCREEN_CHANGE: 'shadow' }).screenChangeMode, 'shadow');
   assert.equal(readPipelineConfig({ SEEON_SCREEN_CHANGE: 'same_slide' }).screenChangeMode, 'same_slide');
 });
 
-test('모르는 값은 경고하고 꺼짐으로 둔다', () => {
+test('모르는 값은 경고하고 기본값(same_slide)으로 둔다', () => {
   const { result, warnList } = withWarnList(() => readPipelineConfig({ SEEON_SCREEN_CHANGE: 'bogus' }));
-  assert.equal(result.screenChangeMode, 'off');
+  assert.equal(result.screenChangeMode, 'same_slide');
   assert.ok(warnList.some((message) => message.includes('SEEON_SCREEN_CHANGE')));
 });
 

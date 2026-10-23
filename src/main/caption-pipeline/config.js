@@ -16,9 +16,9 @@ const DEFAULT_SLIDE_TEXT_BACKEND = 'vlm';
 const SCREEN_TEXT_GROUNDING_LIST = ['on', 'off'];
 const DEFAULT_SCREEN_TEXT_GROUNDING = 'on';
 // 화면 사실 카드: 새 슬라이드가 확정될 때 VLM 한 번으로 패널별 사실을 만들어 두고, 해설 때 발화와 가까운 카드를 에이전트에 넘긴다.
-// 제품 기본은 꺼짐이다(꺼 두면 프롬프트가 지금과 같다). 받는 에이전트는 수치·척도가 기본이고, 지시는 따로 켜서 잰다.
+// 제품 기본은 켜짐이다(off 로 끄면 프롬프트가 카드 없을 때와 같다). 받는 에이전트는 수치·척도가 기본이고, 지시는 따로 켜서 잰다.
 const FACT_CARD_SWITCH_LIST = ['on', 'off'];
-const DEFAULT_FACT_CARD_SWITCH = 'off';
+const DEFAULT_FACT_CARD_SWITCH = 'on';
 const FACT_CARD_AGENT_LIST = ['interpretation', 'scale', 'deixis'];
 const DEFAULT_FACT_CARD_AGENT_LIST = ['interpretation', 'scale'];
 // 카드 JSON 은 프롬프트로만 받는다. vLLM 의 json_schema 출력 모드는 이 서버에서 시험한 적이 없어 받지 않는다.
@@ -127,9 +127,9 @@ function readChartEstimateMode({ env }) {
 }
 
 // 발화로 ROI 잡기: 발화 낱말을 화면 OCR 줄 위치와 맞춰 그 둘레를 확대하고 해설 요청에 [화면 전체, 확대] 두 장을 넣는다.
-// 제품 기본은 꺼짐(지금과 요청이 같다). 실험실은 env 로 켠다.
+// 제품 기본은 켜짐이다(off 로 끄면 요청에 화면 전체 한 장만 넣는다).
 const SPEECH_ROI_MODE_LIST = ['on', 'off'];
-const DEFAULT_SPEECH_ROI_MODE = 'off';
+const DEFAULT_SPEECH_ROI_MODE = 'on';
 // 확대를 받을 해설 유형(지시·수치·척도). 회차가 나빠지면 유형별로 떼어 본다.
 const SPEECH_ROI_TYPE_LIST = ['deixis', 'interpretation', 'visual_description'];
 // 지시 후보만 있는 요청에도 같은 프레임 OCR 을 판단과 함께 시작할지(끝나 있을 때만 쓴다). 기본 꺼짐.
@@ -188,7 +188,8 @@ function readVlmMaxSoftTokens({ env }) {
 const SCREEN_CHANGE_MODE_MAP = { off: 'off', shadow: 'shadow', sameSlide: 'same_slide' };
 const SCREEN_CHANGE_MODE_ALL = 'all';
 const SCREEN_CHANGE_MODE_LIST = Object.values(SCREEN_CHANGE_MODE_MAP);
-const DEFAULT_SCREEN_CHANGE_MODE = SCREEN_CHANGE_MODE_MAP.off;
+// 제품 기본은 same_slide 다.
+const DEFAULT_SCREEN_CHANGE_MODE = SCREEN_CHANGE_MODE_MAP.sameSlide;
 // 변화 해설끼리의 간격(분당 최대 3번)과 슬라이드당 상한.
 const DEFAULT_SCREEN_CHANGE_MIN_INTERVAL_MS = 20000;
 const DEFAULT_SCREEN_CHANGE_PER_SLIDE_MAX = 2;

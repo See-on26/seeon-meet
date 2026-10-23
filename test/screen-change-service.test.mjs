@@ -231,13 +231,13 @@ test('세션 설명은 모드·그림·종류·상한을 담는다', () => {
 });
 
 test('꺼져 있으면 미해결 결과도 적지 않는다', async () => {
-  const { service, callMap } = createHarness({ env: {} });
+  const { service, callMap } = createHarness({ env: { SEEON_SCREEN_CHANGE: 'off' } });
   assert.equal(await service.noteUnresolved(deixisContext()), false);
   assert.equal(callMap.record.length, 0);
 });
 
 test('세션 시작 기록 문구는 꺼져 있으면 off, 켜져 있으면 설정을 함께 적는다', () => {
-  assert.equal(createHarness({ env: {} }).service.describeSessionText(), 'off');
+  assert.equal(createHarness({ env: { SEEON_SCREEN_CHANGE: 'off' } }).service.describeSessionText(), 'off');
   assert.equal(
     createHarness().service.describeSessionText(),
     'same_slide(간격 20초 · 슬라이드당 2번 · 종류 new_text,highlight · 그림 outline)',

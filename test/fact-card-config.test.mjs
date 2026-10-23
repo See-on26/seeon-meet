@@ -7,14 +7,14 @@ const {
   readPipelineConfig, FACT_CARD_AGENT_LIST, DEFAULT_FACT_CARD_AGENT_LIST,
 } = require('../src/main/caption-pipeline/config.js');
 
-// 화면 사실 카드 스위치. 제품 기본은 꺼짐이고, 실험실은 env 로 켠다. 모르는 값이면 경고하고 기본값으로 둔다.
+// 화면 사실 카드 스위치. 제품 기본은 켜짐이고 SEEON_FACT_CARD=off 로 끈다. 모르는 값이면 경고하고 기본값으로 둔다.
 afterEach(() => mock.restoreAll());
 
-test('기본: 카드 꺼짐, 받는 에이전트는 수치·척도, JSON 은 프롬프트로 받는다. 경고하지 않는다', () => {
+test('기본: 카드 켜짐, 받는 에이전트는 수치·척도, JSON 은 프롬프트로 받는다. 경고하지 않는다', () => {
   const warn = mock.method(console, 'warn', () => {});
   for (const env of [{}, { SEEON_FACT_CARD: '', SEEON_FACT_CARD_AGENTS: '', SEEON_FACT_CARD_JSON_MODE: '' }]) {
     const config = readPipelineConfig(env);
-    assert.equal(config.isFactCardEnabled, false);
+    assert.equal(config.isFactCardEnabled, true);
     assert.deepEqual(config.factCardAgentList, ['interpretation', 'scale']);
     assert.equal(config.factCardJsonMode, 'prompt');
   }
@@ -29,7 +29,7 @@ test('SEEON_FACT_CARD: on·off 만 받는다', () => {
   assert.equal(readPipelineConfig({ SEEON_FACT_CARD: 'off' }).isFactCardEnabled, false);
   assert.equal(warn.mock.callCount(), 0);
   for (const value of ['yes', 'true', 'ON', '1']) {
-    assert.equal(readPipelineConfig({ SEEON_FACT_CARD: value }).isFactCardEnabled, false, value);
+    assert.equal(readPipelineConfig({ SEEON_FACT_CARD: value }).isFactCardEnabled, true, value);
   }
   assert.equal(warn.mock.callCount(), 4);
   assert.match(warn.mock.calls[0].arguments[0], /SEEON_FACT_CARD="yes"/);
