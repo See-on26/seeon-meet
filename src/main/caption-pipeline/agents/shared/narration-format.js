@@ -45,6 +45,13 @@ function truncateSlot({ text, maxWordCount }) {
   return wordList.slice(0, maxWordCount).join(' ');
 }
 
+// 한국어 명사구는 핵심 명사가 끝에 온다. 앞에서 자르면 "…영구 전환된 기업 회의 비중"이 "…영구"로 남아 뜻이 바뀌므로
+// 앞 꾸밈말부터 버리고 끝 어절을 남긴다.
+function truncateSlotKeepingTail({ text, maxWordCount }) {
+  const wordList = String(text || '').trim().split(/\s+/).filter(Boolean);
+  return wordList.slice(Math.max(0, wordList.length - maxWordCount)).join(' ');
+}
+
 const INCOMPLETE_TAIL_PATTERN = new RegExp(`(?:${[
   '와', '과', '및', '랑', '이랑', '하고', '의', '을', '를', '에', '에서', '으로', '로',
   '에게', '한테', '부터', '까지', '보다', '처럼', '만큼', '이나', '나', '또는', '그리고', '또한',
@@ -182,7 +189,7 @@ const NARRATION_SLOT_MAP = {
   [NARRATION_TYPE_MAP.interpretation]: {
     [INTERPRETATION_KIND_MAP.valueToMeaning]: [
       { key: 'value', label: '발화에 나온 단순 수치 (예: 73%)', minWordCount: 1, maxWordCount: 2, mustContainValue: true },
-      { key: 'frame', label: '값의 해석틀 — 화면에서 찾은 대상·기준 (예: 작년 대비 A사 기업가치 성장률)', minWordCount: 3, maxWordCount: 5, isPhrase: true },
+      { key: 'frame', label: '값의 해석틀 — 화면에서 찾은 대상·기준 (예: 작년 대비 A사 기업가치 성장률)', minWordCount: 3, maxWordCount: 5, isPhrase: true, dropsLeadingWordsOnOverflow: true },
     ],
     // 발화 표현을 칸에 넣으면 "…빨라졌습니다를 의미"처럼 발화가 그대로 붙는다. 대상과 근거 값만 화면에서 읽는다.
     [INTERPRETATION_KIND_MAP.claimToValue]: [
@@ -436,6 +443,12 @@ function normalizeSlotMap({ slotList, rawSlotMap, language = CAPTION_LANGUAGE_MA
       && countWord({ text }) <= slot.maxWordCount + SLOT_OVERAGE_TOLERANCE_WORD_COUNT;
     if (isWholeSentenceKept) {
       slotMap[slot.key] = truncateSlot({ text, maxWordCount: slot.maxWordCount + SLOT_OVERAGE_TOLERANCE_WORD_COUNT });
+      continue;
+    }
+    if (slot.dropsLeadingWordsOnOverflow && countWord({ text }) > slot.maxWordCount) {
+      slotMap[slot.key] = trimToCompletePhrase({
+        text: truncateSlotKeepingTail({ text, maxWordCount: slot.maxWordCount }), isConservative: true,
+      });
       continue;
     }
     const truncated = truncateSlot({ text, maxWordCount: slot.maxWordCount });
