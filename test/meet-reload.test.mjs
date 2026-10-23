@@ -35,8 +35,16 @@ test('회의 주소에 있으면 그 회의 화면만 새로고침하고 뷰어�
   assert.deepEqual(viewerView.callList, [['send', 'meet-reloaded', { reason: 'shortcut', target: 'meeting' }]]);
 });
 
+test('meet/ 아래에 회의 코드가 붙은 회의 주소에서도 그 회의 화면만 새로고침한다', () => {
+  const meetView = makeView({ url: 'https://meet.google.com/meet/wkx-pupt-nvs' });
+  const viewerView = makeView();
+  assert.equal(reloadMeetView({ getMeetView: () => meetView, getViewerView: () => viewerView, reason: 'shortcut' }), true);
+  assert.deepEqual(meetView.callList, [['reload']]);
+  assert.deepEqual(viewerView.callList, [['send', 'meet-reloaded', { reason: 'shortcut', target: 'meeting' }]]);
+});
+
 test('회의 밖 페이지에 있으면 Meet 첫 화면으로 돌아가고 뷰어에 알린다', () => {
-  for (const url of ['https://workspace.google.com/products/meet/', 'https://meet.google.com/', 'about:blank']) {
+  for (const url of ['https://workspace.google.com/products/meet/', 'https://meet.google.com/', 'https://meet.google.com/meet/', 'about:blank']) {
     const meetView = makeView({ url });
     const viewerView = makeView();
     assert.equal(reloadMeetView({ getMeetView: () => meetView, getViewerView: () => viewerView, reason: 'button' }), true);
