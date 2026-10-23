@@ -131,6 +131,7 @@ export const UI_TEXT_MAP = {
     'status.captureFailed': '실패: {message}',
 
     'gpuTunnel.off': '꺼짐',
+    'gpuTunnel.notConfigured': '서버 설정 없음',
     'gpuTunnel.noKey': '키 없음',
     'gpuTunnel.external': '외부 터널',
     'gpuTunnel.connecting': '연결 중',
@@ -361,6 +362,7 @@ export const UI_TEXT_MAP = {
     'status.captureFailed': 'Failed: {message}',
 
     'gpuTunnel.off': 'Off',
+    'gpuTunnel.notConfigured': 'Server not set up',
     'gpuTunnel.noKey': 'No key',
     'gpuTunnel.external': 'External tunnel',
     'gpuTunnel.connecting': 'Connecting',
