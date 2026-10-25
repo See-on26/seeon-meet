@@ -424,6 +424,7 @@ test('summary-generate 성공: 글을 먼저 돌려주고 음성은 진행 중�
   const ipc = await startSummaryIpc({ fakeSet, isMeetingLive: () => isLive });
   const result = await ipc.handler();
   assert.equal(result.isOk, true);
+  assert.equal(result.sessionId, 'session-1', '렌더러가 지난 회의 창에 열린 그 회의 상세를 다시 채울 수 있게 알린다');
   assert.equal(typeof result.textFilePath, 'string');
   assert.ok(!listCallName(fakeSet.callList).includes('speak'));
   const textMeeting = await ipc.readMeeting();
@@ -433,6 +434,7 @@ test('summary-generate 성공: 글을 먼저 돌려주고 음성은 진행 중�
 
   isLive = false;
   await waitFor(() => ipc.progressList.some((progress) => progress.stage === 'audio-done'));
+  assert.equal(ipc.progressList.find((progress) => progress.stage === 'audio-done').sessionId, 'session-1');
   assert.equal(listCallName(fakeSet.callList).filter((name) => name === 'speak').length, 1);
   assert.equal(fs.readFileSync(path.join(textMeeting.meetingDir, '회의 요약.mp3'), 'utf8'), 'mp3');
   ipc.cleanUp();
@@ -506,7 +508,7 @@ test('summary-generate 실패: 상태 failed·fail 진행 알림', async () => {
   const fakeSet = makeFakeSet({ summaryError: new Error('GPU 응답 없음') });
   const ipc = await startSummaryIpc({ fakeSet });
   const result = await ipc.handler();
-  assert.deepEqual(result, { isOk: false, message: 'GPU 응답 없음' });
+  assert.deepEqual(result, { isOk: false, message: 'GPU 응답 없음', sessionId: 'session-1' });
   const meeting = await ipc.readMeeting();
   assert.equal(meeting.meeting.summaryStatus, 'failed');
   assert.equal(meeting.summaryText, '');

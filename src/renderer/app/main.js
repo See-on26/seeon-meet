@@ -83,7 +83,7 @@ import { SlideDwellGate, DWELL_STATE_MAP } from '../core/trigger/slide-dwell-gat
 import { computeGridEmbedding } from '../core/trigger/frame-embedding.js';
 import { showModal } from './modal.js';
 import { formatMeetingLabel } from '../core/archive/meeting-label.js';
-import { pickArchiveSummaryText } from '../core/archive/archive-summary-text.js';
+import { pickArchiveSummaryText, pickArchiveRefreshMeetingId } from '../core/archive/archive-summary-text.js';
 import { computeAnchoredPanelPosition } from '../core/ui/anchored-panel-position.js';
 
 import {
@@ -1768,21 +1768,49 @@ async function showArchiveList() {
   list.querySelector('button')?.focus();
 }
 
+// 지난 회의 상세의 제목과 요약 칸. 제목도 요약 상태(만드는 중·실패)를 읽는다.
+function fillArchiveDetailSummary({ result }) {
+  $('archiveDetailTitle').textContent = formatMeetingLabel({
+    meeting: { ...result.meeting, hasSummary: Boolean(result.summaryText) }, t,
+  });
+  $('archiveSummary').textContent = pickArchiveSummaryText({
+    summaryText: result.summaryText, summaryStatus: result.meeting.summaryStatus, t,
+  });
+}
+
 async function showArchiveMeeting({ id }) {
   const result = await window.seeon.readMeetingArchive({ id }).catch(() => null);
   if (!result?.isOk) { setArchiveStatus(result?.message || t('archive.readFailed')); return; }
   $('archiveList').hidden = true;
   $('archiveDetail').hidden = false;
   $('archiveDetail').dataset.meetingId = id;
-  $('archiveDetailTitle').textContent = formatMeetingLabel({
-    meeting: { ...result.meeting, hasSummary: Boolean(result.summaryText) }, t,
-  });
+  $('archiveDetail').dataset.sessionId = result.meeting.sessionId || '';
   $('archiveScript').textContent = result.scriptText || t('archive.noScript');
-  $('archiveSummary').textContent = pickArchiveSummaryText({
-    summaryText: result.summaryText, summaryStatus: result.meeting.summaryStatus, t,
-  });
+  fillArchiveDetailSummary({ result });
   setArchiveStatus(t('archive.detailOpened'));
   $('archiveDetailTitle').focus();
+}
+
+// 요약이 저장·실패한 뒤 열려 있는 상세의 제목·요약 칸만 다시 채운다. 읽던 자리를 잃지 않게 포커스는 옮기지 않는다.
+async function refreshArchiveDetailSummary({ id }) {
+  const result = await window.seeon.readMeetingArchive({ id }).catch(() => null);
+  if (!result?.isOk || $('archiveDetail').hidden || $('archiveDetail').dataset.meetingId !== id) return;
+  fillArchiveDetailSummary({ result });
+}
+
+// 요약 저장·실패·음성 저장 고지. 지난 회의 창은 showModal 로 열려 창 밖 안내(#srAnnounce)가 스크린리더에 막힐 수 있어,
+// 창이 열려 있으면 창 안 상태 줄(aria-live)에도 쓰고 그 회의 상세가 열려 있으면 요약 칸을 다시 채운다.
+function announceSummaryNotice({ text, sessionId = null }) {
+  announce(text);
+  if (!$('archiveModal').open) return;
+  setArchiveStatus(text);
+  const meetingId = pickArchiveRefreshMeetingId({
+    isDetailShown: !$('archiveDetail').hidden,
+    detailMeetingId: $('archiveDetail').dataset.meetingId || null,
+    detailSessionId: $('archiveDetail').dataset.sessionId || null,
+    summarySessionId: sessionId,
+  });
+  if (meetingId) refreshArchiveDetailSummary({ id: meetingId });
 }
 
 // 개발자 모드: 로고를 2초 안에 5번 누르면 이번 회의의 파이프라인 흐름 창(단계별 통과/미통과)을 열고,
@@ -2038,8 +2066,8 @@ window.seeon.onPipelineEvent((payload) => {
 });
 
 // 요약 시작·저장·실패 고지는 requestMeetingSummary 가 띄운다. 음성은 글을 저장한 뒤 따로 만들어지므로 그 저장만 여기서 알린다.
-window.seeon.onSummaryProgress(({ stage, message }) => {
-  if (stage === SUMMARY_STAGE_MAP.audioDone) announce(t('summary.audioSaved'));
+window.seeon.onSummaryProgress(({ stage, message, sessionId }) => {
+  if (stage === SUMMARY_STAGE_MAP.audioDone) announceSummaryNotice({ text: t('summary.audioSaved'), sessionId });
   markDebug({
     stage: DEBUG_STAGE_MAP.session, verdict: DEBUG_VERDICT_MAP.info,
     reason: '회의 요약 진행', detail: message,
@@ -2440,7 +2468,10 @@ async function requestMeetingSummary() {
       stage: DEBUG_STAGE_MAP.session, verdict: DEBUG_VERDICT_MAP.fail,
       reason: '회의 요약 실패', detail: result?.message || '알 수 없는 오류',
     });
-    announce(t('summary.failedNotice', { message: result?.message || t('summary.unknownError') }));
+    announceSummaryNotice({
+      text: t('summary.failedNotice', { message: result?.message || t('summary.unknownError') }),
+      sessionId: result?.sessionId,
+    });
     return;
   }
   markDebug({
@@ -2448,7 +2479,7 @@ async function requestMeetingSummary() {
     reason: '회의 요약 완료',
     detail: `${result.textFilePath}${result.isTruncated ? ' (길이 제한으로 잘림)' : ''}`,
   });
-  announce(t('summary.savedText'));
+  announceSummaryNotice({ text: t('summary.savedText'), sessionId: result.sessionId });
 
   console.log(`[summary] 저장 완료 — ${result.textFilePath}`);
 }

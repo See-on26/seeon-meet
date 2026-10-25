@@ -48,13 +48,14 @@ function registerSummary({
       stage: SUMMARY_STAGE_MAP.audioDone, language, detail: { audioFileName: path.basename(audioFilePath) },
     });
     console.log(`[summary] ${progress.message}`);
-    sendProgress(progress);
+    // 렌더러가 지난 회의 창에 열린 그 회의 상세를 알아볼 수 있게 세션을 함께 보낸다.
+    sendProgress({ ...progress, sessionId: session.sessionId });
   }
 
   async function failSummary({ session, language, message }) {
     await setSummaryStatus({ session, status: SUMMARY_STATUS_MAP.failed });
     sendProgress(buildSummaryProgress({ stage: SUMMARY_STAGE_MAP.fail, language, detail: { errorMessage: message } }));
-    return { isOk: false, message };
+    return { isOk: false, message, sessionId: session.sessionId };
   }
 
   // 회의 기록에 요약 글을 쓰지 못하면 지난 회의에서 요약을 볼 수 없으므로 오류를 돌려준다(없으면 null).
@@ -95,6 +96,7 @@ function registerSummary({
       .catch((error) => console.warn(`[summary] 요약 음성 처리 실패(무시): ${error?.message}`));
     return {
       isOk: true,
+      sessionId: session.sessionId,
       textFilePath: result.textFilePath,
       slideCount: result.slideCount,
       violationCount: result.violationCount,
