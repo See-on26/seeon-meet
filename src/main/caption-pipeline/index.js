@@ -77,7 +77,7 @@ const { createSlideLabeler } = require('./context/slide-labeler');
 const { createSegmentSummaryScheduler } = require('./context/segment-summary-scheduler');
 const { createSegmentSummaryAgent } = require('./output/segment-summary-agent');
 const { createContextFileWriter } = require('./context/context-file');
-const { buildTranscriptScript, buildScriptFileName } = require('./context/transcript-script');
+const { buildTranscriptScript, buildFullTranscript, buildScriptFileName } = require('./context/transcript-script');
 const { pickMeetingTitle } = require('../archive/meeting-archive');
 const { classifyQuestion, QUESTION_ROUTE_MAP } = require('./context/question-classifier');
 const { createQuestionRouter } = require('./context/question-router');
@@ -543,11 +543,12 @@ function registerPipeline({ getViewerView, meetingArchive = null }) {
     });
     console.log(`[context] 대화 스크립트 ${scriptFilePath || '(실패)'}`);
     // 사용자 문서 폴더의 회의 기록. 실패해도 회의 종료는 계속한다.
+    // 대화 스크립트는 발화·화자·질문답만 담은 전문이고, 질문·답 이름표는 그 회의 캡션 언어로 적는다.
     const archiveDir = await meetingArchive?.saveScript({
       sessionId, startedAt: lastSession.startedAt, endedAt: lastSession.endedAt,
       title: pickMeetingTitle({ snapshot: lastContextSnapshot }),
       slideCount: lastContextSnapshot.slideList.length, utteranceCount: lastContextSnapshot.utteranceList.length,
-      scriptText: buildTranscriptScript({ snapshot: lastContextSnapshot }),
+      scriptText: buildFullTranscript({ snapshot: lastContextSnapshot, language: lastSession.captionLanguage }),
     }).catch((error) => {
       console.warn(`[archive] 회의 기록 저장 실패(무시): ${error.message}`);
       return null;
