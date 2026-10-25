@@ -3,7 +3,9 @@ import assert from 'node:assert/strict';
 import { createRequire } from 'node:module';
 
 const require = createRequire(import.meta.url);
-const { createContextStore, toSlideMajor, LABEL_STATUS_MAP } = require('../src/main/caption-pipeline/context/context-store.js');
+const {
+  createContextStore, toSlideMajor, LABEL_STATUS_MAP, SEGMENT_STATUS_MAP,
+} = require('../src/main/caption-pipeline/context/context-store.js');
 
 function baseMark({ ts, slideLabel, filePath = `/tmp/${slideLabel}.jpg` }) {
   return { kind: 'slide_mark', ts, slideLabel, frameKind: 'base', filePath };
@@ -223,4 +225,44 @@ test('듣지 못한 해설은 해설 목록에서 뺀다', () => {
   assert.equal(store.forgetNarration({ ts: 100, text: '빨간 막대 상승 구간' }), true);
   assert.equal(store.forgetNarration({ ts: 100, text: '빨간 막대 상승 구간' }), false);
   assert.deepEqual(store.getNarrationList().map((narration) => narration.text), ['다른 해설']);
+});
+
+test('구간 요약: 요청 표시·결과·스냅숏·reset', () => {
+  let changeCount = 0;
+  const store = createContextStore({ onChange: () => { changeCount += 1; } });
+  store.start({ sessionId: 's1', startedAt: 0 });
+  assert.deepEqual(SEGMENT_STATUS_MAP, { requested: 'requested', ready: 'ready', failed: 'failed' });
+  store.markSegmentRequested({ key: '2@60000', slideMajor: 2, startTs: 60000, endTs: 120000, isRevisit: false });
+  store.markSegmentRequested({ key: '1@0', slideMajor: 1, startTs: 0, endTs: 60000, isRevisit: false });
+  assert.deepEqual(store.getSegmentSummaryList(), [
+    { key: '1@0', slideMajor: 1, startTs: 0, endTs: 60000, isRevisit: false, text: '', status: 'requested' },
+    { key: '2@60000', slideMajor: 2, startTs: 60000, endTs: 120000, isRevisit: false, text: '', status: 'requested' },
+  ], '시작 시각순');
+
+  assert.equal(store.setSegmentSummary({ key: '1@0', text: ' 분기 매출이 12% 늘었다. ', status: SEGMENT_STATUS_MAP.ready }), true);
+  assert.equal(store.setSegmentSummary({ key: '2@60000', status: SEGMENT_STATUS_MAP.failed }), true);
+  assert.equal(store.setSegmentSummary({ key: '9@0', text: '요청하지 않은 구간', status: SEGMENT_STATUS_MAP.ready }), false);
+  assert.equal(changeCount, 2, '결과를 넣을 때 알린다');
+  const expectedList = [
+    { key: '1@0', slideMajor: 1, startTs: 0, endTs: 60000, isRevisit: false, text: '분기 매출이 12% 늘었다.', status: 'ready' },
+    { key: '2@60000', slideMajor: 2, startTs: 60000, endTs: 120000, isRevisit: false, text: '', status: 'failed' },
+  ];
+  assert.deepEqual(store.getSegmentSummaryList(), expectedList);
+  assert.deepEqual(store.snapshot().segmentSummaryList, expectedList);
+
+  // 실패한 구간을 다시 요청하면 요청 상태로 돌아간다.
+  store.markSegmentRequested({ key: '2@60000', slideMajor: 2, startTs: 60000, endTs: 120000, isRevisit: false });
+  assert.equal(store.getSegmentSummaryList()[1].status, 'requested');
+
+  const copiedList = store.getSegmentSummaryList();
+  copiedList[0].text = '고친 글';
+  store.snapshot().segmentSummaryList.pop();
+  assert.equal(store.getSegmentSummaryList()[0].text, '분기 매출이 12% 늘었다.', '돌려준 목록을 고쳐도 저장소는 그대로다');
+  assert.equal(store.getSegmentSummaryList().length, 2);
+
+  store.reset();
+  assert.deepEqual(store.getSegmentSummaryList(), []);
+  store.markSegmentRequested({ key: '1@0', slideMajor: 1, startTs: 0, endTs: 60000, isRevisit: false });
+  store.start({ sessionId: 's2', startedAt: 0 });
+  assert.deepEqual(store.snapshot().segmentSummaryList, []);
 });

@@ -1,4 +1,5 @@
 const { formatElapsed } = require('./clock-format');
+const { isCancelledTransition, listLiveVisit } = require('./cancelled-transition');
 
 const EMPTY_SCRIPT_TEXT = '(기록된 발화가 없습니다)';
 // 화자 식별이 켜져 있었는데 Meet 화면 표시로 누가 말했는지 알 수 없던 발화. 화자를 빠짐없이 적되 지어내지 않는다.
@@ -6,21 +7,6 @@ const UNKNOWN_SPEAKER_LABEL = '화자 미상';
 const NO_SCREEN_TEXT_LINE = '화면이 바뀌었습니다 (화면 설명 없음)';
 // 전환 고지 요청은 방문을 연 뒤에 나간다(교차 모드는 체류 3초 뒤). 그 사이의 시각 차를 이만큼까지 같은 전환으로 본다.
 const VISIT_MATCH_SLACK_MS = 15000;
-
-function isCancelledTransition({ transition, cancelledList }) {
-  return cancelledList.some((cancelled) => cancelled.slideMajor === transition.slideMajor
-    && cancelled.requestTs !== null && cancelled.requestTs === transition.ts);
-}
-
-function isFlashVisit({ slideMajor, visit, cancelledList }) {
-  return cancelledList.some((cancelled) => cancelled.slideMajor === slideMajor
-    && cancelled.transitionTs !== null && cancelled.transitionTs === visit.startTs);
-}
-
-function listLiveVisit({ slide, cancelledList }) {
-  return (slide.visitList || [])
-    .filter((visit) => !isFlashVisit({ slideMajor: slide.major, visit, cancelledList }));
-}
 
 // 전환 줄은 그 화면이 실제로 바뀐 시각(방문 시작)에 둔다. 고지가 늦게 만들어져도 그 화면에서 오간 말보다 앞에 온다.
 function resolveTransitionLineTs({ transition, slideByMajorMap }) {
