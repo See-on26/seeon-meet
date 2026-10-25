@@ -300,6 +300,33 @@ test('generateText: 전환 해설이 없던 화면은 회의 뒤 텍스트화한
   fs.rmSync(summariesDir, { recursive: true, force: true });
 });
 
+test('generateText: 화면 정보 텍스트화는 다시 만들 구간의 묘사·라벨 없는 화면만 배경 순위로 한다', async () => {
+  const summariesDir = makeTempDir('summary-background-');
+  const slideMarkList = [1, 2, 3].map((major) => {
+    const filePath = path.join(summariesDir, `slide-${major}.jpg`);
+    fs.writeFileSync(filePath, Buffer.from('jpeg'));
+    return { ts: (major - 1) * VISIT_MS, slideLabel: String(major), frameKind: 'base', filePath };
+  });
+  // 슬라이드 1~3 은 전환 고지가 없었다. 1 은 회의 중에 구간 요약을 마쳤고, 2 는 라벨이 있다.
+  const snapshot = buildSnapshot({ segmentSummaryList: [STORED_SEGMENT_LIST[0]] });
+  for (const slide of snapshot.slideList.slice(0, 3)) slide.hasTransition = false;
+  snapshot.slideList[1].label = { title: '채용 계획', keywordList: [], summary: '' };
+  snapshot.transitionList = snapshot.transitionList.filter((transition) => transition.slideMajor === 4);
+  const fakeSet = makeFakeSet();
+  const vlmTraffic = {
+    runBackground: async (task) => {
+      fakeSet.callList.push({ name: 'background' });
+      return task();
+    },
+  };
+  await makeGenerator({ summariesDir, fakeSet, vlmTraffic }).generateText({
+    session: buildSession({ slideMarkList }), contextSnapshot: snapshot,
+  });
+  assert.deepEqual(fakeSet.callList.filter((call) => call.name === 'recaption').map((call) => call.slideMajor), ['3']);
+  assert.deepEqual(listCallName(fakeSet.callList).slice(0, 2), ['background', 'recaption'], '배경 순위 안에서 텍스트화한다');
+  fs.rmSync(summariesDir, { recursive: true, force: true });
+});
+
 test('generateText: 스크립트 파일은 스크립트 전문이다(── 줄 없음)', async () => {
   const summariesDir = makeTempDir('summary-background-');
   const fakeSet = makeFakeSet();

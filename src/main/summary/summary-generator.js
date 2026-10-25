@@ -6,7 +6,10 @@ const { createMeetingSummaryAgent } = require('../caption-pipeline/output/meetin
 const { createSummaryRewriteAgent } = require('../caption-pipeline/output/summary-rewrite-agent');
 const { createTtsClient } = require('../caption-pipeline/output/tts-client');
 const { listSegments } = require('../caption-pipeline/context/segment-plan');
-const { buildSegmentMaterial, hasSegmentContent } = require('../caption-pipeline/context/segment-material');
+const {
+  buildSegmentMaterial, hasSegmentContent, isScreenFillNeeded,
+} = require('../caption-pipeline/context/segment-material');
+const { defaultVlmTraffic } = require('../caption-pipeline/agents/shared/vlm-traffic');
 const { SEGMENT_STATUS_MAP } = require('../caption-pipeline/context/context-store');
 const { flattenAsrSegmentList } = require('./slide-timeline');
 const { resolveSlideAssetList } = require('./slide-asset-resolver');
@@ -110,6 +113,15 @@ function countScreen({ snapshot }) {
 
 const hasSummaryText = (segmentSummary) => Boolean(segmentSummary.text.trim());
 
+// 회의 뒤 화면 정보 텍스트화 대상. 다시 만들 구간이 쓰는 화면 가운데 전환 고지가 한 번도 없었고 묘사·라벨도 없는
+// 화면이다 — 구간 재료는 묘사·라벨이 있으면 채움 줄을 쓰지 않고, 회의 중에 요약을 마친 구간은 재료를 다시 만들지 않는다.
+function listScreenFillTargetMajor({ snapshot, missingSegmentList }) {
+  const missingMajorSet = new Set(missingSegmentList.map((segment) => String(segment.slideMajor)));
+  const slideByMajorMap = new Map((snapshot.slideList || []).map((slide) => [String(slide.major), slide]));
+  return listSlideMajorWithoutTransitionLine({ snapshot })
+    .filter((major) => missingMajorSet.has(major) && isScreenFillNeeded({ slide: slideByMajorMap.get(major) }));
+}
+
 // 회의 중에 ready 로 끝난 구간 요약 가운데 지금 계산한 구간과 시작·끝 시각까지 같은 것만 쓴다.
 // 회의 중에는 닫힌 것으로 본 방문이 뒤에 이어 붙거나(취소된 전환) 구간 범위가 바뀌면 그 요약은 구간 일부만 담는다.
 function buildReadyTextByKeyMap({ snapshot, segmentList }) {
@@ -123,7 +135,7 @@ function buildReadyTextByKeyMap({ snapshot, segmentList }) {
     .map((segmentSummary) => [segmentSummary.key, segmentSummary.text || '']));
 }
 
-// 에이전트·TTS·회의 진행 여부는 바꿔 끼울 수 있다(기본은 실제 모델·서버, 진행 중인 회의 없음).
+// 에이전트·TTS·회의 진행 여부·GPU 요청 순위는 바꿔 끼울 수 있다(기본은 실제 모델·서버, 진행 중인 회의 없음).
 function createSummaryGenerator({
   config, summariesDir, onProgress = null,
   recaptionAgent = createSlideRecaptionAgent({ config }),
@@ -132,6 +144,7 @@ function createSummaryGenerator({
   rewriteAgent = createSummaryRewriteAgent({ config }),
   ttsClient = createTtsClient({ config }),
   isMeetingLive = () => false,
+  vlmTraffic = defaultVlmTraffic,
   liveCheckMs = DEFAULT_LIVE_CHECK_MS,
   sleep = (ms) => new Promise((resolve) => { setTimeout(resolve, ms); }),
 }) {
@@ -142,23 +155,24 @@ function createSummaryGenerator({
   }
 
   // 화면 정보 텍스트화. 실패하면 null 을 돌려주고 그 화면의 구간 재료에는 화면 설명 줄이 없다.
+  // 회의 뒤 일이라 GPU 배경 순위로 보낸다 — 다음 회의가 시작됐으면 실시간 해설 요청이 먼저 나간다.
   async function recaptionSlide({ asset }) {
     try {
       const baseJpegBuffer = fs.readFileSync(asset.baseFilePath);
       const annotationJpegBuffer = asset.lastAnnotationFilePath
         ? fs.readFileSync(asset.lastAnnotationFilePath) : null;
-      return await recaptionAgent.generate({
+      return await vlmTraffic.runBackground(() => recaptionAgent.generate({
         baseJpegBuffer, annotationJpegBuffer, slideMajor: asset.major,
-      });
+      }));
     } catch (error) {
       console.warn(`[summary] 슬라이드 ${asset.major} 화면 정보 텍스트화 실패: ${error.message}`);
       return null;
     }
   }
 
-  // 전환 고지가 한 번도 없었던 화면만 회의 후에 텍스트로 바꿔 그 화면 구간 재료의 화면 설명을 채운다.
-  async function buildScreenFillByMajorMap({ snapshot, assetList }) {
-    const targetMajorSet = new Set(listSlideMajorWithoutTransitionLine({ snapshot }));
+  // 대상 화면(listScreenFillTargetMajor)만 회의 후에 텍스트로 바꿔 그 화면 구간 재료의 화면 설명을 채운다.
+  async function buildScreenFillByMajorMap({ snapshot, assetList, missingSegmentList }) {
+    const targetMajorSet = new Set(listScreenFillTargetMajor({ snapshot, missingSegmentList }));
     const targetList = assetList.filter((asset) => targetMajorSet.has(String(asset.major)));
     let doneCount = 0;
     const recaptionList = await mapWithConcurrencyLimit({
@@ -177,9 +191,9 @@ function createSummaryGenerator({
   // 회의 중에 ready 로 끝난 구간 요약은 그대로 쓰고, 나머지(마지막 화면·실패·종료 때 요청 중이던 구간)는 지금 만든다.
   // 실시간 해설과 GPU 를 나눠 쓰므로 한 번에 하나씩 보낸다. 일부 구간이 실패하면 빈 요약으로 두고 계속하지만,
   // 글이 있는 구간 없이 실패만 있거나 연속으로 실패하면 던져 요약 실패로 알린다 — "요약할 내용 없음"으로 저장하지 않는다.
-  async function fillSegmentSummaryList({ snapshot, segmentList, screenFillByMajorMap, language }) {
-    const readyTextByKeyMap = buildReadyTextByKeyMap({ snapshot, segmentList });
-    const missingCount = segmentList.filter((segment) => !readyTextByKeyMap.has(segment.key)).length;
+  async function fillSegmentSummaryList({
+    snapshot, segmentList, readyTextByKeyMap, missingCount, screenFillByMajorMap, language,
+  }) {
     logStep(`구간 요약 ${segmentList.length}개 가운데 빠진 ${missingCount}개를 만든다`);
 
     const segmentSummaryList = [];
@@ -256,12 +270,12 @@ function createSummaryGenerator({
     const assetList = resolveSlideAssetList({ slideMarkList: session.slideMarkList });
     logStep(`요약 재료 수집 — 화면 ${countScreen({ snapshot })}개 · 발화 ${session.asrEntryList.length}건`);
 
-    const screenFillByMajorMap = await buildScreenFillByMajorMap({ snapshot, assetList });
+    const segmentList = listSegments({ snapshot, endTs: session.endedAt });
+    const readyTextByKeyMap = buildReadyTextByKeyMap({ snapshot, segmentList });
+    const missingSegmentList = segmentList.filter((segment) => !readyTextByKeyMap.has(segment.key));
+    const screenFillByMajorMap = await buildScreenFillByMajorMap({ snapshot, assetList, missingSegmentList });
     const segmentSummaryList = await fillSegmentSummaryList({
-      snapshot,
-      segmentList: listSegments({ snapshot, endTs: session.endedAt }),
-      screenFillByMajorMap,
-      language,
+      snapshot, segmentList, readyTextByKeyMap, missingCount: missingSegmentList.length, screenFillByMajorMap, language,
     });
     const { bodyText, isTruncated } = segmentSummaryList.some(hasSummaryText)
       ? await summarizeMeeting({ segmentSummaryList, snapshot, language })
