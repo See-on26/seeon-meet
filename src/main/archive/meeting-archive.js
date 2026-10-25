@@ -120,14 +120,19 @@ function createMeetingArchive({ rootDir }) {
 
   // 앱 시작 때 한 번 부른다. 요약을 만드는 중에 앱이 꺼진 회의는 pending 으로 남아 지난 회의가 "만드는 중"을
   // 계속 보이므로 실패로 바꾼다. 시작 시점에는 도는 요약이 없다. 바꾼 회의 수를 돌려준다.
+  // 한 회의의 메타를 쓰지 못해도 나머지 회의는 계속 바꾼다.
   async function failStalePendingSummary() {
     let changedCount = 0;
     for (const dirName of await listMeetingDirName()) {
       const meetingDir = path.join(rootDir, dirName);
-      const meta = await readMeta(meetingDir);
-      if (meta?.summaryStatus !== SUMMARY_STATUS_MAP.pending) continue;
-      await writeMeta({ meetingDir, meta: { ...meta, summaryStatus: SUMMARY_STATUS_MAP.failed } });
-      changedCount += 1;
+      try {
+        const meta = await readMeta(meetingDir);
+        if (meta?.summaryStatus !== SUMMARY_STATUS_MAP.pending) continue;
+        await writeMeta({ meetingDir, meta: { ...meta, summaryStatus: SUMMARY_STATUS_MAP.failed } });
+        changedCount += 1;
+      } catch (error) {
+        console.warn(`[archive] ${dirName} 의 끝나지 않은 요약을 실패로 바꾸지 못함(무시): ${error.message}`);
+      }
     }
     return changedCount;
   }

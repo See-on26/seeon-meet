@@ -1,5 +1,6 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
+import fs from 'node:fs';
 import { createRequire } from 'node:module';
 import { mkdtemp, readFile, writeFile, readdir, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
@@ -93,6 +94,31 @@ test('meeting-archive: 시작 때 남은 pending 은 failed 로 바꾸고 다른
   assert.equal(changed.title, '회의 a', '제목·끝 시각은 그대로');
   assert.equal(changed.endedAt, startedAt + 60_000);
   assert.equal(await archive.failStalePendingSummary(), 0, '다시 불러도 바꿀 것이 없다');
+  await rm(rootDir, { recursive: true, force: true });
+});
+
+test('meeting-archive: 한 회의의 요약 상태를 바꾸지 못해도 나머지 회의는 계속 바꾼다', async (t) => {
+  const { rootDir, archive } = await makeArchive();
+  const idBySessionMap = {};
+  for (const [index, sessionId] of ['a', 'b', 'c'].entries()) {
+    const meetingStartedAt = startedAt + index * 3_600_000;
+    const meetingDir = await archive.saveScript({ sessionId, startedAt: meetingStartedAt, scriptText: 'x' });
+    await archive.setSummaryStatus({ sessionId, startedAt: meetingStartedAt, status: 'pending' });
+    idBySessionMap[sessionId] = path.basename(meetingDir);
+  }
+  const originalWriteFile = fs.promises.writeFile;
+  t.mock.method(fs.promises, 'writeFile', async (filePath, ...argList) => {
+    if (String(filePath).includes(idBySessionMap.b)) throw new Error('쓰기 권한 없음');
+    return originalWriteFile.call(fs.promises, filePath, ...argList);
+  });
+  const warn = t.mock.method(console, 'warn', () => {});
+
+  assert.equal(await archive.failStalePendingSummary(), 2);
+  assert.equal(warn.mock.callCount(), 1);
+  assert.match(warn.mock.calls[0].arguments[0], /쓰기 권한 없음/);
+  t.mock.restoreAll();
+  const readStatus = async (sessionId) => (await archive.read({ id: idBySessionMap[sessionId] })).meeting.summaryStatus;
+  assert.deepEqual([await readStatus('a'), await readStatus('b'), await readStatus('c')], ['failed', 'pending', 'failed']);
   await rm(rootDir, { recursive: true, force: true });
 });
 

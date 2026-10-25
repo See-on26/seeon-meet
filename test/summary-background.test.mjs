@@ -387,10 +387,11 @@ test('generateAudio: 회의가 진행 중이면 기다렸다가 한 번만 합�
 // registerSummary 를 가짜 ipcMain·파이프라인 핸들·실제 회의 기록(임시 폴더)으로 띄운다.
 async function startSummaryIpc({
   fakeSet, isMeetingLive = () => false, session = buildSession(), contextSnapshot = buildSnapshot(),
+  archiveOverrideMap = {},
 }) {
   const summariesDir = makeTempDir('summary-background-');
   const rootDir = makeTempDir('summary-background-archive-');
-  const meetingArchive = createMeetingArchive({ rootDir });
+  const meetingArchive = { ...createMeetingArchive({ rootDir }), ...archiveOverrideMap };
   await meetingArchive.saveScript({ sessionId: session.sessionId, startedAt: session.startedAt, title: '분기 보고', scriptText: '스크립트' });
   const handlerMap = new Map();
   const progressList = [];
@@ -480,6 +481,24 @@ test('summary-generate: 구간 요약이 모두 실패하면 failed 상태와 fa
   assert.match(ipc.progressList[1].message, /GPU 응답 없음/);
   await nextTick();
   assert.ok(!listCallName(fakeSet.callList).some((name) => ['summarize', 'rewrite', 'speak'].includes(name)));
+  ipc.cleanUp();
+});
+
+test('summary-generate: 회의 기록에 요약 글을 쓰지 못하면 failed 상태와 fail 알림', async () => {
+  const fakeSet = makeFakeSet();
+  const ipc = await startSummaryIpc({
+    fakeSet, archiveOverrideMap: { saveSummary: async () => { throw new Error('디스크 공간 부족'); } },
+  });
+  const result = await ipc.handler();
+  assert.equal(result.isOk, false);
+  assert.match(result.message, /디스크 공간 부족/);
+  const meeting = await ipc.readMeeting();
+  assert.equal(meeting.meeting.summaryStatus, 'failed', '지난 회의가 "요약 없음" 대신 실패를 알린다');
+  // done 은 생성기가 out/summaries 에 문서를 쓴 알림(개발 기록용)이고, 회의 기록 저장 실패는 그 뒤 fail 로 알린다.
+  assert.deepEqual(ipc.progressList.map((progress) => progress.stage), ['start', 'done', 'fail']);
+  assert.match(ipc.progressList.at(-1).message, /디스크 공간 부족/);
+  await nextTick();
+  assert.ok(!listCallName(fakeSet.callList).includes('speak'), '실패로 알린 요약의 음성은 만들지 않는다');
   ipc.cleanUp();
 });
 

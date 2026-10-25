@@ -51,6 +51,24 @@ function registerSummary({
     sendProgress(progress);
   }
 
+  async function failSummary({ session, language, message }) {
+    await setSummaryStatus({ session, status: SUMMARY_STATUS_MAP.failed });
+    sendProgress(buildSummaryProgress({ stage: SUMMARY_STAGE_MAP.fail, language, detail: { errorMessage: message } }));
+    return { isOk: false, message };
+  }
+
+  // 회의 기록에 요약 글을 쓰지 못하면 지난 회의에서 요약을 볼 수 없으므로 오류를 돌려준다(없으면 null).
+  async function saveArchiveSummary({ session, documentText }) {
+    if (!meetingArchive) return null;
+    try {
+      await meetingArchive.saveSummary({ sessionId: session.sessionId, startedAt: session.startedAt, summaryText: documentText });
+      return null;
+    } catch (error) {
+      console.error(`[archive] 요약 기록 저장 실패: ${error.message}`);
+      return error;
+    }
+  }
+
   ipcMain.handle('summary-generate', async () => {
     const session = pipelineHandle.consumeLastSession();
     const contextSnapshot = pipelineHandle.consumeLastContext();
@@ -63,19 +81,14 @@ function registerSummary({
       result = await generator.generateText({ session, contextSnapshot });
     } catch (error) {
       console.error('[summary] 요약 생성 실패:', error.message);
-      await setSummaryStatus({ session, status: SUMMARY_STATUS_MAP.failed });
-      sendProgress(buildSummaryProgress({
-        stage: SUMMARY_STAGE_MAP.fail, language, detail: { errorMessage: error.message },
-      }));
-      return { isOk: false, message: error.message };
+      return failSummary({ session, language, message: error.message });
     }
 
-    await writeArchive({
-      label: '요약 기록 저장',
-      write: () => meetingArchive.saveSummary({
-        sessionId: session.sessionId, startedAt: session.startedAt, summaryText: result.documentText,
-      }),
-    });
+    // 요약 문서(out/summaries)는 남지만 지난 회의에는 없으므로 실패로 알리고 음성도 만들지 않는다.
+    const saveError = await saveArchiveSummary({ session, documentText: result.documentText });
+    if (saveError) {
+      return failSummary({ session, language, message: `회의 기록에 요약을 저장하지 못했다 — ${saveError.message}` });
+    }
     await setSummaryStatus({ session, status: SUMMARY_STATUS_MAP.done });
 
     saveSummaryAudio({ session, language, documentText: result.documentText })
