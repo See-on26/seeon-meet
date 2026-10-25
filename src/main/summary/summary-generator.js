@@ -45,7 +45,7 @@ const SUMMARY_PROGRESS_TEXT_MAP = {
 };
 const readProgressText = (language) => SUMMARY_PROGRESS_TEXT_MAP[language] || SUMMARY_PROGRESS_TEXT_MAP.ko;
 
-// 구간 요약이 모두 빈 회의의 요약 본문. 통합 요약은 재료가 없으면 지어내므로 부르지 않는다.
+// 실패 없이 구간 요약이 모두 빈 회의의 요약 본문. 통합 요약은 재료가 없으면 지어내므로 부르지 않는다.
 const EMPTY_SUMMARY_BODY_TEXT_MAP = {
   ko: '회의에서 요약할 만한 말과 화면 기록이 없어요',
   en: 'There was no speech or screen record to summarize',
@@ -54,6 +54,9 @@ const readEmptySummaryBodyText = (language) => EMPTY_SUMMARY_BODY_TEXT_MAP[langu
 
 // 화면 정보 텍스트화 결과를 구간 재료의 화면 설명 한 줄로 쓸 때의 최대 길이.
 const SCREEN_FILL_MAX_CHARS = 80;
+// 회의 뒤 구간 요약이 이만큼 잇달아 실패하면 GPU 서버가 응답하지 않는 것으로 보고 나머지 구간을 묻지 않는다.
+// 구간마다 요청 시간 제한(60초)을 다 기다리지 않게 한다.
+const MAX_CONSECUTIVE_SEGMENT_FAILURE_COUNT = 3;
 
 function buildSummaryProgress({ stage, language, detail = {} }) {
   return { stage, message: readProgressText(language)[stage](detail) };
@@ -159,7 +162,8 @@ function createSummaryGenerator({
   }
 
   // 회의 중에 ready 로 끝난 구간 요약은 그대로 쓰고, 나머지(마지막 화면·실패·종료 때 요청 중이던 구간)는 지금 만든다.
-  // 실시간 해설과 GPU 를 나눠 쓰므로 한 번에 하나씩 보낸다. 실패한 구간은 빈 요약으로 두고 계속한다.
+  // 실시간 해설과 GPU 를 나눠 쓰므로 한 번에 하나씩 보낸다. 일부 구간이 실패하면 빈 요약으로 두고 계속하지만,
+  // 글이 있는 구간 없이 실패만 있거나 연속으로 실패하면 던져 요약 실패로 알린다 — "요약할 내용 없음"으로 저장하지 않는다.
   async function fillSegmentSummaryList({ snapshot, segmentList, screenFillByMajorMap, language }) {
     const readyTextByKeyMap = new Map((snapshot.segmentSummaryList || [])
       .filter((segmentSummary) => segmentSummary.status === SEGMENT_STATUS_MAP.ready)
@@ -168,21 +172,40 @@ function createSummaryGenerator({
     logStep(`구간 요약 ${segmentList.length}개 가운데 빠진 ${missingCount}개를 만든다`);
 
     const segmentSummaryList = [];
+    let failedCount = 0;
+    let consecutiveFailedCount = 0;
+    let lastErrorMessage = '';
     for (const segment of segmentList) {
       const { key, slideMajor, startTs, endTs, isRevisit } = segment;
-      const { text, status } = readyTextByKeyMap.has(key)
-        ? { text: readyTextByKeyMap.get(key), status: SEGMENT_STATUS_MAP.ready }
+      const { text, status, errorMessage, isAsked } = readyTextByKeyMap.has(key)
+        ? { text: readyTextByKeyMap.get(key), status: SEGMENT_STATUS_MAP.ready, isAsked: false }
         : await summarizeSegment({ snapshot, segment, screenFillByMajorMap, language });
+      if (status === SEGMENT_STATUS_MAP.failed) {
+        failedCount += 1;
+        consecutiveFailedCount += 1;
+        lastErrorMessage = errorMessage;
+        if (consecutiveFailedCount >= MAX_CONSECUTIVE_SEGMENT_FAILURE_COUNT) {
+          throw new Error(`구간 요약이 연속 ${consecutiveFailedCount}개 실패해 나머지 구간을 묻지 않았다 — ${lastErrorMessage}`);
+        }
+      } else if (isAsked) {
+        consecutiveFailedCount = 0;
+      }
       segmentSummaryList.push({ key, slideMajor, startTs, endTs, isRevisit, text, status });
+    }
+    if (failedCount && !segmentSummaryList.some(hasSummaryText)) {
+      throw new Error(`구간 요약 ${failedCount}개가 실패하고 글이 있는 구간이 없다 — ${lastErrorMessage}`);
+    }
+    if (failedCount) {
+      console.warn(`[summary] 구간 요약 ${segmentList.length}개 가운데 ${failedCount}개가 실패해 빈 요약으로 두고 통합한다`);
     }
     return segmentSummaryList;
   }
 
-  // 재료가 없는 구간은 GPU 에 묻지 않고 빈 구간으로 둔다.
+  // 재료가 없는 구간은 GPU 에 묻지 않고 빈 구간으로 둔다. isAsked 는 GPU 가 실제로 답했는지다(연속 실패 판정).
   async function summarizeSegment({ snapshot, segment, screenFillByMajorMap, language }) {
     if (!hasSegmentContent({ snapshot, segment, screenFillByMajorMap })) {
       logStep(`구간 요약 ${segment.key} — 재료 없음(묻지 않음)`);
-      return { text: '', status: SEGMENT_STATUS_MAP.ready };
+      return { text: '', status: SEGMENT_STATUS_MAP.ready, isAsked: false };
     }
     const startedAt = Date.now();
     try {
@@ -190,10 +213,10 @@ function createSummaryGenerator({
       const { text } = await segmentSummaryAgent.summarize({ materialText, language });
       const summaryText = typeof text === 'string' ? text : '';
       logStep(`구간 요약 ${segment.key} — ${summaryText ? `${summaryText.length}자` : '빈 구간'} (${Date.now() - startedAt}ms)`);
-      return { text: summaryText, status: SEGMENT_STATUS_MAP.ready };
+      return { text: summaryText, status: SEGMENT_STATUS_MAP.ready, isAsked: true };
     } catch (error) {
-      console.warn(`[summary] 구간 요약 ${segment.key} 실패 — 빈 요약으로 두고 계속한다: ${error?.message}`);
-      return { text: '', status: SEGMENT_STATUS_MAP.failed };
+      console.warn(`[summary] 구간 요약 ${segment.key} 실패: ${error?.message}`);
+      return { text: '', status: SEGMENT_STATUS_MAP.failed, errorMessage: error?.message || String(error), isAsked: true };
     }
   }
 

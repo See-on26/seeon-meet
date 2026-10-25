@@ -32,19 +32,19 @@ function makeTempDir(prefix) {
   return fs.mkdtempSync(path.join(os.tmpdir(), prefix));
 }
 
-// 슬라이드 1~4 를 1분씩 차례로 보고, 슬라이드 4 를 보던 중 4분에 회의가 끝났다.
-function buildSnapshot({ segmentSummaryList = [], qaList = [] } = {}) {
+// 슬라이드 1~4 를 1분씩 차례로 보고, 마지막 슬라이드를 보던 중(4분)에 회의가 끝났다.
+function buildSnapshot({ segmentSummaryList = [], qaList = [], majorList = MAJOR_LIST } = {}) {
   return {
     sessionId: 'session-1',
     startedAt: 0,
-    slideList: MAJOR_LIST.map((major) => ({
+    slideList: majorList.map((major) => ({
       major, displayNumber: major, hasTransition: true,
-      visitList: [{ startTs: (major - 1) * VISIT_MS, endTs: major === 4 ? null : major * VISIT_MS }],
+      visitList: [{ startTs: (major - 1) * VISIT_MS, endTs: major === majorList.at(-1) ? null : major * VISIT_MS }],
     })),
-    transitionList: MAJOR_LIST.map((major) => ({
+    transitionList: majorList.map((major) => ({
       ts: (major - 1) * VISIT_MS + 1000, slideMajor: major, text: `슬라이드 ${major}: 화면 ${major}`,
     })),
-    utteranceList: MAJOR_LIST.map((major) => ({
+    utteranceList: majorList.map((major) => ({
       ts: (major - 1) * VISIT_MS + 2000, text: `말 ${major}`, speakerHint: '김지오',
     })),
     narrationList: [],
@@ -54,10 +54,10 @@ function buildSnapshot({ segmentSummaryList = [], qaList = [] } = {}) {
   };
 }
 
-function buildSession({ captionLanguage = 'ko', slideMarkList = [] } = {}) {
+function buildSession({ captionLanguage = 'ko', slideMarkList = [], majorList = MAJOR_LIST } = {}) {
   return {
-    sessionId: 'session-1', startedAt: 0, endedAt: 4 * VISIT_MS, captionLanguage,
-    asrEntryList: MAJOR_LIST.map((major) => ({ ts: (major - 1) * VISIT_MS + 2000, text: `말 ${major}`, speakerHint: '김지오' })),
+    sessionId: 'session-1', startedAt: 0, endedAt: majorList.length * VISIT_MS, captionLanguage,
+    asrEntryList: majorList.map((major) => ({ ts: (major - 1) * VISIT_MS + 2000, text: `말 ${major}`, speakerHint: '김지오' })),
     slideMarkList,
   };
 }
@@ -165,15 +165,8 @@ test('generateText: 요약이 잘렸으면 재작성이 잘림을 놓쳐도 문�
 
 test('generateText: 구간 요약이 모두 비면 통합을 부르지 않는다', async () => {
   const summariesDir = makeTempDir('summary-background-');
-  // 하나는 빈 구간, 하나는 실패, 나머지도 빈 구간이다. 실패한 구간은 빈 요약으로 두고 계속한다.
-  let callCount = 0;
-  const fakeSet = makeFakeSet({
-    segmentText: () => {
-      callCount += 1;
-      if (callCount === 2) throw new Error('GPU 시간 초과');
-      return { text: '' };
-    },
-  });
+  // 실패한 구간 없이 GPU 가 모든 구간을 담을 내용이 없다고 답했다.
+  const fakeSet = makeFakeSet({ segmentText: () => ({ text: '' }) });
   const generator = makeGenerator({ summariesDir, fakeSet });
   const result = await generator.generateText({ session: buildSession(), contextSnapshot: buildSnapshot() });
   assert.deepEqual(listCallName(fakeSet.callList), ['segment', 'segment', 'segment', 'segment']);
@@ -189,6 +182,68 @@ test('generateText: 구간 요약이 모두 비면 통합을 부르지 않는다
   assert.match(englishResult.documentText, /^Meeting summary\n/);
   assert.match(englishResult.documentText, /\n\nThere was no speech or screen record to summarize\n$/);
   assert.ok(!listCallName(englishFakeSet.callList).includes('summarize'));
+  fs.rmSync(summariesDir, { recursive: true, force: true });
+});
+
+test('generateText: 구간 요약이 모두 실패하면 던진다', async () => {
+  const summariesDir = makeTempDir('summary-background-');
+  // 슬라이드 1 은 회의 중에 빈 구간으로 끝났고, 회의 뒤에는 실패·빈 구간·실패다. 글이 있는 구간이 없다.
+  const storedList = [{ ...STORED_SEGMENT_LIST[0], text: '' }];
+  let callCount = 0;
+  const fakeSet = makeFakeSet({
+    segmentText: () => {
+      callCount += 1;
+      if (callCount === 2) return { text: '' };
+      throw new Error('GPU 시간 초과');
+    },
+  });
+  await assert.rejects(
+    makeGenerator({ summariesDir, fakeSet }).generateText({
+      session: buildSession(), contextSnapshot: buildSnapshot({ segmentSummaryList: storedList }),
+    }),
+    /구간 요약 2개가 실패.*GPU 시간 초과/,
+  );
+  assert.deepEqual(listCallName(fakeSet.callList), ['segment', 'segment', 'segment'], '통합·재작성을 부르지 않는다');
+  assert.deepEqual(fs.readdirSync(summariesDir), [], '요약 문서를 쓰지 않는다');
+  fs.rmSync(summariesDir, { recursive: true, force: true });
+});
+
+test('generateText: 일부 구간만 실패하면 경고를 남기고 나머지로 통합한다', async () => {
+  const summariesDir = makeTempDir('summary-background-');
+  const fakeSet = makeFakeSet({
+    segmentText: ({ materialText }) => {
+      if (materialText.includes('화면: 슬라이드 2')) throw new Error('GPU 시간 초과');
+      return { text: `${materialText.match(/화면: (슬라이드 \d+)/)[1]} 요약.` };
+    },
+  });
+  const result = await makeGenerator({ summariesDir, fakeSet }).generateText({
+    session: buildSession(), contextSnapshot: buildSnapshot(),
+  });
+  assert.equal(result.isOk, true);
+  const [summarizeCall] = fakeSet.callList.filter((call) => call.name === 'summarize');
+  assert.ok(!summarizeCall.integrationText.includes('슬라이드 2 요약.'));
+  assert.ok(summarizeCall.integrationText.includes('슬라이드 3 요약.'));
+  const warnTextList = console.warn.mock.calls.map((call) => String(call.arguments[0]));
+  assert.ok(warnTextList.some((text) => /구간 요약 4개 가운데 1개가 실패/.test(text)), warnTextList.join('\n'));
+  fs.rmSync(summariesDir, { recursive: true, force: true });
+});
+
+test('generateText: 연속 3번 실패하면 나머지를 묻지 않고 던진다', async () => {
+  const summariesDir = makeTempDir('summary-background-');
+  // 슬라이드 1 은 회의 중에 요약을 마쳤다. 회의 뒤 슬라이드 2·3·4 가 잇달아 실패하면 5·6 은 묻지 않는다.
+  const majorList = [1, 2, 3, 4, 5, 6];
+  const fakeSet = makeFakeSet({ segmentText: () => { throw new Error('GPU 응답 없음'); } });
+  await assert.rejects(
+    makeGenerator({ summariesDir, fakeSet }).generateText({
+      session: buildSession({ majorList }),
+      contextSnapshot: buildSnapshot({ majorList, segmentSummaryList: [STORED_SEGMENT_LIST[0]] }),
+    }),
+    /연속 3개.*GPU 응답 없음/,
+  );
+  const segmentCallList = fakeSet.callList.filter((call) => call.name === 'segment');
+  assert.deepEqual(segmentCallList.map((call) => call.materialText.match(/화면: (슬라이드 \d+)/)[1]),
+    ['슬라이드 2', '슬라이드 3', '슬라이드 4']);
+  assert.deepEqual(listCallName(fakeSet.callList), ['segment', 'segment', 'segment']);
   fs.rmSync(summariesDir, { recursive: true, force: true });
 });
 
@@ -363,6 +418,22 @@ test('진행 알림은 start·done·fail·audio-done 만 보낸다', async () =>
   await failingIpc.handler();
   assert.deepEqual(failingIpc.progressList.map((progress) => progress.stage), ['start', 'fail']);
   failingIpc.cleanUp();
+});
+
+test('summary-generate: 구간 요약이 모두 실패하면 failed 상태와 fail 알림', async () => {
+  const fakeSet = makeFakeSet({ segmentText: () => { throw new Error('GPU 응답 없음'); } });
+  const ipc = await startSummaryIpc({ fakeSet });
+  const result = await ipc.handler();
+  assert.equal(result.isOk, false);
+  assert.match(result.message, /GPU 응답 없음/);
+  const meeting = await ipc.readMeeting();
+  assert.equal(meeting.meeting.summaryStatus, 'failed');
+  assert.equal(meeting.summaryText, '', '"요약할 내용 없음" 문서를 남기지 않는다');
+  assert.deepEqual(ipc.progressList.map((progress) => progress.stage), ['start', 'fail']);
+  assert.match(ipc.progressList[1].message, /GPU 응답 없음/);
+  await nextTick();
+  assert.ok(!listCallName(fakeSet.callList).some((name) => ['summarize', 'rewrite', 'speak'].includes(name)));
+  ipc.cleanUp();
 });
 
 test('summary-generate 실패: 상태 failed·fail 진행 알림', async () => {
