@@ -9,6 +9,7 @@ const { createMeetingSummaryAgent } = require('../src/main/caption-pipeline/outp
 const { createSummaryRewriteAgent } = require('../src/main/caption-pipeline/output/summary-rewrite-agent.js');
 const { buildSummarySystemPrompt } = require('../src/main/caption-pipeline/prompts/meeting-summary.js');
 const { buildSummaryRewriteSystemPrompt, buildSummaryRewriteInput } = require('../src/main/caption-pipeline/prompts/summary-rewrite.js');
+const { buildSegmentSummaryPrompt } = require('../src/main/caption-pipeline/prompts/segment-summary.js');
 const { VLM_PRIORITY_MAP } = require('../src/main/caption-pipeline/agents/shared/vlm-gateway.js');
 const { readPipelineConfig } = require('../src/main/caption-pipeline/config.js');
 
@@ -105,6 +106,42 @@ const NEW_MATERIAL_LINE_LIST = [
 ];
 // 영어 요약 지시문이 빼는 한국어 낭독용 규칙 줄(meeting-summary.js 의 KOREAN_READING_RULE_PATTERN 과 같다).
 const KOREAN_READING_RULE_PATTERN = /음차|엔에프티|한글 표기|퍼센트/;
+// 기존 줄 사이에 더한 규칙 줄(지시문에 나오는 순서). 네 부분 제목 줄, 견주기의 판단 한계, 지어내기 꼴 금지다.
+const ADDED_SUMMARY_RULE_LINE_LIST = [
+  '네 부분은 각각 제목 한 줄로 시작한다. 제목은 개요 / 다룬 주제 / 슬라이드별 내용 / 결정된 것과 앞으로 할 일이다.',
+  '제목 줄에는 번호·기호·꾸밈 없이 그 이름만 쓰고, 내용은 다음 줄부터 쓴다.',
+  '    견주는 것은 값의 크기까지다. "가장 큰 영향"·"통계적으로 유의미" 같은 판단은 재료에 그 말이 있을 때만 쓴다.',
+  '  · 재료가 말하지 않은 인과(이로 인해·때문에·그 결과)로 사실을 잇지 마라.',
+  '  · 한 항목의 값·수식어를 다른 항목에 옮겨 붙이지 마라.',
+  '  · 지난 답변·과거 계획·전망을 이번 회의의 결정이나 지금의 사실처럼 쓰지 마라.',
+  '  · 회의의 목적·배경은 재료에 나온 것만 쓴다.',
+];
+// 요약·구간 요약 지시문이 함께 담는 지어내기 꼴 금지 규칙(재료에 없는 인과·옮겨 붙이기·시점 섞기·목적 덧붙이기).
+const FABRICATION_RULE_PATTERN_LIST = [
+  /재료가 말하지 않은 인과\(이로 인해·때문에·그 결과\)로 사실을 잇지/,
+  /한 항목의 값·수식어를 다른 항목에 옮겨 붙이지/,
+  /지난 답변·과거 계획·전망을 이번 회의의 결정이나 지금의 사실처럼 쓰지/,
+  /회의의 목적·배경은 재료에 나온 것만 쓴다/,
+];
+const JUDGMENT_RULE_PATTERN = /"가장 큰 영향"·"통계적으로 유의미" 같은 판단은 재료에 그 말이 있을 때만 쓴다/;
+const KOREAN_TITLE_TEXT = '개요 / 다룬 주제 / 슬라이드별 내용 / 결정된 것과 앞으로 할 일';
+const ENGLISH_TITLE_TEXT = 'Overview / Topics / Slide by slide / Decisions and next steps';
+
+function indexOfLine({ lineList, pattern, label }) {
+  const foundIndex = lineList.findIndex((line) => pattern.test(line));
+  assert.ok(foundIndex >= 0, `${label}: ${pattern} 줄이 없다`);
+  return foundIndex;
+}
+
+// 패턴마다 맞는 줄이 startPattern 줄과 endPattern 줄 사이(그 절 안)에 있어야 한다.
+function assertRuleListInSection({ lineList, patternList, startPattern, endPattern, label }) {
+  const startIndex = indexOfLine({ lineList, pattern: startPattern, label });
+  const endIndex = indexOfLine({ lineList, pattern: endPattern, label });
+  for (const pattern of patternList) {
+    const foundIndex = indexOfLine({ lineList, pattern, label });
+    assert.ok(startIndex < foundIndex && foundIndex < endIndex, `${label}: ${pattern} 줄이 ${startPattern} 절 밖에 있다`);
+  }
+}
 
 function assertSubsequence({ expectedLineList, actualLineList, label }) {
   let cursor = 0;
@@ -536,7 +573,13 @@ test('요약 지시문: 재료 설명 줄만 바뀌고 형식·구성·설명 �
 
   const koreanLineList = buildSummarySystemPrompt({ language: 'ko' }).split('\n');
   assertSubsequence({ expectedLineList: keptLineList, actualLineList: koreanLineList, label: '한국어' });
-  assert.equal(koreanLineList.length, PREVIOUS_SUMMARY_PROMPT_LINE_LIST.length, '줄을 더하거나 빼지 않는다');
+  assert.equal(
+    koreanLineList.length,
+    PREVIOUS_SUMMARY_PROMPT_LINE_LIST.length + ADDED_SUMMARY_RULE_LINE_LIST.length,
+    '더한 규칙 줄 말고는 줄을 더하거나 빼지 않는다',
+  );
+  const extraLineList = koreanLineList.filter((line) => !keptLineList.includes(line) && !NEW_MATERIAL_LINE_LIST.includes(line));
+  assert.deepEqual(extraLineList, ADDED_SUMMARY_RULE_LINE_LIST, '기존 줄과 재료 설명 말고 늘어난 줄은 더한 규칙 줄뿐이다');
   for (const line of PREVIOUS_MATERIAL_LINE_LIST) assert.ok(!koreanLineList.includes(line), `옛 재료 설명이 남았다 — ${line}`);
   assertSubsequence({ expectedLineList: NEW_MATERIAL_LINE_LIST, actualLineList: koreanLineList, label: '새 재료 설명' });
   // 재료 설명은 옛 줄이 있던 자리에 들어간다.
@@ -552,6 +595,67 @@ test('요약 지시문: 재료 설명 줄만 바뀌고 형식·구성·설명 �
   });
   assertSubsequence({ expectedLineList: NEW_MATERIAL_LINE_LIST, actualLineList: englishLineList, label: '영어 새 재료 설명' });
   for (const line of PREVIOUS_MATERIAL_LINE_LIST) assert.ok(!englishLineList.includes(line), `영어에 옛 재료 설명이 남았다 — ${line}`);
+});
+
+test('요약 지시문: 네 부분은 번호·기호 없이 제목 한 줄로 시작하고, 영어면 영어 제목을 쓴다', () => {
+  const titleRulePatternList = [
+    new RegExp(`^네 부분은 각각 제목 한 줄로 시작한다\\. 제목은 ${KOREAN_TITLE_TEXT}이다\\.$`),
+    /^제목 줄에는 번호·기호·꾸밈 없이 그 이름만 쓰고, 내용은 다음 줄부터 쓴다\.$/,
+  ];
+  for (const language of ['ko', 'en']) {
+    const lineList = buildSummarySystemPrompt({ language }).split('\n');
+    assertRuleListInSection({
+      lineList, patternList: titleRulePatternList, startPattern: /^■ 구성/, endPattern: /^■ 설명 방식/, label: `${language} 구성`,
+    });
+  }
+  // 제목 줄 규칙은 형식 규칙(마크다운·기호 금지)과 맞아야 한다.
+  for (const line of ADDED_SUMMARY_RULE_LINE_LIST.slice(0, 2)) assert.doesNotMatch(line, /#|\*\*|\d\./);
+
+  const englishLineList = buildSummarySystemPrompt({ language: 'en' }).split('\n');
+  const englishTitleIndex = indexOfLine({
+    lineList: englishLineList,
+    pattern: new RegExp(`^네 부분은 각각 영어 제목 한 줄로 시작한다\\. 제목 줄에는 번호·기호·꾸밈 없이 ${ENGLISH_TITLE_TEXT} 가운데 그 부분의 이름만 쓴다\\.$`),
+    label: '영어 제목 줄',
+  });
+  assert.ok(englishTitleIndex > indexOfLine({ lineList: englishLineList, pattern: /^\[출력 언어\]/, label: '영어' }), '영어 출력 규칙 뒤에 둔다');
+  assert.doesNotMatch(englishLineList[englishTitleIndex], /#|\*\*/);
+  assert.ok(!buildSummarySystemPrompt({ language: 'ko' }).includes(ENGLISH_TITLE_TEXT), '한국어 지시문에는 영어 제목이 없다');
+});
+
+test('재작성 지시문: 네 제목 줄은 지우거나 바꾸지 않고, 영어면 영어 제목 줄을 그대로 둔다', () => {
+  const keepTitlePattern = new RegExp(`^ {2}네 부분의 제목 줄\\(${KOREAN_TITLE_TEXT}\\)은 지우거나 바꾸지 말고 그대로 둔다\\.$`);
+  for (const language of ['ko', 'en']) {
+    const lineList = buildSummaryRewriteSystemPrompt({ language }).split('\n');
+    assertRuleListInSection({
+      lineList, patternList: [keepTitlePattern], startPattern: /^■ 구성/, endPattern: /^다듬은 본문만 출력한다/, label: `${language} 재작성 구성`,
+    });
+  }
+  const englishPrompt = buildSummaryRewriteSystemPrompt({ language: 'en' });
+  assert.match(englishPrompt, new RegExp(`네 부분의 제목 줄은 영어 제목\\(${ENGLISH_TITLE_TEXT}\\) 그대로 둔다\\. 지우거나 바꾸지 않고, 초안 제목이 한국어면 이 영어 제목으로만 옮긴다\\.`));
+  assert.ok(englishPrompt.indexOf(ENGLISH_TITLE_TEXT) > englishPrompt.indexOf('[출력 언어]'), '영어 출력 규칙 뒤에 둔다');
+  assert.ok(!buildSummaryRewriteSystemPrompt({ language: 'ko' }).includes(ENGLISH_TITLE_TEXT));
+});
+
+test('요약 지시문: 태도에 지어내기 꼴 금지 네 가지, 숫자 견주기 바로 아래에 판단 한계가 있고 영어에도 남는다', () => {
+  for (const language of ['ko', 'en']) {
+    const lineList = buildSummarySystemPrompt({ language }).split('\n');
+    assertRuleListInSection({
+      lineList, patternList: FABRICATION_RULE_PATTERN_LIST, startPattern: /^■ 태도/, endPattern: /^요약본 본문만 출력한다/, label: `${language} 태도`,
+    });
+    // 판단 한계는 "숫자는 견주어 말한다" 항목에 딸린 줄이다(다음 항목 "단위는 자료에 적힌 그대로" 앞).
+    assertRuleListInSection({
+      lineList, patternList: [JUDGMENT_RULE_PATTERN], startPattern: /숫자는 나열하지 말고 \*\*견주어\*\* 말한다/, endPattern: /단위는 자료에 적힌 그대로 쓴다/, label: `${language} 견주기`,
+    });
+  }
+});
+
+test('구간 요약 지시문: 지킬 것에 지어내기 꼴 금지 네 가지가 있고 영어에도 남는다', () => {
+  for (const language of ['ko', 'en']) {
+    const lineList = buildSegmentSummaryPrompt({ materialText: '구간: [01:00~02:00]', language }).split('\n');
+    assertRuleListInSection({
+      lineList, patternList: FABRICATION_RULE_PATTERN_LIST, startPattern: /^■ 지킬 것/, endPattern: /^■ 재료/, label: `${language} 구간 요약`,
+    });
+  }
 });
 
 test('요약·재작성 모듈은 bedrock-converse 를 require 하지 않고 config 에 summaryModelId 가 없다', () => {

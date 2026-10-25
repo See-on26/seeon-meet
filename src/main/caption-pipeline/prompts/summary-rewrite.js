@@ -7,6 +7,8 @@ const KOREAN_READING_RULE_PATTERN = /음차|엔에프티|퍼센트/;
 const ENGLISH_REWRITE_RULE_LINE_LIST = [
   '다듬은 글은 자연스러운 영어로 쓴다(초안에 한국어가 남아 있으면 영어로 옮긴다). 구성 제목도 영어로 쓴다.',
   '숫자는 읽는 대로 쓴다(42% → 42 percent). 영문 약어·상표는 그대로 둔다(영어 목소리가 읽는다).',
+  '네 부분의 제목 줄은 영어 제목(Overview / Topics / Slide by slide / Decisions and next steps) 그대로 둔다.'
+    + ' 지우거나 바꾸지 않고, 초안 제목이 한국어면 이 영어 제목으로만 옮긴다.',
 ];
 
 function buildSummaryRewriteSystemPrompt({ language = 'ko' } = {}) {
@@ -41,6 +43,7 @@ function buildKoreanRewriteLineList() {
     '■ 구성 (초안의 순서를 그대로 유지한다)',
     '  개요 → 다룬 주제 → 슬라이드별 내용 → 결정된 것과 앞으로 할 일.',
     '  초안이 이미 이 순서라면 순서를 바꾸지 말고 문장만 다듬는다.',
+    '  네 부분의 제목 줄(개요 / 다룬 주제 / 슬라이드별 내용 / 결정된 것과 앞으로 할 일)은 지우거나 바꾸지 말고 그대로 둔다.',
     '',
     '다듬은 본문만 출력한다. 머리말이나 설명을 덧붙이지 마라.',
   ];
