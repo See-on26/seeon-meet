@@ -42,8 +42,9 @@ function createMeetingSummaryAgent({ config, requestCompletion = requestVlmCompl
   }
 
   // 통합 초안에 넷째 부분(결정된 것과 앞으로 할 일)이 빠졌을 때 같은 통합 입력으로 그 부분만 쓴다.
+  // isTruncated 면 답이 길이 한도에서 끊긴 것이라 붙이는 쪽에서 버린다.
   async function summarizeDecisionPart({ integrationText, language = 'ko' }) {
-    const { content } = await requestCompletion({
+    const { content, finishReason } = await requestCompletion({
       config,
       prompt: `${buildDecisionPartPrompt({ language })}\n\n${integrationText}`,
       label: DECISION_PART_LABEL,
@@ -52,7 +53,7 @@ function createMeetingSummaryAgent({ config, requestCompletion = requestVlmCompl
       timeoutMs: DECISION_PART_TIMEOUT_MS,
       priority: VLM_PRIORITY_MAP.background,
     });
-    return { text: cleanAnswerText({ content, label: DECISION_PART_LABEL }) };
+    return { text: cleanAnswerText({ content, label: DECISION_PART_LABEL }), isTruncated: finishReason === FINISH_REASON_LENGTH };
   }
 
   return { summarize, summarizeDecisionPart };

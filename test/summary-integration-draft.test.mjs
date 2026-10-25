@@ -47,13 +47,18 @@ test('통합 초안: 짧아지지 않았으면 한 번만 묻고 그대로 쓴�
 });
 
 test('통합 초안: 짧아졌으면 한 번 더 묻고 긴 쪽을 쓴다', async () => {
-  const agent = createAgent([{ text: SHORT_DRAFT, isTruncated: false }, { text: FULL_DRAFT, isTruncated: true }]);
+  const agent = createAgent([{ text: SHORT_DRAFT, isTruncated: false }, { text: FULL_DRAFT, isTruncated: false }]);
   const result = await buildIntegrationDraft({ integrationText: LONG_INPUT, language: 'en', summaryAgent: agent });
   assert.deepEqual(agent.callList, [
     ['summarize', { integrationText: LONG_INPUT, language: 'en' }],
     ['summarize', { integrationText: LONG_INPUT, language: 'en' }],
   ]);
-  assert.deepEqual(result, { text: FULL_DRAFT, isTruncated: true, isRetried: true, isDecisionCompleted: false });
+  assert.deepEqual(result, { text: FULL_DRAFT, isTruncated: false, isRetried: true, isDecisionCompleted: false });
+
+  // 다시 만든 것이 길이 한도에서 잘렸으면(되풀이로 한도를 채운 꼴) 잘리지 않은 처음 것을 쓴다.
+  const truncatedAgent = createAgent([{ text: SHORT_DRAFT, isTruncated: false }, { text: FULL_DRAFT, isTruncated: true }]);
+  const keptFirst = await buildIntegrationDraft({ integrationText: LONG_INPUT, summaryAgent: truncatedAgent });
+  assert.deepEqual(keptFirst, { text: SHORT_DRAFT, isTruncated: false, isRetried: true, isDecisionCompleted: false });
 
   // 다시 만든 것이 더 짧으면 처음 것을 쓴다.
   const shorterAgent = createAgent([{ text: SHORT_DRAFT, isTruncated: false }, { text: '개요\n짧음.', isTruncated: false }]);

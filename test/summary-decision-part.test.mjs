@@ -7,8 +7,9 @@ import { createRequire } from 'node:module';
 
 const require = createRequire(import.meta.url);
 const {
-  buildDecisionPartPrompt, SUMMARY_PART_TITLE_MAP,
+  buildDecisionPartPrompt, buildSummarySystemPrompt, SUMMARY_PART_TITLE_MAP,
 } = require('../src/main/caption-pipeline/prompts/meeting-summary.js');
+const { buildSummaryRewriteSystemPrompt } = require('../src/main/caption-pipeline/prompts/summary-rewrite.js');
 const { createMeetingSummaryAgent } = require('../src/main/caption-pipeline/output/meeting-summary-agent.js');
 const { VLM_PRIORITY_MAP } = require('../src/main/caption-pipeline/agents/shared/vlm-gateway.js');
 const { isDecisionPartMissing, completeDecisionPart } = require('../src/main/summary/decision-part.js');
@@ -25,6 +26,12 @@ const INTEGRATION_TEXT = '[00:00~01:00] 슬라이드 1 — 분기 매출\n매출
 test('요약 네 부분 제목: 한국어·영어 제목 목록은 지시문의 구성 순서와 같다', () => {
   assert.deepEqual(SUMMARY_PART_TITLE_MAP.ko, KOREAN_TITLE_LIST);
   assert.deepEqual(SUMMARY_PART_TITLE_MAP.en, ENGLISH_TITLE_LIST);
+  // 넷째 부분 판정은 이 목록을 쓰므로, 요약·재작성 지시문이 적은 제목과 어긋나면 판정이 조용히 꺼진다.
+  for (const language of ['ko', 'en']) {
+    const titleText = SUMMARY_PART_TITLE_MAP[language].join(' / ');
+    assert.ok(buildSummarySystemPrompt({ language }).includes(titleText), `${language} 요약 지시문에 ${titleText}`);
+    assert.ok(buildSummaryRewriteSystemPrompt({ language }).includes(titleText), `${language} 재작성 지시문에 ${titleText}`);
+  }
 });
 
 test('넷째 부분 빠짐: 셋째 제목 줄은 있는데 넷째 제목 줄이 없을 때만 빠진 것으로 본다', () => {
@@ -35,6 +42,20 @@ test('넷째 부분 빠짐: 셋째 제목 줄은 있는데 넷째 제목 줄이 
   assert.equal(isDecisionPartMissing({ draftText: '이번 회의는 매출을 다뤘습니다.\n정해진 것은 없습니다.' }), false);
   assert.equal(isDecisionPartMissing({ draftText: 'Overview\nA.\n\nSlide by slide\nB.', language: 'en' }), true);
   assert.equal(isDecisionPartMissing({ draftText: 'Overview\nA.\n\nSlide by slide\nB.\n\nDecisions and next steps\nNone.', language: 'en' }), false);
+});
+
+test('넷째 부분 빠짐: 제목에 번호·꾸밈·대소문자가 섞이거나 넷째 제목이 문장으로 이어져도 있는 것으로 본다', () => {
+  const presentList = [
+    '결정된 것과 앞으로 할 일은 없습니다.', '결정된 것과 앞으로 할 일입니다.', '4. 결정된 것과 앞으로 할 일',
+    '**결정된 것과 앞으로 할 일**', '[결정된 것과 앞으로 할 일]', '결정된 것과 앞으로 할 일 — 없습니다.',
+  ];
+  for (const decisionLine of presentList) {
+    assert.equal(isDecisionPartMissing({ draftText: `${DRAFT_WITHOUT_DECISION}\n\n${decisionLine}` }), false, decisionLine);
+  }
+  assert.equal(isDecisionPartMissing({ draftText: 'Overview\nA.\n\nSlide by slide\nB.\n\nDecisions and Next Steps\nNone.', language: 'en' }), false);
+  // 꾸민 셋째 제목에서 빠진 넷째 부분도 잡는다.
+  assert.equal(isDecisionPartMissing({ draftText: '개요\n회의.\n\n3. 슬라이드별 내용\n매출.' }), true);
+  assert.equal(isDecisionPartMissing({ draftText: '개요\n회의.\n\n**슬라이드별 내용**\n매출.' }), true);
 });
 
 test('넷째 부분 보충: 빠졌으면 통합 입력으로 넷째 부분만 만들어 한 줄 띄우고 붙인다', async () => {
@@ -48,6 +69,24 @@ test('넷째 부분 보충: 빠졌으면 통합 입력으로 넷째 부분만 �
   const bodyOnlyAgent = { summarizeDecisionPart: async () => ({ text: '다음 분기 목표를 다시 잡기로 했습니다.' }) };
   const bodyOnly = await completeDecisionPart({ draftText: DRAFT_WITHOUT_DECISION, integrationText: INTEGRATION_TEXT, summaryAgent: bodyOnlyAgent });
   assert.equal(bodyOnly.text, `${DRAFT_WITHOUT_DECISION}\n\n${DECISION_PART}`);
+});
+
+test('넷째 부분 보충: 꾸민 제목으로 답하면 꾸밈 없는 제목 한 줄로 바꿔 붙인다', async () => {
+  const decoratedAgent = { summarizeDecisionPart: async () => ({ text: '**결정된 것과 앞으로 할 일**\n다음 분기 목표를 다시 잡기로 했습니다.', isTruncated: false }) };
+  const result = await completeDecisionPart({ draftText: DRAFT_WITHOUT_DECISION, integrationText: INTEGRATION_TEXT, summaryAgent: decoratedAgent });
+  assert.equal(result.text, `${DRAFT_WITHOUT_DECISION}\n\n${DECISION_PART}`);
+});
+
+test('넷째 부분 보충: 답이 길이 한도에서 잘렸거나 다른 부분까지 다시 썼으면 버리고 초안을 그대로 둔다', async (context) => {
+  const warnMock = context.mock.method(console, 'warn', () => {});
+  const truncatedAgent = { summarizeDecisionPart: async () => ({ text: '결정된 것과 앞으로 할 일\n다음 분기 목표를', isTruncated: true }) };
+  const rewrittenAgent = { summarizeDecisionPart: async () => ({ text: `개요\n회의.\n\n슬라이드별 내용\n매출.\n\n${DECISION_PART}`, isTruncated: false }) };
+  for (const summaryAgent of [truncatedAgent, rewrittenAgent]) {
+    assert.deepEqual(await completeDecisionPart({ draftText: DRAFT_WITHOUT_DECISION, integrationText: INTEGRATION_TEXT, summaryAgent }), {
+      text: DRAFT_WITHOUT_DECISION, isCompleted: false,
+    });
+  }
+  assert.equal(warnMock.mock.callCount(), 2, '버린 까닭을 남긴다');
 });
 
 test('넷째 부분 보충: 빠지지 않았으면 묻지 않고, 묻다 실패하면 초안을 그대로 둔다', async (context) => {
@@ -88,13 +127,16 @@ test('요약 에이전트: 넷째 부분은 배경 순위·maxTokens 800 으로 
   const requestList = [];
   let nextResponse = { content: `\`\`\`\n${DECISION_PART}\n\`\`\``, finishReason: 'stop' };
   const agent = createMeetingSummaryAgent({ config, requestCompletion: async (request) => { requestList.push(request); return nextResponse; } });
-  assert.deepEqual(await agent.summarizeDecisionPart({ integrationText: INTEGRATION_TEXT, language: 'ko' }), { text: DECISION_PART });
+  assert.deepEqual(await agent.summarizeDecisionPart({ integrationText: INTEGRATION_TEXT, language: 'ko' }), { text: DECISION_PART, isTruncated: false });
   const [request] = requestList;
+  assert.equal(request.timeoutMs, 60000);
   assert.equal(request.prompt, `${buildDecisionPartPrompt({ language: 'ko' })}\n\n${INTEGRATION_TEXT}`);
   assert.equal(request.priority, VLM_PRIORITY_MAP.background);
   assert.equal(request.maxTokens, 800);
   assert.equal(request.temperature, 0.2);
   assert.equal(typeof request.label, 'string');
+  nextResponse = { content: DECISION_PART, finishReason: 'length' };
+  assert.deepEqual(await agent.summarizeDecisionPart({ integrationText: INTEGRATION_TEXT }), { text: DECISION_PART, isTruncated: true });
   nextResponse = { content: '  ', finishReason: 'stop' };
   await assert.rejects(agent.summarizeDecisionPart({ integrationText: INTEGRATION_TEXT }), /비어 있습니다/);
 });
