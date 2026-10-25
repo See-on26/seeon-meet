@@ -22,10 +22,11 @@ function startStore({ sessionId = 's1', markList = [] } = {}) {
   return store;
 }
 
-// markList: [[슬라이드 번호, 방문 시각], …]
-function applyMarkList({ store, markList }) {
+// markList: [[슬라이드 번호, 방문 시각], …]. 재료 없는 구간은 GPU 에 묻지 않으므로 방문마다 말 한 마디를 둔다.
+function applyMarkList({ store, markList, hasSpeech = true }) {
   for (const [major, ts] of markList) {
     store.applyRecord({ kind: RECORD_KIND_MAP.slideMark, ts, slideLabel: String(major), frameKind: 'base' });
+    if (hasSpeech) store.applyRecord({ kind: RECORD_KIND_MAP.asr, ts: ts + 500, text: `슬라이드 ${major} 이야기` });
   }
 }
 
@@ -175,6 +176,28 @@ test('scheduler: 실패한 구간은 failed 로 남기고 다음 구간으로 �
 
   scheduler.poll();
   assert.equal(callList.length, 2, '실패한 구간은 회의 중에 다시 요청하지 않는다');
+});
+
+test('scheduler: 재료가 없는 구간은 GPU 에 묻지 않고 빈 구간 ready 로 둔 뒤 다음 구간을 보낸다', async () => {
+  const store = startStore();
+  applyMarkList({ store, markList: [[1, 0]] });
+  applyMarkList({ store, markList: [[2, 60000]], hasSpeech: false });
+  applyMarkList({ store, markList: [[3, 120000], [4, 180000]] });
+  const { callList, agent } = createHeldAgent();
+  const scheduler = createSegmentSummaryScheduler({
+    contextStore: store, segmentSummaryAgent: agent, getCaptionLanguage: () => 'ko', now: () => 190000,
+  });
+  scheduler.poll();
+  assert.equal(callList.length, 1);
+  callList[0].resolve({ text: '첫 화면 요약' });
+  await flush();
+  assert.equal(callList.length, 2, '재료 없는 2@60000 을 건너뛰고 3@120000 을 보낸다');
+  assert.match(callList[1].materialText, /^구간: \[02:00~03:00\]$/m);
+  assert.deepEqual(statusOf({ store }), [
+    ['1@0', SEGMENT_STATUS_MAP.ready, '첫 화면 요약'],
+    ['2@60000', SEGMENT_STATUS_MAP.ready, ''],
+    ['3@120000', SEGMENT_STATUS_MAP.requested, ''],
+  ]);
 });
 
 test('scheduler: isEnabled 가 거짓이면 요청하지 않는다', async () => {

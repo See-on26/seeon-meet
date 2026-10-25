@@ -6,7 +6,7 @@ const { createMeetingSummaryAgent } = require('../caption-pipeline/output/meetin
 const { createSummaryRewriteAgent } = require('../caption-pipeline/output/summary-rewrite-agent');
 const { createTtsClient } = require('../caption-pipeline/output/tts-client');
 const { listSegments } = require('../caption-pipeline/context/segment-plan');
-const { buildSegmentMaterial } = require('../caption-pipeline/context/segment-material');
+const { buildSegmentMaterial, hasSegmentContent } = require('../caption-pipeline/context/segment-material');
 const { SEGMENT_STATUS_MAP } = require('../caption-pipeline/context/context-store');
 const { flattenAsrSegmentList } = require('./slide-timeline');
 const { resolveSlideAssetList } = require('./slide-asset-resolver');
@@ -178,7 +178,12 @@ function createSummaryGenerator({
     return segmentSummaryList;
   }
 
+  // 재료가 없는 구간은 GPU 에 묻지 않고 빈 구간으로 둔다.
   async function summarizeSegment({ snapshot, segment, screenFillByMajorMap, language }) {
+    if (!hasSegmentContent({ snapshot, segment, screenFillByMajorMap })) {
+      logStep(`구간 요약 ${segment.key} — 재료 없음(묻지 않음)`);
+      return { text: '', status: SEGMENT_STATUS_MAP.ready };
+    }
     const startedAt = Date.now();
     try {
       const materialText = buildSegmentMaterial({ snapshot, segment, screenFillByMajorMap });

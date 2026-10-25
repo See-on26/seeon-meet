@@ -4,7 +4,7 @@ import fs from 'node:fs';
 import { createRequire } from 'node:module';
 
 const require = createRequire(import.meta.url);
-const { buildSegmentMaterial } = require('../src/main/caption-pipeline/context/segment-material.js');
+const { buildSegmentMaterial, hasSegmentContent } = require('../src/main/caption-pipeline/context/segment-material.js');
 const { buildSegmentSummaryPrompt } = require('../src/main/caption-pipeline/prompts/segment-summary.js');
 const { createSegmentSummaryAgent } = require('../src/main/caption-pipeline/output/segment-summary-agent.js');
 const { VLM_PRIORITY_MAP } = require('../src/main/caption-pipeline/agents/shared/vlm-gateway.js');
@@ -112,6 +112,44 @@ test('구간 재료: 화면 묘사가 없으면 라벨, 그것도 없으면 scre
   assert.ok(noScreen.includes('시작하겠습니다'));
 });
 
+test('구간 재료 유무: 발화·해설·질문답이 없고 화면 정보도 없으면 재료가 없다', () => {
+  const emptySnapshot = { startedAt: 0, slideList: [slide()], utteranceList: [], narrationList: [], qaList: [] };
+  assert.equal(hasSegmentContent({ snapshot: emptySnapshot, segment: segment() }), false);
+  assert.equal(hasSegmentContent({ snapshot: { startedAt: 0 }, segment: segment() }), false, '목록이 없는 스냅숏도 받는다');
+  assert.equal(hasSegmentContent({
+    snapshot: { startedAt: 0, slideList: [], utteranceList: [] },
+    segment: segment({ key: 'none@0', slideMajor: null, startTs: 0, endTs: 60000 }),
+  }), false, '화면 없는 구간에 말이 없으면 재료가 없다');
+
+  // 구간 밖 기록·해설 칸에서 빼는 해설(화자 안내·질문 답)은 재료가 아니다.
+  const outsideSnapshot = {
+    ...emptySnapshot,
+    utteranceList: [{ ts: 59999, text: '앞 구간 말' }, { ts: 120000, text: '다음 구간 말' }],
+    narrationList: [
+      { ts: 61000, text: '김지오 님 발언', narrationClass: 'speaker_identity' },
+      { ts: 62000, text: '질문 답', narrationClass: 'user_command' },
+    ],
+    qaList: [{ ts: 130000, question: '구간 밖 질문', answer: '' }],
+  };
+  assert.equal(hasSegmentContent({ snapshot: outsideSnapshot, segment: segment() }), false);
+
+  const withList = [
+    ['발화', { utteranceList: [{ ts: 60000, text: '매출이 늘었습니다' }] }],
+    ['해설', { narrationList: [{ ts: 70000, text: '표의 둘째 줄은 12퍼센트입니다', narrationClass: 'deixis' }] }],
+    ['질문답', { qaList: [{ ts: 80000, question: '몇 퍼센트야?', answer: '' }] }],
+    ['화면 주제', { slideList: [slide({ pageTopic: '분기 매출' })] }],
+    ['화면 묘사', { slideList: [slide({ description: '막대그래프' })] }],
+    ['화면 글자', { slideList: [slide({ slideText: '매출 12%' })] }],
+    ['라벨', { slideList: [slide({ label: { title: '매출 추이', keywordList: [], summary: '' } })] }],
+  ];
+  for (const [label, overrideMap] of withList) {
+    assert.equal(hasSegmentContent({ snapshot: { ...emptySnapshot, ...overrideMap }, segment: segment() }), true, label);
+  }
+  assert.equal(hasSegmentContent({
+    snapshot: emptySnapshot, segment: segment(), screenFillByMajorMap: new Map([['3', '회의 뒤 텍스트화 한 줄']]),
+  }), true, '회의 뒤 화면 정보 텍스트화 한 줄도 화면 정보다');
+});
+
 test('구간 요약 지시문: 지어내지 않기·값과 단위 그대로·NONE 규칙을 담고 영어면 영어 규칙을 붙인다', () => {
   const materialText = '구간: [01:00~02:00]\n오간 말:\n매출이 12퍼센트 늘었습니다';
   const prompt = buildSegmentSummaryPrompt({ materialText });
@@ -157,9 +195,25 @@ test('구간 요약 에이전트: 배경 순위·maxTokens 400 으로 묻고 NON
   assert.ok(request.prompt.includes('재료 글'));
   assert.equal(typeof request.label, 'string');
 
-  for (const emptyContent of ['NONE.', '"NONE"', '`NONE`', '  ', undefined, null]) {
+  for (const emptyContent of [
+    'NONE.', '"NONE"', '`NONE`', '  ', undefined, null,
+    '**NONE**', '(NONE)', 'None', 'None.', 'none', 'NONE: 인사만 오갔다', '```\nNONE\n```', '“NONE”',
+  ]) {
     nextContent = emptyContent;
     assert.deepEqual(await agent.summarize({ materialText: '재료 글' }), { text: '' }, `${emptyContent} 는 빈 구간이다`);
+  }
+
+  // 답 전체를 감싼 따옴표·울타리는 벗기고, 글 안의 따옴표는 그대로 둔다.
+  for (const [content, expected] of [
+    ['"매출이 두 배로 늘었다."', '매출이 두 배로 늘었다.'],
+    ['“매출이 두 배로 늘었다.”', '매출이 두 배로 늘었다.'],
+    ["'매출이 두 배로 늘었다.'", '매출이 두 배로 늘었다.'],
+    ['```\n매출이 두 배로 늘었다.\n```', '매출이 두 배로 늘었다.'],
+    ['"AI 허브" 사업은 다음 분기에 시작한다.', '"AI 허브" 사업은 다음 분기에 시작한다.'],
+    ['"A안"과 "B안" 가운데 "B안"', '"A안"과 "B안" 가운데 "B안"'],
+  ]) {
+    nextContent = content;
+    assert.deepEqual(await agent.summarize({ materialText: '재료 글' }), { text: expected }, content);
   }
 
   nextContent = '  매출은 두 분기 연속 늘었다. 다음 분기에 출시하기로 했다.  ';
@@ -168,10 +222,12 @@ test('구간 요약 에이전트: 배경 순위·maxTokens 400 으로 묻고 NON
   });
   assert.ok(requestList.at(-1).prompt.includes(OUTPUT_LANGUAGE_RULE_MAP.en), 'language 를 지시문에 넘긴다');
 
-  nextContent = 'None of the figures changed.';
-  assert.deepEqual(await agent.summarize({ materialText: '재료 글', language: 'en' }), {
-    text: 'None of the figures changed.',
-  }, '대문자 NONE 토큰이 아닌 영어 문장은 요약이다');
+  for (const sentence of ['None of the figures changed.', '결과는 none 이었다.', '"None" was the answer they chose.']) {
+    nextContent = sentence;
+    assert.deepEqual(await agent.summarize({ materialText: '재료 글', language: 'en' }), {
+      text: sentence,
+    }, `none 한 단어가 아닌 문장은 요약이다: ${sentence}`);
+  }
 
   const failingAgent = createSegmentSummaryAgent({
     config, requestCompletion: async () => { throw new Error('VLM(구간 요약) HTTP 503'); },

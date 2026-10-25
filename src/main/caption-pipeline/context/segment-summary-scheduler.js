@@ -1,5 +1,5 @@
 const { listSegments } = require('./segment-plan');
-const { buildSegmentMaterial } = require('./segment-material');
+const { buildSegmentMaterial, hasSegmentContent } = require('./segment-material');
 const { SEGMENT_STATUS_MAP } = require('./context-store');
 
 // 구간이 닫힌 뒤 이만큼 기다렸다 요약한다. 늦게 도착한 받아쓰기·해설 기록이 그 구간 재료에 들어오게 한다.
@@ -19,10 +19,17 @@ function createSegmentSummaryScheduler({
   let pendingSegmentList = [];
 
   // 재료는 보내기 직전의 스냅숏으로 만든다. 줄에서 기다리는 동안 도착한 기록도 들어간다.
+  // 재료가 없는 구간은 GPU 에 묻지 않고 빈 구간으로 둔다.
   async function summarizeSegment({ segment, requestGeneration }) {
     const startedAt = now();
     try {
-      const materialText = buildSegmentMaterial({ snapshot: contextStore.snapshot(), segment });
+      const snapshot = contextStore.snapshot();
+      if (!hasSegmentContent({ snapshot, segment })) {
+        contextStore.setSegmentSummary({ key: segment.key, text: '', status: SEGMENT_STATUS_MAP.ready });
+        console.log(`[summary] 구간 요약 ${segment.key} — 재료 없음(묻지 않음)`);
+        return;
+      }
+      const materialText = buildSegmentMaterial({ snapshot, segment });
       const { text } = await segmentSummaryAgent.summarize({ materialText, language: getCaptionLanguage() });
       if (requestGeneration !== generation) return;
       contextStore.setSegmentSummary({ key: segment.key, text, status: SEGMENT_STATUS_MAP.ready });

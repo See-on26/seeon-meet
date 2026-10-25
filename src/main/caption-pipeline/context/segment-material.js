@@ -19,12 +19,15 @@ function listInSegment({ itemList, segment }) {
 }
 
 // 화면 묘사도 라벨도 없는 화면(전환 해설이 한 번도 없던 화면)만 회의 뒤 화면 정보 텍스트화 한 줄로 채운다.
-function buildSlideInfoLineList({ slide, screenFillByMajorMap }) {
+function isScreenFillNeeded({ slide }) {
+  return !slide.description && !slide.label?.title && !slide.label?.summary;
+}
+
+function listSlideInfoLine({ slide, screenFillByMajorMap }) {
   const title = slide.label?.title || '';
   const summary = slide.label?.summary || '';
-  const fill = !slide.description && !title && !summary
-    ? screenFillByMajorMap?.get(String(slide.major)) || '' : '';
-  const lineList = [
+  const fill = isScreenFillNeeded({ slide }) ? screenFillByMajorMap?.get(String(slide.major)) || '' : '';
+  return [
     slide.pageTopic ? `화면 주제: ${slide.pageTopic}` : '',
     slide.description ? `화면 묘사: ${slide.description}` : '',
     fill ? `화면 설명: ${fill}` : '',
@@ -32,15 +35,32 @@ function buildSlideInfoLineList({ slide, screenFillByMajorMap }) {
     title ? `라벨 제목: ${title}` : '',
     summary ? `라벨 요약: ${summary}` : '',
   ].filter(Boolean);
-  return lineList.length ? lineList : [`화면 정보: ${EMPTY_SECTION_LINE}`];
+}
+
+function isNoScreenSegment(segment) {
+  return segment.slideMajor === null || segment.slideMajor === undefined;
+}
+
+function findSegmentSlide({ snapshot, segment }) {
+  if (isNoScreenSegment(segment)) return null;
+  return (snapshot.slideList || []).find((entry) => entry.major === segment.slideMajor) || null;
 }
 
 function buildScreenLineList({ snapshot, segment, screenFillByMajorMap }) {
-  if (segment.slideMajor === null || segment.slideMajor === undefined) return ['화면: 공유 화면 없음'];
-  const slide = (snapshot.slideList || []).find((entry) => entry.major === segment.slideMajor);
+  if (isNoScreenSegment(segment)) return ['화면: 공유 화면 없음'];
+  const slide = findSegmentSlide({ snapshot, segment });
   const headLine = `화면: ${formatHeardSlideTag({ displayNumber: slide?.displayNumber })}${segment.isRevisit ? REVISIT_NOTE : ''}`;
-  if (!slide) return [headLine, `화면 정보: ${EMPTY_SECTION_LINE}`];
-  return [headLine, ...buildSlideInfoLineList({ slide, screenFillByMajorMap })];
+  const infoLineList = slide ? listSlideInfoLine({ slide, screenFillByMajorMap }) : [];
+  return [headLine, ...(infoLineList.length ? infoLineList : [`화면 정보: ${EMPTY_SECTION_LINE}`])];
+}
+
+function listSegmentRecord({ snapshot, segment }) {
+  return {
+    utteranceList: listInSegment({ itemList: snapshot.utteranceList, segment }),
+    narrationList: listInSegment({ itemList: snapshot.narrationList, segment })
+      .filter((narration) => !EXCLUDED_NARRATION_CLASS_LIST.includes(narration.narrationClass)),
+    qaList: listInSegment({ itemList: snapshot.qaList, segment }),
+  };
 }
 
 function buildSection({ title, lineList }) {
@@ -55,10 +75,7 @@ function formatQaLineList({ qa }) {
 // screenFillByMajorMap 은 회의 뒤 화면 정보 텍스트화 결과(슬라이드 번호 문자열 → 한 줄)다. 회의 중에는 없다.
 function buildSegmentMaterial({ snapshot, segment, screenFillByMajorMap = null }) {
   const { startedAt } = snapshot;
-  const utteranceList = listInSegment({ itemList: snapshot.utteranceList, segment });
-  const narrationList = listInSegment({ itemList: snapshot.narrationList, segment })
-    .filter((narration) => !EXCLUDED_NARRATION_CLASS_LIST.includes(narration.narrationClass));
-  const qaList = listInSegment({ itemList: snapshot.qaList, segment });
+  const { utteranceList, narrationList, qaList } = listSegmentRecord({ snapshot, segment });
   return [
     `구간: [${formatElapsed({ ts: segment.startTs, startedAt })}~${formatElapsed({ ts: segment.endTs, startedAt })}]`,
     ...buildScreenLineList({ snapshot, segment, screenFillByMajorMap }),
@@ -74,4 +91,13 @@ function buildSegmentMaterial({ snapshot, segment, screenFillByMajorMap = null }
   ].join('\n');
 }
 
-module.exports = { buildSegmentMaterial };
+// 구간 재료에 담을 것이 있는가. 오간 말·해설·질문답이 없고 화면 정보(주제·묘사·글자·라벨·채움 줄)도 없으면
+// 요약할 것이 없으므로 GPU 에 묻지 않고 빈 구간으로 둔다. 회의 중 스케줄러와 회의 뒤 생성기가 같이 쓴다.
+function hasSegmentContent({ snapshot, segment, screenFillByMajorMap = null }) {
+  const { utteranceList, narrationList, qaList } = listSegmentRecord({ snapshot, segment });
+  if (utteranceList.length || narrationList.length || qaList.length) return true;
+  const slide = findSegmentSlide({ snapshot, segment });
+  return Boolean(slide) && listSlideInfoLine({ slide, screenFillByMajorMap }).length > 0;
+}
+
+module.exports = { buildSegmentMaterial, hasSegmentContent, isScreenFillNeeded };

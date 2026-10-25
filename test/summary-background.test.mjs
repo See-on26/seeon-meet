@@ -192,6 +192,21 @@ test('generateText: 구간 요약이 모두 비면 통합을 부르지 않는다
   fs.rmSync(summariesDir, { recursive: true, force: true });
 });
 
+test('generateText: 재료가 없는 구간은 GPU 에 묻지 않고 빈 구간으로 둔다', async () => {
+  const summariesDir = makeTempDir('summary-background-');
+  // 슬라이드 3 을 보는 동안에는 말도 해설도 질문도 없었고, 화면 정보도 없다.
+  const snapshot = buildSnapshot();
+  snapshot.utteranceList = snapshot.utteranceList.filter((utterance) => !utterance.text.endsWith('3'));
+  const fakeSet = makeFakeSet();
+  await makeGenerator({ summariesDir, fakeSet }).generateText({ session: buildSession(), contextSnapshot: snapshot });
+  const segmentCallList = fakeSet.callList.filter((call) => call.name === 'segment');
+  assert.deepEqual(segmentCallList.map((call) => call.materialText.match(/화면: (슬라이드 \d+)/)[1]),
+    ['슬라이드 1', '슬라이드 2', '슬라이드 4']);
+  const [summarizeCall] = fakeSet.callList.filter((call) => call.name === 'summarize');
+  assert.ok(!summarizeCall.integrationText.includes('슬라이드 3'), summarizeCall.integrationText);
+  fs.rmSync(summariesDir, { recursive: true, force: true });
+});
+
 test('generateText: 전환 해설이 없던 화면은 회의 뒤 텍스트화한 한 줄을 구간 재료에 넣는다', async () => {
   const summariesDir = makeTempDir('summary-background-');
   const slideFilePath = path.join(summariesDir, 'slide-1.jpg');
