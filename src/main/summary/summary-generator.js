@@ -163,7 +163,7 @@ function createSummaryGenerator({
 
     reportProgress({ stage: SUMMARY_STAGE_MAP.summarize, message: progressText.summarize() });
     const { text: draftText, isTruncated: draftTruncated } = await summaryAgent.summarize({
-      scriptText: summaryScriptText, language,
+      integrationText: summaryScriptText, language,
     });
 
     reportProgress({ stage: SUMMARY_STAGE_MAP.rewrite, message: progressText.rewrite() });
