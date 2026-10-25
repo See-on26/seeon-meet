@@ -1517,6 +1517,13 @@ function syncFeatureTogglesToMain() {
   });
 }
 
+// 회의 요약 스위치를 회의 중에 바꾸면 main 의 회의 중 구간 요약도 따라 멈추거나 다시 한다.
+function syncMeetingSummaryToMain({ isOn }) {
+  window.seeon.setMeetingSummaryEnabled(isOn).catch((error) => {
+    console.warn('[toggle] main 에 회의 요약 스위치를 알리지 못함:', error.message);
+  });
+}
+
 function buildFeatureToggleList() {
   const container = $('featureToggleList');
   if (!container) return;
@@ -1572,6 +1579,7 @@ featureToggleStore.subscribe(({ key, isOn }) => {
     reason: '기능 토글', detail: `${FEATURE_LABEL_MAP[key]} ${isOn ? '켜짐' : '꺼짐'}`,
   });
   syncFeatureTogglesToMain();
+  if (key === FEATURE_KEY_MAP.meetingSummary) syncMeetingSummaryToMain({ isOn });
   syncFeatureToggleUi();
 });
 
@@ -2216,6 +2224,7 @@ async function attemptStartExperiment() {
 
     const sessionResult = await window.seeon.startPipelineSession({
       mode: getCurrentMode(), captionLanguage: captionLanguageStore.get(), slideTextBackend: slideTextBackendStore.get(),
+      isMeetingSummaryEnabled: featureToggleStore.isOn(FEATURE_KEY_MAP.meetingSummary),
     }).catch(() => null);
     currentSessionId = sessionResult?.sessionId || null;
     gapSource = sessionResult?.gapSource === GAP_CANDIDATE_SOURCE_MAP.audio

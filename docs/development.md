@@ -67,6 +67,7 @@ npm start
 | `SEEON_FACT_CARD` | 화면 사실 카드(`on`·`off`). 새 슬라이드가 확정될 때 화면을 읽는 서버에 한 번 물어 패널별 사실(라벨·값·단위·범례)을 카드로 만들어 두고, 해설 때 발화와 가까운 카드를 받는 에이전트의 프롬프트에 넣는다. 끄면 프롬프트가 지금과 같다. 세부: `SEEON_FACT_CARD_AGENTS`(받는 에이전트 쉼표 목록, 기본 `interpretation,scale`, `deixis` 도 고를 수 있음), `SEEON_FACT_CARD_JSON_MODE`(카드 JSON 을 받는 방법, `prompt` 만) | `on` |
 | `SEEON_SCREEN_CHANGE` | 같은 슬라이드 안 화면 변화 해설. `off` 는 감지·기록을 하지 않음, `shadow` 는 감지·글자 차이·이미 말한 값 거르기까지 하고 기록만 남김(해설 없음), `same_slide` 는 새 글자·강조가 나타나면 변화 해설을 내고 근거가 늦게 뜬 해설을 다시 시도한다. `all` 은 아직 `same_slide` 로 돈다. 세부: `SEEON_SCREEN_CHANGE_KINDS`(사건 종류 쉼표 목록, 기본 `new_text,highlight`, 글자 없는 변화 `visual` 은 오탐이 많아 기본에서 뺌), `SEEON_SCREEN_CHANGE_MIN_INTERVAL_MS`(변화 해설끼리 간격, 기본 `20000`), `SEEON_SCREEN_CHANGE_PER_SLIDE_MAX`(슬라이드당 상한, 기본 `2`), `SEEON_SCREEN_CHANGE_IMAGE`(보내는 그림 `outline`·`crop`·`full`, 기본 `outline`) | `same_slide` |
 | `SEEON_SLIDE_TEXT_BACKEND` | 화면 글자를 읽는 방법. `vlm` 은 화면을 읽는 서버, `ocr` 은 임베딩 서버(8804)의 글자 인식(`/ocr`, 주소는 `SEEON_OCR_URL` 로 바꿀 수 있음)이고 OCR 이 응답하지 않으면 VLM 으로 읽는다. 개발자 모드에서 고르면 그 값이 먼저다 | `vlm` |
+| `SEEON_SUMMARY_LIVE_SEGMENTS` | 회의 중 구간 요약(`on`·`off`). 슬라이드 방문(또는 오래 머문 화면을 시간으로 자른 구간)이 닫히면 그 구간을 실시간 해설 요청이 없을 때 화면을 읽는 서버에 짧게 요약해 두고, 회의 뒤 요약은 이 구간 요약을 모아 만든다. 회의 요약 스위치를 끄면 하지 않는다. `off` 면 회의 중에는 하지 않고 회의 뒤에 모든 구간을 요약한다 | `on` |
 | `SEEON_GPU_SSH_HOST` · `SEEON_GPU_SSH_USER` | 앱이 켜질 때 여는 GPU 서버 SSH 터널의 서버 주소·계정. 실제 값은 저장소에 두지 않는다 | 비어 있음 (비면 터널을 열지 않음) |
 | `SEEON_GPU_SSH_PORT` | 그 서버의 SSH 포트 | `22` |
 | `SEEON_GPU_SSH_HOST_FINGERPRINT` | 서버 호스트 키 지문(`SHA256:…`). 다르면 연결하지 않는다 | 비어 있음 (비면 터널을 열지 않음) |

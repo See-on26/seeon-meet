@@ -74,6 +74,8 @@ const { createFrameImageOps } = require('./orchestrator/speech-roi/frame-image')
 const { createScreenChangeService } = require('./orchestrator/screen-change-service');
 const { createContextStore, toSlideMajor, LABEL_STATUS_MAP } = require('./context/context-store');
 const { createSlideLabeler } = require('./context/slide-labeler');
+const { createSegmentSummaryScheduler } = require('./context/segment-summary-scheduler');
+const { createSegmentSummaryAgent } = require('./output/segment-summary-agent');
 const { createContextFileWriter } = require('./context/context-file');
 const { buildTranscriptScript, buildScriptFileName } = require('./context/transcript-script');
 const { pickMeetingTitle } = require('../archive/meeting-archive');
@@ -90,6 +92,8 @@ const ASR_DRAIN_POLL_MS = 100;
 const PIPELINE_STAGE_MAP = { frame: 'frame', judge: 'judge', vlm: 'vlm', caption: 'caption', tts: 'tts', asr: 'asr' };
 
 const RECENT_NARRATION_LIMIT = 4;
+// 시간으로 자르는 구간과 닫힌 뒤 기다림이 지난 구간은 새 기록 없이도 생기므로 세션 동안 이 간격으로 다시 본다.
+const SEGMENT_SUMMARY_POLL_MS = 15000;
 
 async function appendErrorRecordSafely({ appendRecord, record }) {
   try {
@@ -196,10 +200,39 @@ function registerPipeline({ getViewerView, meetingArchive = null }) {
     readImage: (filePath) => fs.promises.readFile(filePath).catch(() => null),
     getCaptionLanguage,
   });
+  // 회의 요약 스위치(렌더러)는 세션 시작 때 넘어오고, 회의 중에 바꾸면 다시 알려 온다.
+  let isSessionMeetingSummaryEnabled = true;
+  const segmentSummaryScheduler = createSegmentSummaryScheduler({
+    contextStore,
+    segmentSummaryAgent: createSegmentSummaryAgent({ config }),
+    getCaptionLanguage,
+    isEnabled: () => config.isLiveSegmentSummaryEnabled && isSessionMeetingSummaryEnabled,
+  });
+  let segmentSummaryTimer = null;
+
+  function stopSegmentSummaryTimer() {
+    if (segmentSummaryTimer) clearInterval(segmentSummaryTimer);
+    segmentSummaryTimer = null;
+  }
+
+  function startSegmentSummaryTimer() {
+    stopSegmentSummaryTimer();
+    segmentSummaryTimer = setInterval(() => {
+      try {
+        segmentSummaryScheduler.poll();
+      } catch (error) {
+        console.warn(`[summary] 구간 요약 확인 실패(무시): ${error.message}`);
+      }
+    }, SEGMENT_SUMMARY_POLL_MS);
+  }
 
   function appendRecord(record) {
     try {
-      if (contextStore.applyRecord(record)) labelReadySlides();
+      if (contextStore.applyRecord(record)) {
+        labelReadySlides();
+        // 구간은 슬라이드 방문으로 닫힌다. poll 은 Store 스냅숏을 뜨므로 다른 기록마다 부르지 않는다.
+        if (record.kind === RECORD_KIND_MAP.slideMark) segmentSummaryScheduler.poll();
+      }
     } catch (error) {
       console.warn(`[context] 기록 반영 실패(무시) kind=${record?.kind}: ${error.message}`);
     }
@@ -440,7 +473,9 @@ function registerPipeline({ getViewerView, meetingArchive = null }) {
     }
   });
 
-  ipcMain.handle('pipeline-session-start', async (_event, { mode = '', asrLanguage, captionLanguage, slideTextBackend } = {}) => {
+  ipcMain.handle('pipeline-session-start', async (_event, {
+    mode = '', asrLanguage, captionLanguage, slideTextBackend, isMeetingSummaryEnabled,
+  } = {}) => {
     describedStore.reset();
     captionDescribed.reset();
     screenRegistry.reset();
@@ -460,7 +495,10 @@ function registerPipeline({ getViewerView, meetingArchive = null }) {
     const { sessionId } = sessionStore.startSession({ mode, asrLanguage: meetingLanguage, captionLanguage: sessionCaptionLanguage });
     devFlow.recorder.start({ sessionId, mode });
     contextGeneration += 1;
+    segmentSummaryScheduler.reset();
+    isSessionMeetingSummaryEnabled = isMeetingSummaryEnabled !== false;
     contextStore.start({ sessionId, startedAt: Date.now() });
+    startSegmentSummaryTimer();
     console.log(`[pipeline] ■ 캡처 세션 시작 (모드=${mode}, 받아쓰기=${meetingLanguage}, 캡션 언어=${sessionCaptionLanguage}, 화면 글자=${sessionSlideTextBackend}, 화면 변화=${screenChange.describeSessionText()}, ${sessionId}) — 중복 이력·화면 레지스트리 초기화`);
     markDebug({
       stage: DEBUG_STAGE_MAP.session, verdict: DEBUG_VERDICT_MAP.info,
@@ -494,6 +532,9 @@ function registerPipeline({ getViewerView, meetingArchive = null }) {
     devFlow.recorder.markEnded();
 
     lastSession = sessionStore.endSession({ endedAt: Date.now() });
+    // 구간 요약을 멈추고 돌고 있던 요청의 응답은 버린다. ready 가 아닌 구간은 회의 뒤 생성기가 다시 만든다.
+    stopSegmentSummaryTimer();
+    segmentSummaryScheduler.stop();
     lastContextSnapshot = contextStore.snapshot();
     const contextFilePath = await contextFile.flush();
     console.log(`[context] 컨텍스트 저장 ${contextFilePath || '(실패)'} — 슬라이드 ${lastContextSnapshot.slideList.length}장 · 발화 ${lastContextSnapshot.utteranceList.length}건`);
@@ -519,6 +560,12 @@ function registerPipeline({ getViewerView, meetingArchive = null }) {
       asrCount: lastSession.asrEntryList.length,
       slideMarkCount: lastSession.slideMarkList.length,
     };
+  });
+
+  // 회의 중에 회의 요약 스위치를 끄면 구간 요약도 멈추고, 켜면 다음 확인부터 다시 한다.
+  ipcMain.handle('pipeline-set-meeting-summary-enabled', async (_event, { isEnabled } = {}) => {
+    isSessionMeetingSummaryEnabled = isEnabled !== false;
+    return { isOk: true };
   });
 
   ipcMain.on('pipeline-slide-mark', (_event, { ts, slideLabel, frameKind, filePath, transitionTs = null }) => {
