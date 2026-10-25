@@ -152,6 +152,26 @@ test('generateText: Store 에 없는 구간만 채우고 통합·재작성을 �
   fs.rmSync(summariesDir, { recursive: true, force: true });
 });
 
+test('generateText: Store 의 ready 구간도 시작·끝 시각이 지금 계산한 구간과 다르면 다시 만든다', async () => {
+  const summariesDir = makeTempDir('summary-background-');
+  // 회의 중에는 슬라이드 1 이 30초에 닫힌 것으로 요약했지만, 지금 계산하면 1분까지다.
+  const storedList = [
+    { ...STORED_SEGMENT_LIST[0], endTs: 30000, text: '앞 조각만 담은 요약.' },
+    { key: '2@60000', slideMajor: 2, startTs: VISIT_MS, endTs: 2 * VISIT_MS, isRevisit: false, text: '둘째 화면 요약.', status: 'ready' },
+  ];
+  const fakeSet = makeFakeSet();
+  await makeGenerator({ summariesDir, fakeSet }).generateText({
+    session: buildSession(), contextSnapshot: buildSnapshot({ segmentSummaryList: storedList }),
+  });
+  const segmentCallList = fakeSet.callList.filter((call) => call.name === 'segment');
+  assert.deepEqual(segmentCallList.map((call) => call.materialText.match(/화면: (슬라이드 \d+)/)[1]),
+    ['슬라이드 1', '슬라이드 3', '슬라이드 4']);
+  const [summarizeCall] = fakeSet.callList.filter((call) => call.name === 'summarize');
+  assert.ok(!summarizeCall.integrationText.includes('앞 조각만 담은 요약.'));
+  assert.ok(summarizeCall.integrationText.includes('둘째 화면 요약.'));
+  fs.rmSync(summariesDir, { recursive: true, force: true });
+});
+
 test('generateText: 요약이 잘렸으면 재작성이 잘림을 놓쳐도 문서에 잘림 안내를 단다', async () => {
   const summariesDir = makeTempDir('summary-background-');
   const fakeSet = makeFakeSet({ summaryTruncated: true });

@@ -225,6 +225,12 @@ test('scheduler: isEnabled 가 거짓이면 요청하지 않는다', async () =>
   assert.equal(callList.length, 2);
 });
 
+test('scheduler: 구간 길이 상한은 segment-plan 의 값을 쓴다', () => {
+  const source = readSource('src/main/caption-pipeline/context/segment-summary-scheduler.js');
+  assert.match(source, /\{ listSegments, DEFAULT_MAX_SEGMENT_MS \} = require\('\.\/segment-plan'\)/);
+  assert.doesNotMatch(source, /300000|300_000/, '상수를 따로 두지 않는다');
+});
+
 test('config: SEEON_SUMMARY_LIVE_SEGMENTS 기본 on, off 를 받고 모르는 값은 경고하고 on', () => {
   const warn = mock.method(console, 'warn', () => {});
   assert.equal(readPipelineConfig({}).isLiveSegmentSummaryEnabled, true);

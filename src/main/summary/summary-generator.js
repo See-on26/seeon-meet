@@ -110,6 +110,19 @@ function countScreen({ snapshot }) {
 
 const hasSummaryText = (segmentSummary) => Boolean(segmentSummary.text.trim());
 
+// 회의 중에 ready 로 끝난 구간 요약 가운데 지금 계산한 구간과 시작·끝 시각까지 같은 것만 쓴다.
+// 회의 중에는 닫힌 것으로 본 방문이 뒤에 이어 붙거나(취소된 전환) 구간 범위가 바뀌면 그 요약은 구간 일부만 담는다.
+function buildReadyTextByKeyMap({ snapshot, segmentList }) {
+  const segmentByKeyMap = new Map(segmentList.map((segment) => [segment.key, segment]));
+  return new Map((snapshot.segmentSummaryList || [])
+    .filter((segmentSummary) => {
+      const segment = segmentByKeyMap.get(segmentSummary.key);
+      return segmentSummary.status === SEGMENT_STATUS_MAP.ready && Boolean(segment)
+        && segmentSummary.startTs === segment.startTs && segmentSummary.endTs === segment.endTs;
+    })
+    .map((segmentSummary) => [segmentSummary.key, segmentSummary.text || '']));
+}
+
 // 에이전트·TTS·회의 진행 여부는 바꿔 끼울 수 있다(기본은 실제 모델·서버, 진행 중인 회의 없음).
 function createSummaryGenerator({
   config, summariesDir, onProgress = null,
@@ -165,9 +178,7 @@ function createSummaryGenerator({
   // 실시간 해설과 GPU 를 나눠 쓰므로 한 번에 하나씩 보낸다. 일부 구간이 실패하면 빈 요약으로 두고 계속하지만,
   // 글이 있는 구간 없이 실패만 있거나 연속으로 실패하면 던져 요약 실패로 알린다 — "요약할 내용 없음"으로 저장하지 않는다.
   async function fillSegmentSummaryList({ snapshot, segmentList, screenFillByMajorMap, language }) {
-    const readyTextByKeyMap = new Map((snapshot.segmentSummaryList || [])
-      .filter((segmentSummary) => segmentSummary.status === SEGMENT_STATUS_MAP.ready)
-      .map((segmentSummary) => [segmentSummary.key, segmentSummary.text || '']));
+    const readyTextByKeyMap = buildReadyTextByKeyMap({ snapshot, segmentList });
     const missingCount = segmentList.filter((segment) => !readyTextByKeyMap.has(segment.key)).length;
     logStep(`구간 요약 ${segmentList.length}개 가운데 빠진 ${missingCount}개를 만든다`);
 

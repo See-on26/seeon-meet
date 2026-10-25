@@ -3,7 +3,7 @@ import assert from 'node:assert/strict';
 import { createRequire } from 'node:module';
 
 const require = createRequire(import.meta.url);
-const { listSegments } = require('../src/main/caption-pipeline/context/segment-plan.js');
+const { listSegments, DEFAULT_MAX_SEGMENT_MS } = require('../src/main/caption-pipeline/context/segment-plan.js');
 
 function slide(major, visitList) {
   return { major, visitList };
@@ -132,4 +132,53 @@ test('segment-plan: 열린 방문은 endTs 가 없으면 구간에 넣지 않는
   assert.deepEqual(listSegments({ snapshot }).map(({ key }) => key), ['1@0']);
   assert.deepEqual(listSegments({ snapshot: { startedAt: 0, slideList: [], utteranceList: [] } }), [],
     '방문이 없는 회의도 끝 시각이 없으면 구간이 없다');
+});
+
+test('segment-plan: 취소된 방문만 사이에 둔 같은 슬라이드의 방문은 한 방문이다', () => {
+  // 1 → 2(취소) → 1: 화면은 슬라이드 1 그대로였으므로 다시 온 방문이 아니다.
+  const snapshot = {
+    startedAt: 0,
+    slideList: [
+      slide(1, [{ startTs: 0, endTs: 60000 }, { startTs: 62000, endTs: 120000 }]),
+      slide(2, [{ startTs: 60000, endTs: 62000 }]),
+      slide(3, [{ startTs: 120000, endTs: null }]),
+    ],
+    cancelledTransitionList: [{ slideMajor: 2, requestTs: 60100, transitionTs: 60000 }],
+    utteranceList: [],
+  };
+  assert.deepEqual(listSegments({ snapshot, endTs: 180000 }), [
+    { key: '1@0', slideMajor: 1, startTs: 0, endTs: 120000, isRevisit: false, isOpenTail: false },
+    { key: '3@120000', slideMajor: 3, startTs: 120000, endTs: 180000, isRevisit: false, isOpenTail: true },
+  ]);
+
+  // 취소된 방문이 여럿 끼어도, 돌아온 방문이 아직 열려 있어도 한 방문이다.
+  const openSnapshot = {
+    startedAt: 0,
+    slideList: [
+      slide(1, [{ startTs: 0, endTs: 60000 }, { startTs: 64000, endTs: null }]),
+      slide(2, [{ startTs: 60000, endTs: 62000 }]),
+      slide(3, [{ startTs: 62000, endTs: 64000 }]),
+    ],
+    cancelledTransitionList: [
+      { slideMajor: 2, requestTs: 60100, transitionTs: 60000 },
+      { slideMajor: 3, requestTs: 62100, transitionTs: 62000 },
+    ],
+    utteranceList: [],
+  };
+  assert.deepEqual(listSegments({ snapshot: openSnapshot, endTs: 90000 }), [
+    { key: '1@0', slideMajor: 1, startTs: 0, endTs: 90000, isRevisit: false, isOpenTail: true },
+  ]);
+  assert.deepEqual(listSegments({ snapshot: openSnapshot }), [], '합친 방문이 열려 있으면 끝 시각 없이는 구간이 아니다');
+
+  // 사이에 살아 있는 방문이 있으면(5초 미만이라 구간이 아니어도) 다시 온 방문이다.
+  const liveBetweenSnapshot = { ...snapshot, cancelledTransitionList: [] };
+  assert.deepEqual(listSegments({ snapshot: liveBetweenSnapshot, endTs: 180000 }).map(({ key, isRevisit }) => [key, isRevisit]), [
+    ['1@0', false],
+    ['1@62000', true],
+    ['3@120000', false],
+  ]);
+});
+
+test('segment-plan: 구간 길이 상한을 내보낸다(회의 중 스케줄러가 같은 값을 쓴다)', () => {
+  assert.equal(DEFAULT_MAX_SEGMENT_MS, 300000);
 });

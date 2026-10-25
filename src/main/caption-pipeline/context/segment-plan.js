@@ -10,10 +10,27 @@ function toSegmentKey({ slideMajor, startTs }) {
   return `${slideMajor ?? 'none'}@${startTs}`;
 }
 
+// 취소된 방문만 사이에 둔 같은 슬라이드의 방문은 화면이 바뀐 적이 없으므로 한 방문으로 잇는다.
+// 사이에 살아 있는 방문이 하나라도 있으면(5초 미만이라 구간이 아니어도) 따로 둔다.
+function mergeAcrossCancelledVisit({ visitList, liveStartTsList }) {
+  const mergedList = [];
+  for (const visit of visitList) {
+    const previous = mergedList.at(-1);
+    const isOnlyCancelledBetween = Boolean(previous) && Number.isFinite(previous.endTs)
+      && !liveStartTsList.some((startTs) => startTs >= previous.endTs && startTs < visit.startTs);
+    if (isOnlyCancelledBetween) previous.endTs = visit.endTs;
+    else mergedList.push({ startTs: visit.startTs, endTs: visit.endTs });
+  }
+  return mergedList;
+}
+
 // 취소된 전환의 방문을 뺀 살아 있는 방문. 같은 슬라이드의 둘째 이후 방문은 다시 온 방문이다.
 function listLiveVisitSpan({ snapshot }) {
   const cancelledList = snapshot.cancelledTransitionList || [];
-  return (snapshot.slideList || []).flatMap((slide) => listLiveVisit({ slide, cancelledList })
+  const liveVisitBySlideList = (snapshot.slideList || [])
+    .map((slide) => ({ slide, visitList: listLiveVisit({ slide, cancelledList }) }));
+  const liveStartTsList = liveVisitBySlideList.flatMap(({ visitList }) => visitList.map((visit) => visit.startTs));
+  return liveVisitBySlideList.flatMap(({ slide, visitList }) => mergeAcrossCancelledVisit({ visitList, liveStartTsList })
     .map((visit, index) => ({
       slideMajor: slide.major, startTs: visit.startTs,
       endTs: Number.isFinite(visit.endTs) ? visit.endTs : null, isRevisit: index > 0,
@@ -70,4 +87,4 @@ function listSegments({
     .sort((left, right) => left.startTs - right.startTs);
 }
 
-module.exports = { listSegments };
+module.exports = { listSegments, DEFAULT_MAX_SEGMENT_MS };

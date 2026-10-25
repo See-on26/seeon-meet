@@ -1,10 +1,9 @@
-const { listSegments } = require('./segment-plan');
+const { listSegments, DEFAULT_MAX_SEGMENT_MS } = require('./segment-plan');
 const { buildSegmentMaterial, hasSegmentContent } = require('./segment-material');
 const { SEGMENT_STATUS_MAP } = require('./context-store');
 
 // 구간이 닫힌 뒤 이만큼 기다렸다 요약한다. 늦게 도착한 받아쓰기·해설 기록이 그 구간 재료에 들어오게 한다.
 const DEFAULT_SETTLE_MS = 5000;
-const DEFAULT_MAX_SEGMENT_MS = 300000;
 
 // 회의 중 닫힌 구간을 하나씩 요약해 맥락 Store 에 쌓는다. 요청은 GPU 배경 순위라 실시간 해설 요청이 없을 때만 나간다.
 // 새 세션(reset)이나 회의 끝(stop) 전에 보낸 요청의 응답은 버린다 — 새 세션에도 같은 key 가 생길 수 있고,
