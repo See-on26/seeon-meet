@@ -141,7 +141,7 @@ test('통합 입력: 구간마다 시각·슬라이드·화면 설명 머리 줄
     summarySegment({ slideMajor: null, startTs: 0, endTs: 60000, text: '  회의 목적을 나눴다.  ' }),
     summarySegment({ slideMajor: 3, startTs: 60000, endTs: 120000, text: '매출이 두 배로 늘었다.' }),
     summarySegment({ slideMajor: 5, startTs: 120000, endTs: 180000, text: '출시는 다음 분기다.' }),
-    summarySegment({ slideMajor: 7, startTs: 180000, endTs: 200000, text: '' }),
+    summarySegment({ slideMajor: 9, startTs: 180000, endTs: 200000, text: '' }),
     summarySegment({ slideMajor: 7, startTs: 200000, endTs: 220000, text: '   ', status: 'failed' }),
     summarySegment({ slideMajor: 7, startTs: 220000, endTs: 240000, text: '참고 문서를 띄웠다.' }),
   ];
@@ -157,8 +157,9 @@ test('통합 입력: 구간마다 시각·슬라이드·화면 설명 머리 줄
     '[02:00~03:00] 슬라이드 5 — 출시 일정',
     '출시는 다음 분기다.',
     '',
+    // 요약이 빈 슬라이드 9 구간은 빠진다. 슬라이드 7 은 빈 조각과 이어진 조각이 한 묶음이라 시각이 빈 조각부터다.
     // 들은 번호가 없는 화면은 내부 번호를 슬라이드 번호처럼 쓰지 않는다. 해설도 라벨도 없으면 머리 줄은 화면까지만이다.
-    '[03:40~04:00] 번호 없는 화면',
+    '[03:20~04:00] 번호 없는 화면',
     '참고 문서를 띄웠다.',
     '',
     // 다시 온 구간도 그 화면을 처음 설명한 해설을 쓴다(복귀 고지는 주제만 짧게 말한다).
@@ -166,6 +167,122 @@ test('통합 입력: 구간마다 시각·슬라이드·화면 설명 머리 줄
     '매출 결론을 다시 짚었다.',
   ].join('\n'));
   assert.equal(buildIntegrationInput({ segmentSummaryList: [summarySegment({ slideMajor: 3, startTs: 0, endTs: 60000, text: '' })], snapshot: meetingSnapshot }), '');
+});
+
+const NO_SCREEN_SHARE_NOTICE = '이 회의에서는 공유 화면 전환이 감지되지 않았다. 화면 자료 없이 대화만 오갔다.';
+
+test('통합 입력: 같은 방문을 시간으로 끊은 이어진 조각은 머리 줄 하나에 본문 여러 줄로 합친다', () => {
+  const pieceList = [
+    summarySegment({ slideMajor: 3, startTs: 60000, endTs: 360000, text: '매출이 두 배로 늘었다.' }),
+    summarySegment({ slideMajor: 3, startTs: 360000, endTs: 660000, text: '원인은 해외 판매다.' }),
+    summarySegment({ slideMajor: 3, startTs: 660000, endTs: 780000, text: '다음 분기 목표를 정했다.' }),
+  ];
+  assert.equal(buildIntegrationInput({ segmentSummaryList: pieceList, snapshot: meetingSnapshot }), [
+    '[01:00~13:00] 슬라이드 3 — 슬라이드 3: 분기 매출 막대그래프',
+    '매출이 두 배로 늘었다.',
+    '원인은 해외 판매다.',
+    '다음 분기 목표를 정했다.',
+  ].join('\n'));
+
+  // 가운데 조각의 요약이 비어도 앞뒤 조각은 한 묶음이고, 빈 조각은 본문에 줄을 남기지 않는다.
+  const withEmptyPieceList = [pieceList[0], { ...pieceList[1], text: '', status: 'failed' }, pieceList[2]];
+  assert.equal(buildIntegrationInput({ segmentSummaryList: withEmptyPieceList, snapshot: meetingSnapshot }), [
+    '[01:00~13:00] 슬라이드 3 — 슬라이드 3: 분기 매출 막대그래프',
+    '매출이 두 배로 늘었다.',
+    '다음 분기 목표를 정했다.',
+  ].join('\n'));
+});
+
+test('통합 입력: 사이에 다른 슬라이드가 끼면 합치지 않는다', () => {
+  const input = buildIntegrationInput({
+    snapshot: meetingSnapshot,
+    segmentSummaryList: [
+      summarySegment({ slideMajor: 3, startTs: 60000, endTs: 120000, text: '매출이 늘었다.' }),
+      summarySegment({ slideMajor: 5, startTs: 120000, endTs: 180000, text: '출시는 다음 분기다.' }),
+      summarySegment({ slideMajor: 3, startTs: 180000, endTs: 240000, text: '매출 이야기를 마무리했다.' }),
+    ],
+  });
+  assert.equal(input, [
+    '[01:00~02:00] 슬라이드 3 — 슬라이드 3: 분기 매출 막대그래프',
+    '매출이 늘었다.',
+    '',
+    '[02:00~03:00] 슬라이드 5 — 출시 일정',
+    '출시는 다음 분기다.',
+    '',
+    '[03:00~04:00] 슬라이드 3 — 슬라이드 3: 분기 매출 막대그래프',
+    '매출 이야기를 마무리했다.',
+  ].join('\n'));
+});
+
+test('통합 입력: 같은 슬라이드라도 다시 온 방문이나 시각이 이어지지 않는 조각은 합치지 않는다', () => {
+  const revisitInput = buildIntegrationInput({
+    snapshot: meetingSnapshot,
+    segmentSummaryList: [
+      summarySegment({ slideMajor: 3, startTs: 60000, endTs: 120000, text: '매출이 늘었다.' }),
+      summarySegment({ slideMajor: 3, startTs: 120000, endTs: 180000, isRevisit: true, text: '결론을 다시 짚었다.' }),
+    ],
+  });
+  assert.equal(revisitInput, [
+    '[01:00~02:00] 슬라이드 3 — 슬라이드 3: 분기 매출 막대그래프',
+    '매출이 늘었다.',
+    '',
+    '[02:00~03:00] 슬라이드 3 (다시 봄) — 슬라이드 3: 분기 매출 막대그래프',
+    '결론을 다시 짚었다.',
+  ].join('\n'));
+
+  const gapInput = buildIntegrationInput({
+    snapshot: meetingSnapshot,
+    segmentSummaryList: [
+      summarySegment({ slideMajor: 3, startTs: 60000, endTs: 120000, text: '매출이 늘었다.' }),
+      summarySegment({ slideMajor: 3, startTs: 125000, endTs: 180000, text: '결론을 짚었다.' }),
+    ],
+  });
+  assert.equal(gapInput.split('\n').filter((line) => line.startsWith('[')).length, 2, gapInput);
+});
+
+test('통합 입력: 슬라이드 구간이 없으면 맨 앞에 화면 공유가 없었다고 알리고 시간 조각을 한 묶음으로 합친다', async () => {
+  const segmentSummaryList = [
+    summarySegment({ slideMajor: null, startTs: 0, endTs: 300000, text: '회의 목적을 나눴다.' }),
+    summarySegment({ slideMajor: null, startTs: 300000, endTs: 600000, text: '일정을 맞췄다.' }),
+    summarySegment({ slideMajor: null, startTs: 600000, endTs: 660000, text: '다음 회의 날짜를 정했다.' }),
+  ];
+  const snapshot = { startedAt: 0, slideList: [], transitionList: [] };
+  const expected = [
+    NO_SCREEN_SHARE_NOTICE,
+    '',
+    '[00:00~11:00] 화면 없음',
+    '회의 목적을 나눴다.',
+    '일정을 맞췄다.',
+    '다음 회의 날짜를 정했다.',
+  ].join('\n');
+  assert.equal(buildIntegrationInput({ segmentSummaryList, snapshot }), expected);
+  assert.deepEqual(
+    await fitIntegrationInput({ segmentSummaryList, snapshot, language: 'ko', maxChars: expected.length, reduce: async () => assert.fail('줄이지 않는다') }),
+    { text: expected, isTruncated: false },
+  );
+
+  // 슬라이드 구간이 있었다면 그 요약이 비었어도 안내 줄을 두지 않는다. 요약이 모두 비면 안내 줄도 없다.
+  const withEmptySlideList = [...segmentSummaryList, summarySegment({ slideMajor: 3, startTs: 660000, endTs: 720000, text: '' })];
+  assert.ok(!buildIntegrationInput({ segmentSummaryList: withEmptySlideList, snapshot }).includes(NO_SCREEN_SHARE_NOTICE));
+  assert.equal(buildIntegrationInput({ segmentSummaryList: segmentSummaryList.map((segment) => ({ ...segment, text: '' })), snapshot }), '');
+
+  // 한 시간 동안 화면이 없던 회의: 합친 블록 하나를 한 번에 줄이고, 안내 줄은 줄인 뒤에도 맨 앞에 남는다.
+  const hourPieceList = Array.from({ length: 12 }, (_, index) => summarySegment({
+    slideMajor: null, startTs: index * 300000, endTs: (index + 1) * 300000, text: '가'.repeat(40),
+  }));
+  const reduceTextList = [];
+  const fitted = await fitIntegrationInput({
+    segmentSummaryList: hourPieceList, snapshot, language: 'ko', maxChars: 300,
+    reduce: async ({ text }) => {
+      reduceTextList.push(text);
+      return { text: '한 시간 동안 일정을 맞췄다.' };
+    },
+  });
+  assert.equal(reduceTextList.length, 1);
+  assert.ok(reduceTextList[0].startsWith(`[00:00~1:00:00] 화면 없음\n${'가'.repeat(40)}\n`), '합친 블록이 묶음 재료다');
+  assert.deepEqual(fitted, {
+    text: `${NO_SCREEN_SHARE_NOTICE}\n\n[00:00~1:00:00] 화면 없음\n한 시간 동안 일정을 맞췄다.`, isTruncated: false,
+  });
 });
 
 function buildLongMeeting({ segmentCount }) {

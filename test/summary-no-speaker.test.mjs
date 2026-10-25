@@ -25,12 +25,12 @@ test('요약 입력은 화자 이름 없이 화면 설명 머리 줄과 구간 �
   assert.doesNotMatch(input, /김지오/);
 });
 
-test('화면 없이 대화만 오간 구간은 화면 없음 머리 줄로 알려 준다', () => {
+test('화면 공유가 없던 회의는 대화만 오간 회의로 알려 준다', () => {
   const input = buildIntegrationInput({
     snapshot: { startedAt: 0, slideList: [], transitionList: [] },
     segmentSummaryList: [{ key: 'none@0', slideMajor: null, startTs: 0, endTs: 60000, isRevisit: false, text: '인사를 나눴다.', status: 'ready' }],
   });
-  assert.equal(input, '[00:00~01:00] 화면 없음\n인사를 나눴다.');
+  assert.equal(input, '이 회의에서는 공유 화면 전환이 감지되지 않았다. 화면 자료 없이 대화만 오갔다.\n\n[00:00~01:00] 화면 없음\n인사를 나눴다.');
 });
 
 test('요약 프롬프트는 구간 요약 목록을 재료로 하고 누가 말했는지 쓰지 않게 한다', () => {
