@@ -36,15 +36,36 @@ test('회의가 끝나면 대화 스크립트와 회의 정보를 날짜별 폴�
   await rm(rootDir, { recursive: true, force: true });
 });
 
-test('같은 회의의 요약은 스크립트와 같은 폴더에 넣고 음성 파일도 복사한다', async () => {
+test('요약 상태와 요약 음성을 따로 저장하고 read 가 상태를 돌려준다', async () => {
   const { rootDir, archive } = await makeArchive();
-  const meetingDir = await archive.saveScript({ sessionId: 's1', startedAt, scriptText: '스크립트' });
+  const meetingDir = await archive.saveScript({
+    sessionId: 's1', startedAt, endedAt: startedAt + 60_000, title: '분기 매출', scriptText: '스크립트',
+  });
+  const meetingId = path.basename(meetingDir);
+  assert.equal((await archive.read({ id: meetingId })).meeting.summaryStatus, null);
+
+  assert.equal(await archive.setSummaryStatus({ sessionId: 's1', startedAt, status: 'pending' }), meetingDir);
+  const pending = await archive.read({ id: meetingId });
+  assert.equal(pending.meeting.summaryStatus, 'pending');
+  assert.equal(pending.meeting.title, '분기 매출');
+  assert.equal(pending.meeting.endedAt, startedAt + 60_000);
+
+  // 요약 글은 음성보다 먼저 저장한다. 글만 쓰고 음성 파일은 건드리지 않는다.
+  assert.equal(await archive.saveSummary({ sessionId: 's1', startedAt, summaryText: '요약 본문' }), meetingDir);
+  await archive.setSummaryStatus({ sessionId: 's1', startedAt, status: 'done' });
+  const done = await archive.read({ id: meetingId });
+  assert.equal(done.meeting.summaryStatus, 'done');
+  assert.equal(done.summaryText, '요약 본문');
+  assert.equal(await readFile(path.join(meetingDir, ARCHIVE_FILE_NAME_MAP.summaryAudio)).catch(() => null), null);
+
   const audioFilePath = path.join(rootDir, 'source.mp3');
   await writeFile(audioFilePath, Buffer.from('mp3'));
-  const summaryDir = await archive.saveSummary({ sessionId: 's1', startedAt, summaryText: '요약 본문', audioFilePath });
-  assert.equal(summaryDir, meetingDir);
-  assert.equal(await readFile(path.join(meetingDir, ARCHIVE_FILE_NAME_MAP.summary), 'utf8'), '요약 본문');
+  assert.equal(await archive.saveSummaryAudio({ sessionId: 's1', startedAt, audioFilePath }), meetingDir);
   assert.equal((await readFile(path.join(meetingDir, ARCHIVE_FILE_NAME_MAP.summaryAudio))).toString(), 'mp3');
+
+  await archive.setSummaryStatus({ sessionId: 's1', startedAt, status: 'failed' });
+  assert.equal((await archive.read({ id: meetingId })).meeting.summaryStatus, 'failed');
+  await assert.rejects(archive.setSummaryStatus({ sessionId: 's1', startedAt, status: 'unknown' }), RangeError);
   await rm(rootDir, { recursive: true, force: true });
 });
 
@@ -105,21 +126,4 @@ test('회의 제목은 앞쪽 슬라이드 제목(라벨 제목, 없으면 화�
   ] } }), '분기 매출 · 채용 계획');
   assert.equal(pickMeetingTitle({ snapshot: { slideList: [] } }), '');
   assert.equal(pickMeetingTitle({ snapshot: null }), '');
-});
-
-test('회의 후 처리에서 스크립트만 바꿔 쓰고 회의 정보는 그대로 둔다', async () => {
-  const { rootDir, archive } = await makeArchive();
-  const meetingDir = await archive.saveScript({
-    sessionId: 's1', startedAt, endedAt: startedAt + 60_000, title: '분기 매출', slideCount: 2, utteranceCount: 3,
-    scriptText: '[00:01] 화자 미상: 안녕하세요',
-  });
-  const replacedDir = await archive.replaceScript({
-    sessionId: 's1', startedAt, scriptText: '[00:00] ── 표지 ──\n[00:01] 화자 미상: 안녕하세요',
-  });
-  assert.equal(replacedDir, meetingDir);
-  assert.equal(await readFile(path.join(meetingDir, ARCHIVE_FILE_NAME_MAP.script), 'utf8'),
-    '[00:00] ── 표지 ──\n[00:01] 화자 미상: 안녕하세요');
-  const meta = JSON.parse(await readFile(path.join(meetingDir, ARCHIVE_FILE_NAME_MAP.meta), 'utf8'));
-  assert.equal(meta.title, '분기 매출');
-  await rm(rootDir, { recursive: true, force: true });
 });

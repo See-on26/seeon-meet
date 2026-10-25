@@ -1,0 +1,368 @@
+import { test, beforeEach, afterEach, mock } from 'node:test';
+import assert from 'node:assert/strict';
+import fs from 'node:fs';
+import os from 'node:os';
+import path from 'node:path';
+import { createRequire } from 'node:module';
+
+const require = createRequire(import.meta.url);
+const { createSummaryGenerator } = require('../src/main/summary/summary-generator.js');
+const { registerSummary } = require('../src/main/summary/index.js');
+const { createMeetingArchive } = require('../src/main/archive/meeting-archive.js');
+const { TRUNCATED_NOTICE } = require('../src/main/summary/summary-document.js');
+
+// 생성기의 단계별 로그·경고가 시험 출력에 섞이지 않게 막는다.
+beforeEach(() => {
+  mock.method(console, 'log', () => {});
+  mock.method(console, 'warn', () => {});
+  mock.method(console, 'error', () => {});
+});
+afterEach(() => mock.restoreAll());
+
+const VISIT_MS = 60000;
+const MAJOR_LIST = [1, 2, 3, 4];
+const nextTick = () => new Promise((resolve) => { setImmediate(resolve); });
+
+async function waitFor(predicate) {
+  for (let count = 0; count < 200 && !predicate(); count += 1) await nextTick();
+  assert.ok(predicate(), '기다린 조건이 끝내 참이 되지 않았다');
+}
+
+function makeTempDir(prefix) {
+  return fs.mkdtempSync(path.join(os.tmpdir(), prefix));
+}
+
+// 슬라이드 1~4 를 1분씩 차례로 보고, 슬라이드 4 를 보던 중 4분에 회의가 끝났다.
+function buildSnapshot({ segmentSummaryList = [], qaList = [] } = {}) {
+  return {
+    sessionId: 'session-1',
+    startedAt: 0,
+    slideList: MAJOR_LIST.map((major) => ({
+      major, displayNumber: major, hasTransition: true,
+      visitList: [{ startTs: (major - 1) * VISIT_MS, endTs: major === 4 ? null : major * VISIT_MS }],
+    })),
+    transitionList: MAJOR_LIST.map((major) => ({
+      ts: (major - 1) * VISIT_MS + 1000, slideMajor: major, text: `슬라이드 ${major}: 화면 ${major}`,
+    })),
+    utteranceList: MAJOR_LIST.map((major) => ({
+      ts: (major - 1) * VISIT_MS + 2000, text: `말 ${major}`, speakerHint: '김지오',
+    })),
+    narrationList: [],
+    qaList,
+    cancelledTransitionList: [],
+    segmentSummaryList,
+  };
+}
+
+function buildSession({ captionLanguage = 'ko', slideMarkList = [] } = {}) {
+  return {
+    sessionId: 'session-1', startedAt: 0, endedAt: 4 * VISIT_MS, captionLanguage,
+    asrEntryList: MAJOR_LIST.map((major) => ({ ts: (major - 1) * VISIT_MS + 2000, text: `말 ${major}`, speakerHint: '김지오' })),
+    slideMarkList,
+  };
+}
+
+// 회의 중에 슬라이드 1 은 요약을 마쳤고, 2 는 실패, 3 은 요청만 한 채 회의가 끝났다. 4 는 아직 요청 전이다.
+const STORED_SEGMENT_LIST = [
+  { key: '1@0', slideMajor: 1, startTs: 0, endTs: VISIT_MS, isRevisit: false, text: '첫 화면 요약.', status: 'ready' },
+  { key: '2@60000', slideMajor: 2, startTs: VISIT_MS, endTs: 2 * VISIT_MS, isRevisit: false, text: '', status: 'failed' },
+  { key: '3@120000', slideMajor: 3, startTs: 2 * VISIT_MS, endTs: 3 * VISIT_MS, isRevisit: false, text: '', status: 'requested' },
+];
+
+// 부른 순서를 callList 에 남기는 가짜 에이전트·TTS. 구간 요약은 재료의 슬라이드 번호로 글을 만든다.
+function makeFakeSet({ segmentText = null, summaryError = null, summaryTruncated = false } = {}) {
+  const callList = [];
+  return {
+    callList,
+    recaptionAgent: {
+      generate: async ({ slideMajor }) => {
+        callList.push({ name: 'recaption', slideMajor });
+        return { title: '분기 매출 표', bodyText: '' };
+      },
+    },
+    segmentSummaryAgent: {
+      summarize: async ({ materialText, language }) => {
+        callList.push({ name: 'segment', materialText, language });
+        if (segmentText) return segmentText({ materialText });
+        const major = materialText.match(/화면: 슬라이드 (\d+)/)?.[1];
+        return { text: `슬라이드 ${major} 새 요약.` };
+      },
+    },
+    summaryAgent: {
+      summarize: async ({ integrationText, language }) => {
+        callList.push({ name: 'summarize', integrationText, language });
+        if (summaryError) throw summaryError;
+        return { text: '초안.', isTruncated: summaryTruncated };
+      },
+    },
+    rewriteAgent: {
+      rewrite: async ({ draftText, isTruncated, language }) => {
+        callList.push({ name: 'rewrite', draftText, isTruncated, language });
+        return { text: '듣는 글 본문.', isTruncated: false, isRewritten: true };
+      },
+    },
+    ttsClient: {
+      synthesizeLong: async ({ text, language }) => {
+        callList.push({ name: 'speak', text, language });
+        return Buffer.from('mp3');
+      },
+    },
+  };
+}
+
+function makeGenerator({ summariesDir, fakeSet, ...optionMap }) {
+  const { callList, ...agentMap } = fakeSet;
+  return createSummaryGenerator({ config: {}, summariesDir, ...agentMap, ...optionMap });
+}
+
+const listCallName = (callList) => callList.map((call) => call.name);
+
+test('generateText: Store 에 없는 구간만 채우고 통합·재작성을 한 번씩 부른다', async () => {
+  const summariesDir = makeTempDir('summary-background-');
+  const fakeSet = makeFakeSet();
+  const generator = makeGenerator({ summariesDir, fakeSet });
+  const result = await generator.generateText({
+    session: buildSession(), contextSnapshot: buildSnapshot({ segmentSummaryList: STORED_SEGMENT_LIST }),
+  });
+
+  // ready 인 슬라이드 1 은 다시 만들지 않고, failed·requested·없음(2·3·4)은 구간 순서대로 만든다.
+  const segmentCallList = fakeSet.callList.filter((call) => call.name === 'segment');
+  assert.deepEqual(segmentCallList.map((call) => call.materialText.match(/화면: (슬라이드 \d+)/)[1]),
+    ['슬라이드 2', '슬라이드 3', '슬라이드 4']);
+  assert.ok(segmentCallList.every((call) => call.language === 'ko'));
+  assert.deepEqual(listCallName(fakeSet.callList), ['segment', 'segment', 'segment', 'summarize', 'rewrite']);
+
+  const [summarizeCall] = fakeSet.callList.filter((call) => call.name === 'summarize');
+  assert.equal(summarizeCall.integrationText, [
+    '[00:00~01:00] 슬라이드 1 — 슬라이드 1: 화면 1\n첫 화면 요약.',
+    '[01:00~02:00] 슬라이드 2 — 슬라이드 2: 화면 2\n슬라이드 2 새 요약.',
+    '[02:00~03:00] 슬라이드 3 — 슬라이드 3: 화면 3\n슬라이드 3 새 요약.',
+    '[03:00~04:00] 슬라이드 4 — 슬라이드 4: 화면 4\n슬라이드 4 새 요약.',
+  ].join('\n\n'));
+  const [rewriteCall] = fakeSet.callList.filter((call) => call.name === 'rewrite');
+  assert.equal(rewriteCall.draftText, '초안.');
+
+  assert.equal(result.isOk, true);
+  assert.equal(result.isTruncated, false);
+  assert.equal(result.slideCount, 4);
+  assert.match(result.documentText, /^회의 요약\n/);
+  assert.match(result.documentText, /\n듣는 글 본문\.\n$/);
+  assert.equal(fs.readFileSync(result.textFilePath, 'utf8'), result.documentText);
+  assert.equal('audioFilePath' in result, false);
+  fs.rmSync(summariesDir, { recursive: true, force: true });
+});
+
+test('generateText: 요약이 잘렸으면 재작성이 잘림을 놓쳐도 문서에 잘림 안내를 단다', async () => {
+  const summariesDir = makeTempDir('summary-background-');
+  const fakeSet = makeFakeSet({ summaryTruncated: true });
+  const result = await makeGenerator({ summariesDir, fakeSet }).generateText({
+    session: buildSession(), contextSnapshot: buildSnapshot(),
+  });
+  assert.equal(result.isTruncated, true);
+  assert.match(result.documentText, new RegExp(`${TRUNCATED_NOTICE}\n$`));
+  fs.rmSync(summariesDir, { recursive: true, force: true });
+});
+
+test('generateText: 구간 요약이 모두 비면 통합을 부르지 않는다', async () => {
+  const summariesDir = makeTempDir('summary-background-');
+  // 하나는 빈 구간, 하나는 실패, 나머지도 빈 구간이다. 실패한 구간은 빈 요약으로 두고 계속한다.
+  let callCount = 0;
+  const fakeSet = makeFakeSet({
+    segmentText: () => {
+      callCount += 1;
+      if (callCount === 2) throw new Error('GPU 시간 초과');
+      return { text: '' };
+    },
+  });
+  const generator = makeGenerator({ summariesDir, fakeSet });
+  const result = await generator.generateText({ session: buildSession(), contextSnapshot: buildSnapshot() });
+  assert.deepEqual(listCallName(fakeSet.callList), ['segment', 'segment', 'segment', 'segment']);
+  assert.equal(result.isOk, true);
+  assert.equal(result.isTruncated, false);
+  assert.match(result.documentText, /\n\n회의에서 요약할 만한 말과 화면 기록이 없어요\n$/);
+  assert.equal(fs.readFileSync(result.textFilePath, 'utf8'), result.documentText);
+
+  const englishFakeSet = makeFakeSet({ segmentText: () => ({ text: '' }) });
+  const englishResult = await makeGenerator({ summariesDir, fakeSet: englishFakeSet }).generateText({
+    session: buildSession({ captionLanguage: 'en' }), contextSnapshot: buildSnapshot(),
+  });
+  assert.match(englishResult.documentText, /^Meeting summary\n/);
+  assert.match(englishResult.documentText, /\n\nThere was no speech or screen record to summarize\n$/);
+  assert.ok(!listCallName(englishFakeSet.callList).includes('summarize'));
+  fs.rmSync(summariesDir, { recursive: true, force: true });
+});
+
+test('generateText: 전환 해설이 없던 화면은 회의 뒤 텍스트화한 한 줄을 구간 재료에 넣는다', async () => {
+  const summariesDir = makeTempDir('summary-background-');
+  const slideFilePath = path.join(summariesDir, 'slide-1.jpg');
+  fs.writeFileSync(slideFilePath, Buffer.from('jpeg'));
+  const snapshot = buildSnapshot();
+  snapshot.slideList[0].hasTransition = false;
+  snapshot.transitionList = snapshot.transitionList.filter((transition) => transition.slideMajor !== 1);
+  const fakeSet = makeFakeSet();
+  await makeGenerator({ summariesDir, fakeSet }).generateText({
+    session: buildSession({ slideMarkList: [{ ts: 0, slideLabel: '1', frameKind: 'base', filePath: slideFilePath }] }),
+    contextSnapshot: snapshot,
+  });
+  assert.deepEqual(fakeSet.callList.filter((call) => call.name === 'recaption').map((call) => call.slideMajor), ['1']);
+  const firstSegmentCall = fakeSet.callList.find((call) => call.name === 'segment');
+  assert.match(firstSegmentCall.materialText, /^화면: 슬라이드 1\n화면 설명: 분기 매출 표$/m);
+  fs.rmSync(summariesDir, { recursive: true, force: true });
+});
+
+test('generateText: 스크립트 파일은 스크립트 전문이다(── 줄 없음)', async () => {
+  const summariesDir = makeTempDir('summary-background-');
+  const fakeSet = makeFakeSet();
+  const result = await makeGenerator({ summariesDir, fakeSet }).generateText({
+    session: buildSession(),
+    contextSnapshot: buildSnapshot({ qaList: [{ ts: 70000, question: '매출은요?', answer: '두 배입니다.', route: 'screen', slideMajorList: [2] }] }),
+  });
+  const scriptFilePath = result.textFilePath.replace(/\.txt$/, '-script.txt');
+  const scriptText = fs.readFileSync(scriptFilePath, 'utf8');
+  assert.equal(scriptText, [
+    '[00:02] 김지오: 말 1',
+    '[01:02] 김지오: 말 2',
+    '[01:10] 사용자 질문: 매출은요?',
+    '[01:10] SEEON 답: 두 배입니다.',
+    '[02:02] 김지오: 말 3',
+    '[03:02] 김지오: 말 4',
+  ].join('\n'));
+  assert.doesNotMatch(scriptText, /──/);
+  assert.equal(result.scriptText, scriptText);
+  fs.rmSync(summariesDir, { recursive: true, force: true });
+});
+
+test('generateAudio: 회의가 진행 중이면 기다렸다가 한 번만 합성한다', async () => {
+  const summariesDir = makeTempDir('summary-background-');
+  const eventList = [];
+  const liveAnswerList = [true, true, false];
+  const fakeSet = makeFakeSet();
+  fakeSet.ttsClient = {
+    synthesizeLong: async ({ text, language }) => {
+      eventList.push(`speak:${language}:${text}`);
+      return Buffer.from('mp3');
+    },
+  };
+  const generator = makeGenerator({
+    summariesDir,
+    fakeSet,
+    isMeetingLive: () => {
+      const isLive = liveAnswerList.shift();
+      eventList.push(`live:${isLive}`);
+      return isLive;
+    },
+    sleep: async (ms) => { eventList.push(`sleep:${ms}`); },
+  });
+  const audioFilePath = await generator.generateAudio({ sessionId: 'session-1', documentText: '요약 글', language: 'ko' });
+  assert.deepEqual(eventList, ['live:true', 'sleep:5000', 'live:true', 'sleep:5000', 'live:false', 'speak:ko:요약 글']);
+  assert.equal(audioFilePath, path.join(summariesDir, 'summary-session-1.mp3'));
+  assert.equal(fs.readFileSync(audioFilePath, 'utf8'), 'mp3');
+
+  // 합성에 실패하면 null 이다(요약 글은 이미 저장돼 있다).
+  const failingSet = makeFakeSet();
+  failingSet.ttsClient = { synthesizeLong: async () => { throw new Error('TTS(요약본) HTTP 503'); } };
+  assert.equal(await makeGenerator({ summariesDir, fakeSet: failingSet }).generateAudio({
+    sessionId: 'session-2', documentText: '요약 글', language: 'ko',
+  }), null);
+  fs.rmSync(summariesDir, { recursive: true, force: true });
+});
+
+// registerSummary 를 가짜 ipcMain·파이프라인 핸들·실제 회의 기록(임시 폴더)으로 띄운다.
+async function startSummaryIpc({
+  fakeSet, isMeetingLive = () => false, session = buildSession(), contextSnapshot = buildSnapshot(),
+}) {
+  const summariesDir = makeTempDir('summary-background-');
+  const rootDir = makeTempDir('summary-background-archive-');
+  const meetingArchive = createMeetingArchive({ rootDir });
+  await meetingArchive.saveScript({ sessionId: session.sessionId, startedAt: session.startedAt, title: '분기 보고', scriptText: '스크립트' });
+  const handlerMap = new Map();
+  const progressList = [];
+  registerSummary({
+    ipcMain: { handle: (channel, handler) => handlerMap.set(channel, handler) },
+    getViewerView: () => ({ webContents: { send: (channel, payload) => progressList.push({ channel, ...payload }) } }),
+    pipelineHandle: {
+      config: {},
+      consumeLastSession: () => session,
+      consumeLastContext: () => contextSnapshot,
+      isMeetingLive,
+    },
+    meetingArchive,
+    createGenerator: (optionMap) => makeGenerator({ ...optionMap, summariesDir, fakeSet, sleep: nextTick }),
+  });
+  const readMeeting = async () => {
+    const [{ id }] = await meetingArchive.list();
+    return meetingArchive.read({ id });
+  };
+  const cleanUp = () => {
+    fs.rmSync(summariesDir, { recursive: true, force: true });
+    fs.rmSync(rootDir, { recursive: true, force: true });
+  };
+  return { handler: handlerMap.get('summary-generate'), progressList, readMeeting, cleanUp };
+}
+
+test('summary-generate 성공: 글을 먼저 돌려주고 음성은 진행 중인 회의가 끝난 뒤 저장한다', async () => {
+  const fakeSet = makeFakeSet();
+  let isLive = true;
+  const ipc = await startSummaryIpc({ fakeSet, isMeetingLive: () => isLive });
+  const result = await ipc.handler();
+  assert.equal(result.isOk, true);
+  assert.equal(typeof result.textFilePath, 'string');
+  assert.ok(!listCallName(fakeSet.callList).includes('speak'));
+  const textMeeting = await ipc.readMeeting();
+  assert.equal(textMeeting.meeting.summaryStatus, 'done');
+  assert.match(textMeeting.summaryText, /듣는 글 본문\./);
+  assert.equal(fs.existsSync(path.join(textMeeting.meetingDir, '회의 요약.mp3')), false);
+
+  isLive = false;
+  await waitFor(() => ipc.progressList.some((progress) => progress.stage === 'audio-done'));
+  assert.equal(listCallName(fakeSet.callList).filter((name) => name === 'speak').length, 1);
+  assert.equal(fs.readFileSync(path.join(textMeeting.meetingDir, '회의 요약.mp3'), 'utf8'), 'mp3');
+  ipc.cleanUp();
+});
+
+test('진행 알림은 start·done·fail·audio-done 만 보낸다', async () => {
+  // 화면 정보 텍스트화·구간 채우기·통합·재작성·음성 합성 단계는 알리지 않는다.
+  const fakeSet = makeFakeSet();
+  const slideDir = makeTempDir('summary-background-slide-');
+  const slideFilePath = path.join(slideDir, 'slide-1.jpg');
+  fs.writeFileSync(slideFilePath, Buffer.from('jpeg'));
+  const snapshot = buildSnapshot();
+  snapshot.slideList[0].hasTransition = false;
+  snapshot.transitionList = snapshot.transitionList.filter((transition) => transition.slideMajor !== 1);
+  const ipc = await startSummaryIpc({
+    fakeSet,
+    session: buildSession({ slideMarkList: [{ ts: 0, slideLabel: '1', frameKind: 'base', filePath: slideFilePath }] }),
+    contextSnapshot: snapshot,
+  });
+  await ipc.handler();
+  await waitFor(() => ipc.progressList.some((progress) => progress.stage === 'audio-done'));
+  assert.deepEqual(listCallName(fakeSet.callList),
+    ['recaption', 'segment', 'segment', 'segment', 'segment', 'summarize', 'rewrite', 'speak']);
+  assert.deepEqual(ipc.progressList.map((progress) => progress.stage), ['start', 'done', 'audio-done']);
+  assert.ok(ipc.progressList.every((progress) => progress.channel === 'summary-progress' && progress.message));
+  assert.equal(ipc.progressList[0].message, '회의 요약 생성 중입니다…');
+  ipc.cleanUp();
+  fs.rmSync(slideDir, { recursive: true, force: true });
+
+  const failingIpc = await startSummaryIpc({ fakeSet: makeFakeSet({ summaryError: new Error('GPU 응답 없음') }) });
+  await failingIpc.handler();
+  assert.deepEqual(failingIpc.progressList.map((progress) => progress.stage), ['start', 'fail']);
+  failingIpc.cleanUp();
+});
+
+test('summary-generate 실패: 상태 failed·fail 진행 알림', async () => {
+  const fakeSet = makeFakeSet({ summaryError: new Error('GPU 응답 없음') });
+  const ipc = await startSummaryIpc({ fakeSet });
+  const result = await ipc.handler();
+  assert.deepEqual(result, { isOk: false, message: 'GPU 응답 없음' });
+  const meeting = await ipc.readMeeting();
+  assert.equal(meeting.meeting.summaryStatus, 'failed');
+  assert.equal(meeting.summaryText, '');
+  const failList = ipc.progressList.filter((progress) => progress.stage === 'fail');
+  assert.equal(failList.length, 1);
+  assert.match(failList[0].message, /GPU 응답 없음/);
+  // 글을 못 만들었으니 음성도 만들지 않는다.
+  await nextTick();
+  assert.ok(!listCallName(fakeSet.callList).includes('speak'));
+  ipc.cleanUp();
+});

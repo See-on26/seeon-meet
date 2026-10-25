@@ -1620,6 +1620,8 @@ function registerPipeline({ getViewerView, meetingArchive = null }) {
       lastContextSnapshot = null;
       return snapshot;
     },
+    // 캡처 세션이 열려 있는 동안이 회의 중이다. 회의 뒤 요약 음성은 회의 중이 아닐 때만 만든다.
+    isMeetingLive: () => sessionStore.getCurrentSessionId() !== null,
   };
 }
 
