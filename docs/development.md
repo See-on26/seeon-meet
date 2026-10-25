@@ -150,7 +150,11 @@ npm run dist:mac:dir    # 맥에서 설치본 동작만 확인할 때 — dist/m
 - 개발 실행은 `out/summaries/` 에 `summary-session-<id>.txt`(요약 글), `summary-session-<id>.mp3`(요약 음성),
   `summary-session-<id>-script.txt`(회의 스크립트)를 남겨요.
 - 사용자에게 보이는 기록은 `문서/SEEON 회의 기록/<날짜 시각> 회의/` 의 `대화 스크립트.txt`·`회의 요약.txt`·`회의 요약.mp3` 이고,
-  같은 폴더의 `meeting.json` 에 회의 정보(시작·끝 시각, 제목, 슬라이드·발화 수)를 둬요.
+  같은 폴더의 `meeting.json` 에 회의 정보(시작·끝 시각, 제목, 슬라이드·발화 수)와 요약 상태 `summaryStatus` 를 둬요.
+- `summaryStatus` 는 회의 뒤 요약을 만드는 동안 `pending`, 회의 기록에 요약 글을 저장하면 `done`,
+  요약을 만들지 못했거나(구간 요약이 모두 실패한 경우 포함) 회의 기록에 저장하지 못하면 `failed` 예요.
+  요약 기능을 끈 회의에는 이 칸이 없어요. 요약을 만드는 중에 앱이 꺼지면 다음 실행 때 `pending` 을 `failed` 로 바꿔요.
+  지난 회의 목록·상세는 요약 글이 없을 때 이 상태로 `요약 만드는 중`·`요약 실패`를 보여요.
 
 ---
 
