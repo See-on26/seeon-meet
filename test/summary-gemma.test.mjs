@@ -106,6 +106,9 @@ const NEW_MATERIAL_LINE_LIST = [
 ];
 // 영어 요약 지시문이 빼는 한국어 낭독용 규칙 줄(meeting-summary.js 의 KOREAN_READING_RULE_PATTERN 과 같다).
 const KOREAN_READING_RULE_PATTERN = /음차|엔에프티|한글 표기|퍼센트/;
+// 숫자 자체는 아라비아 숫자로 두게 한다("읽는 대로 쓴다"를 숫자 전체를 한글로 풀라는 뜻으로 읽지 않게).
+const NUMBER_RULE_LINE = '    숫자 자체는 아라비아 숫자로 둔다. 16.1퍼센트를 "십육 점 일 퍼센트"처럼 한글로 풀어 쓰지 마라.';
+const NUMBER_PARENT_PATTERN = /^ {2}· 숫자는 읽는 대로 쓴다\. 42%보다 42퍼센트가 낫다\.$/;
 // 다시 돌아온 구간은 새로 나온 내용만 적게 한다(머리 줄의 "다시 봄"마다 내용 없는 한 줄을 쓰지 않게).
 const REVISIT_RULE_LINE = '   다시 돌아온 구간(머리 줄에 "다시 봄"이 붙은 구간)은 앞에서 적은 것을 되풀이하지 말고'
   + ' 새로 나온 내용만 적는다. 새로 나온 것이 없으면 따로 적지 않는다.';
@@ -114,9 +117,10 @@ const TITLE_RULE_LINE_LIST = [
   '제목 줄에는 번호·기호·꾸밈 없이 그 이름만 쓰고, 내용은 다음 줄부터 쓴다.',
 ];
 const EMPTY_SENTENCE_RULE_LINE = '  · "…을 확인했습니다"처럼 무엇을 봤는지만 말하고 그 내용은 없는 문장을 쓰지 마라.';
-// 기존 줄 사이에 더한 규칙 줄(지시문에 나오는 순서). 다시 돌아온 구간, 네 부분 제목 줄,
+// 기존 줄 사이에 더한 규칙 줄(지시문에 나오는 순서). 숫자 표기, 다시 돌아온 구간, 네 부분 제목 줄,
 // 내용 없는 문장 금지, 견주기의 판단 한계, 지어내기 꼴 금지다.
 const ADDED_SUMMARY_RULE_LINE_LIST = [
+  NUMBER_RULE_LINE,
   REVISIT_RULE_LINE,
   ...TITLE_RULE_LINE_LIST,
   EMPTY_SENTENCE_RULE_LINE,
@@ -592,9 +596,10 @@ test('요약 지시문: 재료 설명 줄만 바뀌고 형식·구성·설명 �
   assert.deepEqual(extraLineList, ADDED_SUMMARY_RULE_LINE_LIST, '기존 줄과 재료 설명 말고 늘어난 줄은 더한 규칙 줄뿐이다');
   for (const line of PREVIOUS_MATERIAL_LINE_LIST) assert.ok(!koreanLineList.includes(line), `옛 재료 설명이 남았다 — ${line}`);
   assertSubsequence({ expectedLineList: NEW_MATERIAL_LINE_LIST, actualLineList: koreanLineList, label: '새 재료 설명' });
-  // 재료 설명은 옛 줄이 있던 자리에 들어간다.
+  // 재료 설명은 옛 줄이 있던 자리에 들어간다(더한 규칙 줄을 빼고 견준다).
+  const baseLineList = koreanLineList.filter((line) => !ADDED_SUMMARY_RULE_LINE_LIST.includes(line));
   for (const [index, line] of NEW_MATERIAL_LINE_LIST.entries()) {
-    assert.equal(koreanLineList.indexOf(line), PREVIOUS_SUMMARY_PROMPT_LINE_LIST.indexOf(PREVIOUS_MATERIAL_LINE_LIST[index]));
+    assert.equal(baseLineList.indexOf(line), PREVIOUS_SUMMARY_PROMPT_LINE_LIST.indexOf(PREVIOUS_MATERIAL_LINE_LIST[index]));
   }
 
   const englishLineList = buildSummarySystemPrompt({ language: 'en' }).split('\n');
@@ -674,6 +679,16 @@ test('요약 지시문: 다시 돌아온 구간은 새로 나온 내용만 적�
       endPattern: /^■ 분량/,
       label: `${language} 설명 방식`,
     });
+  }
+});
+
+test('요약·재작성 지시문: "숫자는 읽는 대로 쓴다" 바로 아래에 숫자는 아라비아 숫자로 둔다는 줄이 있고 영어에는 없다', () => {
+  for (const [label, build] of [['요약', buildSummarySystemPrompt], ['재작성', buildSummaryRewriteSystemPrompt]]) {
+    const lineList = build({ language: 'ko' }).split('\n');
+    const parentIndex = indexOfLine({ lineList, pattern: NUMBER_PARENT_PATTERN, label: `${label} 숫자 규칙` });
+    assert.equal(lineList[parentIndex + 1], NUMBER_RULE_LINE, `${label}: 숫자 표기 줄이 "읽는 대로 쓴다" 바로 뒤에 없다`);
+    // 영어는 숫자를 영어로 읽으니 한국어 숫자 표기 줄을 빼고 영어 규칙(42 percent)을 쓴다.
+    assert.ok(!build({ language: 'en' }).split('\n').includes(NUMBER_RULE_LINE), `${label}: 영어에 한국어 숫자 표기 줄이 남았다`);
   }
 });
 
