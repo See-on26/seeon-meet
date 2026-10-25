@@ -2039,7 +2039,7 @@ window.seeon.onPipelineEvent((payload) => {
 
 // 요약 시작·저장·실패 고지는 requestMeetingSummary 가 띄운다. 음성은 글을 저장한 뒤 따로 만들어지므로 그 저장만 여기서 알린다.
 window.seeon.onSummaryProgress(({ stage, message }) => {
-  if (stage === SUMMARY_STAGE_MAP.audioDone) showNotice(t('summary.audioSaved'));
+  if (stage === SUMMARY_STAGE_MAP.audioDone) announce(t('summary.audioSaved'));
   markDebug({
     stage: DEBUG_STAGE_MAP.session, verdict: DEBUG_VERDICT_MAP.info,
     reason: '회의 요약 진행', detail: message,
@@ -2430,8 +2430,8 @@ async function requestMeetingSummary() {
     });
     return;
   }
-  // 요약은 뒤에서 만들어진다. 시작·저장·실패는 화면을 막는 창 없이 고지 줄로만 알린다.
-  showNotice(t('summary.generating'));
+  // 요약은 뒤에서 만들어진다. 시작·저장·실패는 화면을 막는 창 없이 고지 줄과 스크린리더 안내로 알린다.
+  announce(t('summary.generating'));
   const result = await window.seeon.generateSummary().catch((error) => ({
     isOk: false, message: error.message,
   }));
@@ -2440,7 +2440,7 @@ async function requestMeetingSummary() {
       stage: DEBUG_STAGE_MAP.session, verdict: DEBUG_VERDICT_MAP.fail,
       reason: '회의 요약 실패', detail: result?.message || '알 수 없는 오류',
     });
-    showNotice(t('summary.failedNotice', { message: result?.message || t('summary.unknownError') }));
+    announce(t('summary.failedNotice', { message: result?.message || t('summary.unknownError') }));
     return;
   }
   markDebug({
@@ -2448,7 +2448,7 @@ async function requestMeetingSummary() {
     reason: '회의 요약 완료',
     detail: `${result.textFilePath}${result.isTruncated ? ' (길이 제한으로 잘림)' : ''}`,
   });
-  showNotice(t('summary.savedText'));
+  announce(t('summary.savedText'));
 
   console.log(`[summary] 저장 완료 — ${result.textFilePath}`);
 }

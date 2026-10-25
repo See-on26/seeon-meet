@@ -73,19 +73,27 @@ function readBlockSource(source, { head, end }) {
   return source.slice(start, source.indexOf(end, start));
 }
 
-test('회의 요약은 창을 띄우지 않고 고지 줄로 알리며, 진행 알림은 음성 저장만 고지 줄에 낸다', () => {
+// 고지 줄에 쓰면서 스크린리더(aria-live)에도 읽히는 announce(t('키' ...)) 호출의 위치. 없으면 -1.
+function findAnnounceIndex(source, key) {
+  return source.search(new RegExp(`\\bannounce\\(\\s*t\\(\\s*'${key.replaceAll('.', '\\.')}'`));
+}
+
+test('회의 요약은 창을 띄우지 않고 스크린리더가 읽는 고지로 알리며, 진행 알림은 음성 저장만 알린다', () => {
   const source = readSource('src/renderer/app/main.js');
   const requestSource = readBlockSource(source, { head: 'async function requestMeetingSummary(', end: '\n}\n' });
-  assert.equal(requestSource.includes('showModal('), false);
-  const generatingIndex = requestSource.indexOf("showNotice(t('summary.generating'));");
-  assert.ok(generatingIndex >= 0 && generatingIndex < requestSource.indexOf('window.seeon.generateSummary('),
+  assert.equal(requestSource.includes('showModal('), false, '화면을 막는 창을 띄우지 않는다');
+  assert.equal(requestSource.includes('showNotice('), false, '고지 줄에만 쓰면 스크린리더가 읽지 않는다');
+  const generatingIndex = findAnnounceIndex(requestSource, 'summary.generating');
+  assert.ok(generatingIndex >= 0 && generatingIndex < requestSource.indexOf('generateSummary('),
     '요약을 부르기 전에 시작 고지를 띄운다');
-  assert.ok(requestSource.includes("showNotice(t('summary.savedText'));"));
-  assert.match(requestSource, /showNotice\(t\('summary\.failedNotice', \{ message: /);
+  for (const key of ['summary.savedText', 'summary.failedNotice', 'summary.off']) {
+    assert.ok(findAnnounceIndex(requestSource, key) >= 0, key);
+  }
 
   const progressSource = readBlockSource(source, { head: 'window.seeon.onSummaryProgress(', end: '\n});\n' });
-  assert.equal((progressSource.match(/showNotice\(/g) || []).length, 1, progressSource);
-  assert.ok(progressSource.includes("if (stage === SUMMARY_STAGE_MAP.audioDone) showNotice(t('summary.audioSaved'));"),
-    progressSource);
+  assert.equal(progressSource.includes('showNotice('), false, progressSource);
+  assert.equal((progressSource.match(/\bannounce\(/g) || []).length, 1, progressSource);
+  assert.ok(findAnnounceIndex(progressSource, 'summary.audioSaved') >= 0, progressSource);
+  assert.ok(progressSource.includes('SUMMARY_STAGE_MAP.audioDone'), '음성 저장 단계일 때만 알린다');
   assert.ok(progressSource.includes('markDebug('));
 });
