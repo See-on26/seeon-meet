@@ -106,10 +106,20 @@ const NEW_MATERIAL_LINE_LIST = [
 ];
 // 영어 요약 지시문이 빼는 한국어 낭독용 규칙 줄(meeting-summary.js 의 KOREAN_READING_RULE_PATTERN 과 같다).
 const KOREAN_READING_RULE_PATTERN = /음차|엔에프티|한글 표기|퍼센트/;
-// 기존 줄 사이에 더한 규칙 줄(지시문에 나오는 순서). 네 부분 제목 줄, 견주기의 판단 한계, 지어내기 꼴 금지다.
-const ADDED_SUMMARY_RULE_LINE_LIST = [
+// 다시 돌아온 구간은 새로 나온 내용만 적게 한다(머리 줄의 "다시 봄"마다 내용 없는 한 줄을 쓰지 않게).
+const REVISIT_RULE_LINE = '   다시 돌아온 구간(머리 줄에 "다시 봄"이 붙은 구간)은 앞에서 적은 것을 되풀이하지 말고'
+  + ' 새로 나온 내용만 적는다. 새로 나온 것이 없으면 따로 적지 않는다.';
+const TITLE_RULE_LINE_LIST = [
   '네 부분은 각각 제목 한 줄로 시작한다. 제목은 개요 / 다룬 주제 / 슬라이드별 내용 / 결정된 것과 앞으로 할 일이다.',
   '제목 줄에는 번호·기호·꾸밈 없이 그 이름만 쓰고, 내용은 다음 줄부터 쓴다.',
+];
+const EMPTY_SENTENCE_RULE_LINE = '  · "…을 확인했습니다"처럼 무엇을 봤는지만 말하고 그 내용은 없는 문장을 쓰지 마라.';
+// 기존 줄 사이에 더한 규칙 줄(지시문에 나오는 순서). 다시 돌아온 구간, 네 부분 제목 줄,
+// 내용 없는 문장 금지, 견주기의 판단 한계, 지어내기 꼴 금지다.
+const ADDED_SUMMARY_RULE_LINE_LIST = [
+  REVISIT_RULE_LINE,
+  ...TITLE_RULE_LINE_LIST,
+  EMPTY_SENTENCE_RULE_LINE,
   '    견주는 것은 값의 크기까지다. "가장 큰 영향"·"통계적으로 유의미" 같은 판단은 재료에 그 말이 있을 때만 쓴다.',
   '  · 재료가 말하지 않은 인과(이로 인해·때문에·그 결과)로 사실을 잇지 마라.',
   '  · 한 항목의 값·수식어를 다른 항목에 옮겨 붙이지 마라.',
@@ -609,7 +619,7 @@ test('요약 지시문: 네 부분은 번호·기호 없이 제목 한 줄로 �
     });
   }
   // 제목 줄 규칙은 형식 규칙(마크다운·기호 금지)과 맞아야 한다.
-  for (const line of ADDED_SUMMARY_RULE_LINE_LIST.slice(0, 2)) assert.doesNotMatch(line, /#|\*\*|\d\./);
+  for (const line of TITLE_RULE_LINE_LIST) assert.doesNotMatch(line, /#|\*\*|\d\./);
 
   const englishLineList = buildSummarySystemPrompt({ language: 'en' }).split('\n');
   const englishTitleIndex = indexOfLine({
@@ -645,6 +655,24 @@ test('요약 지시문: 태도에 지어내기 꼴 금지 네 가지, 숫자 견
     // 판단 한계는 "숫자는 견주어 말한다" 항목에 딸린 줄이다(다음 항목 "단위는 자료에 적힌 그대로" 앞).
     assertRuleListInSection({
       lineList, patternList: [JUDGMENT_RULE_PATTERN], startPattern: /숫자는 나열하지 말고 \*\*견주어\*\* 말한다/, endPattern: /단위는 자료에 적힌 그대로 쓴다/, label: `${language} 견주기`,
+    });
+  }
+});
+
+test('요약 지시문: 다시 돌아온 구간은 새로 나온 내용만 적고, 무엇을 봤는지만 말하는 문장을 막으며 영어에도 남는다', () => {
+  for (const language of ['ko', 'en']) {
+    const lineList = buildSummarySystemPrompt({ language }).split('\n');
+    // 다시 돌아온 구간 규칙은 원래 규칙 "다시 돌아왔다면 그 사실을 밝힌다" 바로 다음 줄이다.
+    const revisitIndex = indexOfLine({
+      lineList, pattern: /^ {3}같은 슬라이드로 다시 돌아왔다면 그 사실을 밝힌다\.$/, label: `${language} 다시 돌아옴`,
+    });
+    assert.equal(lineList[revisitIndex + 1], REVISIT_RULE_LINE, `${language}: 다시 돌아온 구간 규칙이 원래 규칙 바로 뒤에 없다`);
+    assertRuleListInSection({
+      lineList,
+      patternList: [/^ {2}· "…을 확인했습니다"처럼 무엇을 봤는지만 말하고 그 내용은 없는 문장을 쓰지 마라\.$/],
+      startPattern: /^■ 설명 방식/,
+      endPattern: /^■ 분량/,
+      label: `${language} 설명 방식`,
     });
   }
 });
