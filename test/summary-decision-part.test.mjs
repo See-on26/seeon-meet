@@ -73,6 +73,8 @@ test('넷째 부분 지시문: 그 부분만 제목 줄부터 쓰게 하고, 영
   assert.match(korean, /첫 줄은 제목 "결정된 것과 앞으로 할 일" 한 줄이다/);
   assert.match(korean, /넷째 부분만 출력한다/);
   assert.match(korean, /정해진 것이 없으면 없다고 분명히 적는다/);
+  assert.match(korean, /"…하기로 했습니다"처럼 끝맺은 문장으로 쓴다/);
+  assert.match(korean, /의견·우려·설명은 결정이 아니다/);
   assert.match(korean, /지난 답변·과거 계획·전망을 이번 회의의 결정처럼 쓰지 마라/);
   assert.doesNotMatch(korean, /\[출력 언어\]|Decisions and next steps/);
   const english = buildDecisionPartPrompt({ language: 'en' });
