@@ -153,6 +153,11 @@ test('스크립트 전문: 영어 캡션이면 User question·SEEON answer', () 
   assert.match(script, /^\[00:22\] User question: 지금 화면 뭐야\?$/m);
   assert.doesNotMatch(script, /사용자 질문|SEEON 답/);
   assert.match(script, /^\[00:05\] 김지오: 매출이 늘었습니다$/m);
+  // 화자를 모르는 발화의 이름표도 영어다. 화자 식별을 끈 동안의 발화는 여전히 이름표가 없다.
+  assert.match(script, /^\[00:01\] Unknown speaker: 시작하겠습니다$/m);
+  assert.match(script, /^\[00:25\] 화자 식별을 끈 동안의 발화$/m);
+  assert.doesNotMatch(script, /화자 미상/);
+  assert.match(buildFullTranscript({ snapshot: meetingSnapshot, language: 'ko' }), /^\[00:01\] 화자 미상: 시작하겠습니다$/m);
 });
 
 test('스크립트 전문: 발화도 질문도 없으면 빈 기록 문구', () => {
