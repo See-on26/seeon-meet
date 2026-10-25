@@ -14,7 +14,7 @@ const { SEGMENT_STATUS_MAP } = require('../caption-pipeline/context/context-stor
 const { flattenAsrSegmentList } = require('./slide-timeline');
 const { resolveSlideAssetList } = require('./slide-asset-resolver');
 const { fitIntegrationInput } = require('./integration-input');
-const { completeDecisionPart } = require('./decision-part');
+const { buildIntegrationDraft } = require('./integration-draft');
 const { buildSummaryDocument, findMarkupViolationList, buildSummaryFileName } = require('./summary-document');
 const {
   buildFullTranscript, listSlideMajorWithoutTransitionLine,
@@ -257,12 +257,9 @@ function createSummaryGenerator({
       }),
     });
     logStep(`통합 요약 — 입력 ${fitted.text.length}자${fitted.isTruncated ? ' (길이 제한으로 자름)' : ''}`);
-    const draft = await summaryAgent.summarize({ integrationText: fitted.text, language });
-    const completed = await completeDecisionPart({
-      draftText: draft.text, integrationText: fitted.text, language, summaryAgent, logStep,
-    });
+    const draft = await buildIntegrationDraft({ integrationText: fitted.text, language, summaryAgent, logStep });
     logStep('요약본 듣는 글로 재구성');
-    const rewritten = await rewriteAgent.rewrite({ draftText: completed.text, isTruncated: draft.isTruncated, language });
+    const rewritten = await rewriteAgent.rewrite({ draftText: draft.text, isTruncated: draft.isTruncated, language });
     return { bodyText: rewritten.text, isTruncated: fitted.isTruncated || draft.isTruncated || rewritten.isTruncated };
   }
 
