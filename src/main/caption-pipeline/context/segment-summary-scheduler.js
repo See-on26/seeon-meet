@@ -36,7 +36,7 @@ function createSegmentSummaryScheduler({
     } catch (error) {
       if (requestGeneration !== generation) return;
       contextStore.setSegmentSummary({ key: segment.key, status: SEGMENT_STATUS_MAP.failed });
-      console.warn(`[summary] 구간 요약 ${segment.key} 실패 — 회의 뒤에 다시 만든다: ${error.message}`);
+      console.warn(`[summary] 구간 요약 ${segment.key} 실패 — 회의 뒤에 다시 만든다: ${error?.message}`);
     }
   }
 
@@ -46,10 +46,13 @@ function createSegmentSummaryScheduler({
     if (isSummarizing || !pendingSegmentList.length || !isEnabled()) return;
     const segment = pendingSegmentList.shift();
     isSummarizing = true;
-    summarizeSegment({ segment, requestGeneration: generation }).finally(() => {
-      isSummarizing = false;
-      runNext();
-    });
+    // 실패 기록마저 쓰지 못한 오류도 거부로 새지 않게 여기서 받는다. 그 구간은 회의 뒤 생성기가 다시 만든다.
+    summarizeSegment({ segment, requestGeneration: generation })
+      .catch((error) => console.warn(`[summary] 구간 요약 ${segment.key} 처리 오류(무시): ${error?.message}`))
+      .finally(() => {
+        isSummarizing = false;
+        runNext();
+      });
   }
 
   // 지금 보는 화면의 구간(isOpenTail)은 아직 닫히지 않아 넣지 않는다. 한 번 요청한 구간은 실패해도 회의 중에 다시 넣지 않는다.

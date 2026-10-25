@@ -1,4 +1,4 @@
-import { test, afterEach, mock } from 'node:test';
+import { test, beforeEach, afterEach, mock } from 'node:test';
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import Module, { createRequire } from 'node:module';
@@ -10,6 +10,8 @@ const { buildSegmentMaterial } = require('../src/main/caption-pipeline/context/s
 const { RECORD_KIND_MAP } = require('../src/main/caption-pipeline/instrumentation/record-store.js');
 const { readPipelineConfig } = require('../src/main/caption-pipeline/config.js');
 
+// 구간마다 남기는 진행 로그가 시험 출력에 섞이지 않게 막는다.
+beforeEach(() => mock.method(console, 'log', () => {}));
 afterEach(() => mock.restoreAll());
 
 const readSource = (relativePath) => fs.readFileSync(new URL(`../${relativePath}`, import.meta.url), 'utf8');
@@ -200,6 +202,53 @@ test('scheduler: 재료가 없는 구간은 GPU 에 묻지 않고 빈 구간 rea
   ]);
 });
 
+// 처리되지 않은 거부를 모은다. 시험이 끝나면 듣기를 멈춘다.
+function collectUnhandledRejection() {
+  const reasonList = [];
+  const listener = (reason) => reasonList.push(reason);
+  process.on('unhandledRejection', listener);
+  return { reasonList, stop: () => process.off('unhandledRejection', listener) };
+}
+
+test('scheduler: 에이전트가 Error 가 아닌 값으로 거부해도 failed 로 남기고 다음 구간으로 간다', async () => {
+  const warn = mock.method(console, 'warn', () => {});
+  const rejection = collectUnhandledRejection();
+  const store = startStore({ markList: [[1, 0], [2, 60000], [3, 120000]] });
+  const { callList, agent } = createHeldAgent();
+  const scheduler = createSegmentSummaryScheduler({
+    contextStore: store, segmentSummaryAgent: agent, getCaptionLanguage: () => 'ko', now: () => 130000,
+  });
+  scheduler.poll();
+  callList[0].reject(null);
+  await flush();
+  await flush();
+  rejection.stop();
+  assert.deepEqual(rejection.reasonList, []);
+  assert.equal(callList.length, 2);
+  assert.deepEqual(statusOf({ store })[0], ['1@0', SEGMENT_STATUS_MAP.failed, '']);
+  assert.match(warn.mock.calls[0].arguments[0], /1@0/);
+});
+
+test('scheduler: 결과를 Store 에 넣다 오류가 나도 거부가 새지 않고 다음 구간으로 간다', async () => {
+  const warn = mock.method(console, 'warn', () => {});
+  const rejection = collectUnhandledRejection();
+  const store = startStore({ markList: [[1, 0], [2, 60000], [3, 120000]] });
+  const brokenStore = { ...store, setSegmentSummary: () => { throw new Error('저장소 오류'); } };
+  const { callList, agent } = createHeldAgent();
+  const scheduler = createSegmentSummaryScheduler({
+    contextStore: brokenStore, segmentSummaryAgent: agent, getCaptionLanguage: () => 'ko', now: () => 130000,
+  });
+  scheduler.poll();
+  callList[0].resolve({ text: '첫 화면 요약' });
+  await flush();
+  await flush();
+  rejection.stop();
+  assert.deepEqual(rejection.reasonList, []);
+  assert.equal(callList.length, 2, '줄의 다음 구간을 잇는다');
+  assert.ok(warn.mock.calls.some((call) => /\[summary\].*저장소 오류/.test(call.arguments[0])),
+    warn.mock.calls.map((call) => call.arguments[0]).join('\n'));
+});
+
 test('scheduler: isEnabled 가 거짓이면 요청하지 않는다', async () => {
   const store = startStore({ markList: [[1, 0], [2, 60000], [3, 120000]] });
   const { callList, agent } = createHeldAgent();
@@ -247,8 +296,15 @@ test('파이프라인: 세션 시작에 reset, 슬라이드 마크 반영 때와
   const source = readSource('src/main/caption-pipeline/index.js');
   assert.match(source, /isEnabled: \(\) => config\.isLiveSegmentSummaryEnabled && isSessionMeetingSummaryEnabled/);
   const appendBody = source.slice(source.indexOf('function appendRecord(record) {'), source.indexOf('function labelReadySlides() {'));
-  assert.match(appendBody, /if \(record\.kind === RECORD_KIND_MAP\.slideMark\) segmentSummaryScheduler\.poll\(\);/);
-  assert.equal(appendBody.match(/segmentSummaryScheduler\.poll\(\)/g).length, 1, '다른 기록에는 poll 하지 않는다');
+  assert.match(appendBody,
+    /if \(record\.kind === RECORD_KIND_MAP\.slideMark && record\.frameKind === SLIDE_FRAME_KIND_BASE\) pollSegmentSummary\(\);/,
+    '주석 판 마크에는 poll 하지 않는다');
+  assert.equal(appendBody.match(/pollSegmentSummary\(\)/g).length, 1, '다른 기록에는 poll 하지 않는다');
+  assert.doesNotMatch(appendBody, /segmentSummaryScheduler\.poll\(\)/, 'poll 실패를 [context] 기록 반영 실패로 남기지 않는다');
+  const pollBody = source.slice(source.indexOf('function pollSegmentSummary() {'), source.indexOf('function stopSegmentSummaryTimer() {'));
+  assert.match(pollBody, /try \{\s*segmentSummaryScheduler\.poll\(\);\s*\} catch \(error\) \{\s*console\.warn\(`\[summary\]/);
+  const timerBody = source.slice(source.indexOf('function startSegmentSummaryTimer() {'), source.indexOf('function appendRecord(record) {'));
+  assert.match(timerBody, /setInterval\(pollSegmentSummary, SEGMENT_SUMMARY_POLL_MS\)/);
   assert.match(source, /const SEGMENT_SUMMARY_POLL_MS = 15000;/);
 
   const startBody = source.slice(source.indexOf("ipcMain.handle('pipeline-session-start'"), source.indexOf("ipcMain.handle('pipeline-session-end'"));
@@ -268,6 +324,7 @@ test('렌더러: 세션 시작에 회의 요약 스위치 값을 넘기고, 스�
   const source = readSource('src/renderer/app/main.js');
   assert.match(source, /isMeetingSummaryEnabled: featureToggleStore\.isOn\(FEATURE_KEY_MAP\.meetingSummary\)/);
   assert.match(source, /if \(key === FEATURE_KEY_MAP\.meetingSummary\) syncMeetingSummaryToMain\(\{ isOn \}\);/);
+  assert.match(source, /window\.seeon\.setMeetingSummaryEnabled\(\{ isEnabled: isOn \}\)/, 'preload 관례대로 객체 인자');
 
   const exposedMap = {};
   const invokeList = [];
@@ -289,7 +346,7 @@ test('렌더러: 세션 시작에 회의 요약 스위치 값을 넘기고, 스�
   } finally {
     Module._load = originalLoad;
   }
-  await exposedMap.seeon.setMeetingSummaryEnabled(false);
+  await exposedMap.seeon.setMeetingSummaryEnabled({ isEnabled: false });
   await exposedMap.seeon.startPipelineSession({ mode: 'delayed', captionLanguage: 'ko', isMeetingSummaryEnabled: true });
   assert.deepEqual(invokeList, [
     { channel: 'pipeline-set-meeting-summary-enabled', payload: { isEnabled: false } },

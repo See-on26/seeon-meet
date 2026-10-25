@@ -72,7 +72,9 @@ const {
 const { createSlideLayoutStore, createSharedOcrClient } = require('./orchestrator/speech-roi/slide-layout-store');
 const { createFrameImageOps } = require('./orchestrator/speech-roi/frame-image');
 const { createScreenChangeService } = require('./orchestrator/screen-change-service');
-const { createContextStore, toSlideMajor, LABEL_STATUS_MAP } = require('./context/context-store');
+const {
+  createContextStore, toSlideMajor, LABEL_STATUS_MAP, SLIDE_FRAME_KIND_BASE,
+} = require('./context/context-store');
 const { createSlideLabeler } = require('./context/slide-labeler');
 const { createSegmentSummaryScheduler } = require('./context/segment-summary-scheduler');
 const { createSegmentSummaryAgent } = require('./output/segment-summary-agent');
@@ -210,6 +212,15 @@ function registerPipeline({ getViewerView, meetingArchive = null }) {
   });
   let segmentSummaryTimer = null;
 
+  // 구간 요약 확인이 실패해도 기록 반영·세션은 계속한다.
+  function pollSegmentSummary() {
+    try {
+      segmentSummaryScheduler.poll();
+    } catch (error) {
+      console.warn(`[summary] 구간 요약 확인 실패(무시): ${error?.message}`);
+    }
+  }
+
   function stopSegmentSummaryTimer() {
     if (segmentSummaryTimer) clearInterval(segmentSummaryTimer);
     segmentSummaryTimer = null;
@@ -217,21 +228,15 @@ function registerPipeline({ getViewerView, meetingArchive = null }) {
 
   function startSegmentSummaryTimer() {
     stopSegmentSummaryTimer();
-    segmentSummaryTimer = setInterval(() => {
-      try {
-        segmentSummaryScheduler.poll();
-      } catch (error) {
-        console.warn(`[summary] 구간 요약 확인 실패(무시): ${error.message}`);
-      }
-    }, SEGMENT_SUMMARY_POLL_MS);
+    segmentSummaryTimer = setInterval(pollSegmentSummary, SEGMENT_SUMMARY_POLL_MS);
   }
 
   function appendRecord(record) {
     try {
       if (contextStore.applyRecord(record)) {
         labelReadySlides();
-        // 구간은 슬라이드 방문으로 닫힌다. poll 은 Store 스냅숏을 뜨므로 다른 기록마다 부르지 않는다.
-        if (record.kind === RECORD_KIND_MAP.slideMark) segmentSummaryScheduler.poll();
+        // 구간은 슬라이드 방문(base 마크)으로 닫힌다. poll 은 Store 스냅숏을 뜨므로 주석 판 마크나 다른 기록마다 부르지 않는다.
+        if (record.kind === RECORD_KIND_MAP.slideMark && record.frameKind === SLIDE_FRAME_KIND_BASE) pollSegmentSummary();
       }
     } catch (error) {
       console.warn(`[context] 기록 반영 실패(무시) kind=${record?.kind}: ${error.message}`);

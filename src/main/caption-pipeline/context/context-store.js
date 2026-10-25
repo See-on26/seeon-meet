@@ -381,4 +381,4 @@ function createContextStore({ onChange = () => {} } = {}) {
   };
 }
 
-module.exports = { createContextStore, toSlideMajor, LABEL_STATUS_MAP, SEGMENT_STATUS_MAP };
+module.exports = { createContextStore, toSlideMajor, LABEL_STATUS_MAP, SEGMENT_STATUS_MAP, SLIDE_FRAME_KIND_BASE };

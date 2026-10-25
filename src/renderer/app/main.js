@@ -1520,7 +1520,7 @@ function syncFeatureTogglesToMain() {
 
 // 회의 요약 스위치를 회의 중에 바꾸면 main 의 회의 중 구간 요약도 따라 멈추거나 다시 한다.
 function syncMeetingSummaryToMain({ isOn }) {
-  window.seeon.setMeetingSummaryEnabled(isOn).catch((error) => {
+  window.seeon.setMeetingSummaryEnabled({ isEnabled: isOn }).catch((error) => {
     console.warn('[toggle] main 에 회의 요약 스위치를 알리지 못함:', error.message);
   });
 }

@@ -107,7 +107,7 @@ contextBridge.exposeInMainWorld('seeon', {
       mode, asrLanguage, captionLanguage, slideTextBackend, isMeetingSummaryEnabled,
     });
   },
-  setMeetingSummaryEnabled(isEnabled) {
+  setMeetingSummaryEnabled({ isEnabled }) {
     return ipcRenderer.invoke('pipeline-set-meeting-summary-enabled', { isEnabled });
   },
   getSlideTextBackendDefault() { return ipcRenderer.invoke('pipeline-slide-text-backend-default'); },
