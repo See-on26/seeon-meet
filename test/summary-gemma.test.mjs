@@ -266,22 +266,34 @@ test('통합 입력: 슬라이드 구간이 없으면 맨 앞에 화면 공유�
   assert.ok(!buildIntegrationInput({ segmentSummaryList: withEmptySlideList, snapshot }).includes(NO_SCREEN_SHARE_NOTICE));
   assert.equal(buildIntegrationInput({ segmentSummaryList: segmentSummaryList.map((segment) => ({ ...segment, text: '' })), snapshot }), '');
 
-  // 한 시간 동안 화면이 없던 회의: 합친 블록 하나를 한 번에 줄이고, 안내 줄은 줄인 뒤에도 맨 앞에 남는다.
+  // 한 시간 동안 화면이 없던 회의: 합친 블록이 묶음 한도보다 길어 조각 단위 묶음으로 나눠 필요한 만큼만 줄인다.
+  // 줄인 뒤에도 같은 방문이라 머리 줄은 하나이고, 안내 줄은 맨 앞에 남는다.
   const hourPieceList = Array.from({ length: 12 }, (_, index) => summarySegment({
-    slideMajor: null, startTs: index * 300000, endTs: (index + 1) * 300000, text: '가'.repeat(40),
+    slideMajor: null, startTs: index * 300000, endTs: (index + 1) * 300000, text: '가'.repeat(200),
   }));
   const reduceTextList = [];
   const fitted = await fitIntegrationInput({
-    segmentSummaryList: hourPieceList, snapshot, language: 'ko', maxChars: 300,
+    segmentSummaryList: hourPieceList, snapshot, language: 'ko', maxChars: 2000,
     reduce: async ({ text }) => {
       reduceTextList.push(text);
-      return { text: '한 시간 동안 일정을 맞췄다.' };
+      return { text: `십 분 요약 ${reduceTextList.length}.` };
     },
   });
-  assert.equal(reduceTextList.length, 1);
-  assert.ok(reduceTextList[0].startsWith(`[00:00~1:00:00] 화면 없음\n${'가'.repeat(40)}\n`), '합친 블록이 묶음 재료다');
+  // 조각 두 개씩이 묶음 재료다. 머리 줄 시각이 가장 긴 마지막 묶음이 가장 길어 먼저 줄이고, 그다음은 맨 앞 묶음이다.
+  assert.deepEqual(reduceTextList, [
+    `[50:00~1:00:00] 화면 없음\n${'가'.repeat(200)}\n${'가'.repeat(200)}`,
+    `[00:00~10:00] 화면 없음\n${'가'.repeat(200)}\n${'가'.repeat(200)}`,
+  ]);
   assert.deepEqual(fitted, {
-    text: `${NO_SCREEN_SHARE_NOTICE}\n\n[00:00~1:00:00] 화면 없음\n한 시간 동안 일정을 맞췄다.`, isTruncated: false,
+    text: [
+      NO_SCREEN_SHARE_NOTICE,
+      '',
+      '[00:00~1:00:00] 화면 없음',
+      '십 분 요약 2.',
+      ...Array.from({ length: 8 }, () => '가'.repeat(200)),
+      '십 분 요약 1.',
+    ].join('\n'),
+    isTruncated: false,
   });
 });
 
@@ -293,7 +305,9 @@ function buildLongMeeting({ segmentCount }) {
   return { snapshot: { startedAt: 0, slideList, transitionList: [] }, segmentSummaryList };
 }
 
-test('통합 입력: maxChars 를 넘으면 묶음을 reduce 로 줄여 maxChars 안에 넣는다', async () => {
+const headLineListOf = (text) => text.split('\n').filter((line) => line.startsWith('['));
+
+test('통합 입력: maxChars 를 넘으면 가장 긴 묶음부터 하나씩, 넘지 않을 만큼만 reduce 로 줄인다', async () => {
   const { snapshot, segmentSummaryList } = buildLongMeeting({ segmentCount: 20 });
   const fullText = buildIntegrationInput({ segmentSummaryList, snapshot });
   const neverReduce = async () => assert.fail('maxChars 안이면 줄이지 않는다');
@@ -314,46 +328,127 @@ test('통합 입력: maxChars 를 넘으면 묶음을 reduce 로 줄여 maxChars
   assert.ok(fullText.length > 800);
   assert.equal(fitted.isTruncated, false);
   assert.ok(fitted.text.length <= 800, `${fitted.text.length}자`);
-  assert.equal(reduceCallList.length, 7, '20 구간을 200자 이하 묶음 일곱 개로 나눈다');
+  // 20 구간은 200자 이하 묶음 일곱 개다. 슬라이드 번호가 두 자리인 묶음이 길어 먼저 줄이고, 넷을 줄이면 800자 안이다.
+  assert.equal(reduceCallList.length, 4, '모든 묶음을 줄이지 않는다');
   for (const call of reduceCallList) {
     assert.ok(call.text.length <= 200, `묶음 ${call.text.length}자`);
     assert.equal(call.language, 'en');
   }
-  assert.ok(reduceCallList[0].text.startsWith('[00:00~01:00] 슬라이드 1\n'), '묶음 재료는 구간 머리 줄과 요약 그대로다');
-  assert.ok(reduceCallList[0].text.includes('[02:00~03:00] 슬라이드 3\n'));
-  // 줄인 묶음은 묶인 구간 전체의 시각과 슬라이드를 머리 줄로 단다.
-  assert.ok(fitted.text.startsWith('[00:00~03:00] 슬라이드 1, 슬라이드 2, 슬라이드 3\n줄인 요약 1\n\n[03:00~06:00]'), fitted.text);
-  assert.ok(fitted.text.endsWith('[18:00~20:00] 슬라이드 19, 슬라이드 20\n줄인 요약 7'), fitted.text);
+  assert.ok(reduceCallList[0].text.startsWith('[09:00~10:00] 슬라이드 10\n'), '묶음 재료는 구간 머리 줄과 요약 그대로다');
+  assert.ok(reduceCallList[0].text.includes('[11:00~12:00] 슬라이드 12\n'));
+  // 줄인 묶음은 묶인 구간 전체의 시각과 슬라이드를 머리 줄로 달고, 줄이지 않은 구간은 그대로 남는다.
+  assert.ok(fitted.text.includes('[09:00~12:00] 슬라이드 10, 슬라이드 11, 슬라이드 12\n줄인 요약 1\n\n'), fitted.text);
+  assert.ok(fitted.text.includes(`[03:00~04:00] 슬라이드 4\n${'가'.repeat(40)}`), fitted.text);
+  assert.ok(fitted.text.endsWith(`[19:00~20:00] 슬라이드 20\n${'가'.repeat(40)}`), fitted.text);
 });
 
-test('통합 입력: 세 번 줄여도 넘치면 앞에서부터 maxChars 까지 자르고 isTruncated', async () => {
+test('통합 입력: 24,000자를 조금 넘는 입력은 묶음 한두 개만 줄인다', async () => {
+  const slideList = Array.from({ length: 45 }, (_, index) => ({ major: index + 1, displayNumber: index + 1, label: null }));
+  const segmentSummaryList = slideList.map((slide, index) => summarySegment({
+    slideMajor: slide.major, startTs: index * 60000, endTs: (index + 1) * 60000, text: '가'.repeat(520),
+  }));
+  const snapshot = { startedAt: 0, slideList, transitionList: [] };
+  const fullText = buildIntegrationInput({ segmentSummaryList, snapshot });
+  assert.ok(fullText.length > 24000 && fullText.length < 25000, `${fullText.length}자`);
+
+  const reduceTextList = [];
+  const fitted = await fitIntegrationInput({
+    segmentSummaryList, snapshot, language: 'ko',
+    reduce: async ({ text }) => {
+      reduceTextList.push(text);
+      return { text: '여러 화면을 줄인 요약.' };
+    },
+  });
+  assert.ok(reduceTextList.length >= 1 && reduceTextList.length <= 2, `${reduceTextList.length}번 줄였다`);
+  assert.ok(reduceTextList.every((text) => text.length <= 6000));
+  assert.equal(fitted.isTruncated, false);
+  assert.ok(fitted.text.length <= 24000);
+  assert.ok(headLineListOf(fitted.text).length >= 34, '줄이지 않은 구간 머리 줄이 대부분 남는다');
+});
+
+test('통합 입력: 한 화면에 아주 오래 머문 방문은 조각 단위 묶음으로 줄이고 머리 줄은 하나로 남긴다', async () => {
+  // 슬라이드 3 을 여섯 시간 띄워 둔 회의. 5분 조각 72개가 한 방문이라 블록 하나가 4만 자를 넘는다.
+  const pieceList = Array.from({ length: 72 }, (_, index) => summarySegment({
+    slideMajor: 3, startTs: 60000 + index * 300000, endTs: 60000 + (index + 1) * 300000, text: '나'.repeat(590),
+  }));
+  assert.ok(buildIntegrationInput({ segmentSummaryList: pieceList, snapshot: meetingSnapshot }).length > 40000);
+
+  const reduceTextList = [];
+  const fitted = await fitIntegrationInput({
+    segmentSummaryList: pieceList, snapshot: meetingSnapshot, language: 'ko',
+    reduce: async ({ text }) => {
+      reduceTextList.push(text);
+      return { text: `오십 분 요약 ${reduceTextList.length}.` };
+    },
+  });
+  assert.ok(reduceTextList.length >= 1);
+  for (const text of reduceTextList) {
+    assert.ok(text.length <= 6000, `한 번 줄이는 입력 ${text.length}자`);
+    assert.equal(headLineListOf(text).length, 1, '묶음 재료도 그 방문의 머리 줄 하나다');
+    assert.match(headLineListOf(text)[0], / 슬라이드 3 — 슬라이드 3: 분기 매출 막대그래프$/);
+  }
+  assert.equal(fitted.isTruncated, false);
+  assert.ok(fitted.text.length <= 24000, `${fitted.text.length}자`);
+  assert.deepEqual(headLineListOf(fitted.text), ['[01:00~6:01:00] 슬라이드 3 — 슬라이드 3: 분기 매출 막대그래프']);
+  assert.ok(fitted.text.includes('오십 분 요약 1.'));
+});
+
+test('통합 입력: 줄인 묶음에 화면이 하나뿐이면 머리 줄에 그 화면 설명을 남긴다', async () => {
+  // 슬라이드 3 과 다시 본 슬라이드 3 이 한 묶음, 나머지는 슬라이드 5·7 이 번갈아 나온다.
+  const segmentSummaryList = [
+    summarySegment({ slideMajor: 3, startTs: 60000, endTs: 120000, text: 'ㄱ'.repeat(60) }),
+    summarySegment({ slideMajor: 3, startTs: 120000, endTs: 180000, isRevisit: true, text: 'ㄴ'.repeat(60) }),
+    ...Array.from({ length: 10 }, (_, index) => summarySegment({
+      slideMajor: index % 2 ? 7 : 5, startTs: 180000 + index * 60000, endTs: 240000 + index * 60000, text: 'ㄷ'.repeat(60),
+    })),
+  ];
+  const reduceTextList = [];
+  const fitted = await fitIntegrationInput({
+    segmentSummaryList, snapshot: meetingSnapshot, language: 'ko', maxChars: 880,
+    reduce: async ({ text }) => {
+      reduceTextList.push(text);
+      return { text: `줄인 요약 ${reduceTextList.length}` };
+    },
+  });
+  assert.equal(reduceTextList.length, 2);
+  assert.ok(fitted.text.startsWith(
+    '[01:00~03:00] 슬라이드 3, 슬라이드 3 (다시 봄) — 슬라이드 3: 분기 매출 막대그래프\n줄인 요약 1\n\n',
+  ), fitted.text);
+  assert.ok(fitted.text.includes('[03:00~05:00] 슬라이드 5, 번호 없는 화면\n줄인 요약 2\n\n'), '화면이 둘이면 설명을 달지 않는다');
+});
+
+test('통합 입력: 줄여도 넘치면 앞에서부터 maxChars 까지 자르고 isTruncated', async () => {
   const { snapshot, segmentSummaryList } = buildLongMeeting({ segmentCount: 20 });
+  const fullText = buildIntegrationInput({ segmentSummaryList, snapshot });
+
+  // 줄인 글이 묶음보다 길거나 비면 그 묶음의 구간 요약을 그대로 두고, 묶음마다 한 번씩만 묻는다.
+  for (const reducedText of ['나'.repeat(300), '']) {
+    let reduceCount = 0;
+    const fitted = await fitIntegrationInput({
+      segmentSummaryList, snapshot, language: 'ko', maxChars: 800,
+      reduce: async () => {
+        reduceCount += 1;
+        return { text: reducedText };
+      },
+    });
+    assert.equal(reduceCount, 7, JSON.stringify(reducedText.slice(0, 3)));
+    assert.deepEqual(fitted, { text: fullText.slice(0, 800), isTruncated: true });
+  }
+
+  // 모든 묶음을 줄여도 모자라면 묶음 수의 두 배까지만 묻고 자른다.
+  // 150자의 4분의 1(37자)보다 구간 하나가 길어 구간마다 한 묶음(20개)이다.
   let reduceCount = 0;
   const fitted = await fitIntegrationInput({
-    segmentSummaryList, snapshot, language: 'ko', maxChars: 800,
+    segmentSummaryList, snapshot, language: 'ko', maxChars: 150,
     reduce: async () => {
       reduceCount += 1;
-      return { text: '나'.repeat(300) };
+      return { text: '줄인 요약' };
     },
   });
-
-  // 첫 번째에 일곱 묶음, 그 뒤 두 번은 묶음마다 한도를 넘어 일곱 구간을 하나씩 줄인다.
-  assert.equal(reduceCount, 21);
+  assert.equal(reduceCount, 40);
   assert.equal(fitted.isTruncated, true);
-  assert.equal(fitted.text.length, 800);
-  assert.ok(fitted.text.startsWith('[00:00~03:00] 슬라이드 1, 슬라이드 2, 슬라이드 3\n나'));
-
-  // 줄인 글이 비면 그 묶음의 구간 요약을 버리지 않고 그대로 둔다.
-  let emptyReduceCount = 0;
-  const kept = await fitIntegrationInput({
-    segmentSummaryList, snapshot, language: 'ko', maxChars: 800,
-    reduce: async () => {
-      emptyReduceCount += 1;
-      return { text: '' };
-    },
-  });
-  assert.equal(emptyReduceCount, 21);
-  assert.deepEqual(kept, { text: buildIntegrationInput({ segmentSummaryList, snapshot }).slice(0, 800), isTruncated: true });
+  assert.equal(fitted.text.length, 150);
+  assert.ok(fitted.text.startsWith('[00:00~01:00] 슬라이드 1\n줄인 요약\n\n[01:00~02:00] 슬라이드 2\n줄인 요약'), fitted.text);
 });
 
 test('요약 에이전트: 배경 순위·maxTokens 6000 으로 묻고 finish_reason length 면 isTruncated', async () => {
