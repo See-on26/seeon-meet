@@ -136,10 +136,16 @@ test('지난 회의 목록은 최신 회의부터, 요약·스크립트가 있�
   await archive.saveScript({ sessionId: 'old', startedAt: startedAt - 86_400_000, title: '어제 회의', scriptText: 'x' });
   await archive.saveScript({ sessionId: 'new', startedAt, title: '오늘 회의', scriptText: 'y' });
   await archive.saveSummary({ sessionId: 'new', startedAt, summaryText: '요약' });
+  await archive.setSummaryStatus({ sessionId: 'new', startedAt, status: 'done' });
+  await archive.saveScript({ sessionId: 'making', startedAt: startedAt - 3_600_000, title: '만드는 중', scriptText: 'z' });
+  await archive.setSummaryStatus({ sessionId: 'making', startedAt: startedAt - 3_600_000, status: 'pending' });
   const meetingList = await archive.list();
-  assert.deepEqual(meetingList.map(({ id, title, hasSummary, hasScript }) => ({ id, title, hasSummary, hasScript })), [
-    { id: '2026-10-05 14-30 회의', title: '오늘 회의', hasSummary: true, hasScript: true },
-    { id: '2026-10-04 14-30 회의', title: '어제 회의', hasSummary: false, hasScript: true },
+  assert.deepEqual(meetingList.map(({ id, title, hasSummary, hasScript, summaryStatus }) => ({
+    id, title, hasSummary, hasScript, summaryStatus,
+  })), [
+    { id: '2026-10-05 14-30 회의', title: '오늘 회의', hasSummary: true, hasScript: true, summaryStatus: 'done' },
+    { id: '2026-10-05 13-30 회의', title: '만드는 중', hasSummary: false, hasScript: true, summaryStatus: 'pending' },
+    { id: '2026-10-04 14-30 회의', title: '어제 회의', hasSummary: false, hasScript: true, summaryStatus: null },
   ]);
   await rm(rootDir, { recursive: true, force: true });
 });

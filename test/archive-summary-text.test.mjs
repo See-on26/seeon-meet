@@ -41,6 +41,10 @@ const NEW_SUMMARY_TEXT_MAP = {
   'summary.audioSaved': ['회의 요약 음성을 저장했어요', 'Meeting summary audio saved'],
   'archive.summaryPending': ['요약을 만드는 중이에요', 'The summary is being created'],
   'archive.summaryFailed': ['요약을 만들지 못했어요', "The summary couldn't be created"],
+  'archive.summaryPendingShort': ['요약 만드는 중', 'summary in progress'],
+  'archive.summaryFailedShort': ['요약 실패', 'summary failed'],
+  // 지난 회의 상세는 스크립트가 요약보다 먼저다.
+  'archive.detailOpened': ['대화 스크립트와 회의 요약을 열었어요', 'Opened the transcript and meeting summary'],
 };
 const REMOVED_KEY_LIST = [
   'modal.summaryFailedTitle', 'modal.summaryFailedMessage', 'summary.savedWithAudio', 'summary.savedTextOnly',

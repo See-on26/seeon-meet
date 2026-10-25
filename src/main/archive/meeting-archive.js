@@ -165,6 +165,7 @@ function createMeetingArchive({ rootDir }) {
         utteranceCount: meta.utteranceCount ?? 0,
         hasSummary: await isFile(path.join(meetingDir, ARCHIVE_FILE_NAME_MAP.summary)),
         hasScript: await isFile(path.join(meetingDir, ARCHIVE_FILE_NAME_MAP.script)),
+        summaryStatus: meta.summaryStatus ?? null,
       });
     }
     return meetingList.sort((left, right) => (right.startedAt ?? 0) - (left.startedAt ?? 0));

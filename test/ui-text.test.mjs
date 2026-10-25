@@ -380,6 +380,11 @@ test('지난 회의 항목을 영어 어순(월 이름·12시간제)으로 읽�
     'Meeting on December 31, 12:00 AM, no summary');
   assert.equal(formatMeetingLabel({ meeting: { startedAt: new Date(2026, 11, 31, 0, 0).getTime(), hasSummary: false } }),
     '12월 31일 오전 12시 0분 회의, 요약 없음');
+  const januaryMeeting = { startedAt: new Date(2026, 0, 9, 9, 5).getTime(), hasSummary: false };
+  assert.equal(formatMeetingLabel({ meeting: { ...januaryMeeting, summaryStatus: 'pending' }, t: tEn }),
+    'Meeting on January 9, 9:05 AM, summary in progress');
+  assert.equal(formatMeetingLabel({ meeting: { ...januaryMeeting, summaryStatus: 'failed' }, t: tEn }),
+    'Meeting on January 9, 9:05 AM, summary failed');
 });
 
 test('마이크 질문 안내를 영어로도 읽는다', async () => {
