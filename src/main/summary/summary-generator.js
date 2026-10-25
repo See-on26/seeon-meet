@@ -15,6 +15,7 @@ const { flattenAsrSegmentList } = require('./slide-timeline');
 const { resolveSlideAssetList } = require('./slide-asset-resolver');
 const { fitIntegrationInput } = require('./integration-input');
 const { buildIntegrationDraft } = require('./integration-draft');
+const { readNumbersForSpeech } = require('./speech-number');
 const { buildSummaryDocument, findMarkupViolationList, buildSummaryFileName } = require('./summary-document');
 const {
   buildFullTranscript, listSlideMajorWithoutTransitionLine,
@@ -339,7 +340,8 @@ function createSummaryGenerator({
     try {
       await waitUntilNoLiveMeeting();
       logStep('요약본 음성 합성');
-      const mp3Buffer = await ttsClient.synthesizeLong({ text: documentText, language });
+      // 글은 아라비아 숫자 그대로 두고, 음성 서버가 잘못 읽는 숫자 꼴만 읽는 말로 바꿔 합성한다.
+      const mp3Buffer = await ttsClient.synthesizeLong({ text: readNumbersForSpeech({ text: documentText, language }), language });
       const audioFilePath = path.join(summariesDir, buildSummaryFileName({ sessionId, extension: 'mp3' }));
       fs.writeFileSync(audioFilePath, mp3Buffer);
       return audioFilePath;
