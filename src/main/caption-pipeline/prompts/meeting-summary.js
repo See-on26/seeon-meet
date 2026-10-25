@@ -104,4 +104,32 @@ function buildKoreanSummaryLineList() {
   ];
 }
 
-module.exports = { buildSummarySystemPrompt };
+// 요약 네 부분의 제목 줄(구성 순서). 영어 요약은 영어 제목을 쓴다.
+const SUMMARY_PART_TITLE_MAP = {
+  ko: ['개요', '다룬 주제', '슬라이드별 내용', '결정된 것과 앞으로 할 일'],
+  en: ['Overview', 'Topics', 'Slide by slide', 'Decisions and next steps'],
+};
+
+// 통합 초안에 넷째 부분이 빠졌을 때 그 부분만 따로 쓰게 하는 지시문. 재료는 통합 요약과 같은 통합 입력이다.
+function buildDecisionPartPrompt({ language = 'ko' } = {}) {
+  const title = (SUMMARY_PART_TITLE_MAP[language] || SUMMARY_PART_TITLE_MAP.ko)[3];
+  return [
+    `너는 회의 요약의 넷째 부분 "${title}"만 쓰는 역할이다.`,
+    '재료는 회의를 시간순으로 나눈 구간 요약 목록이다. 구간마다 머리 줄에 시각·슬라이드와 그 화면 설명이 있다.',
+    '',
+    '■ 형식',
+    '이 글은 음성으로 합성되어 그대로 소리 내 읽힌다.',
+    '  · 표·마크다운·도형 기호를 쓰지 마라. 항목은 기호 없이 그냥 줄을 바꿔 쓴다.',
+    `  · 첫 줄은 제목 "${title}" 한 줄이다. 번호·기호·꾸밈 없이 그 이름만 쓰고, 내용은 다음 줄부터 쓴다.`,
+    '',
+    '■ 내용',
+    '  · 회의에서 정해진 것, 하기로 한 일을 한 줄에 하나씩 쓴다.',
+    '  · 재료에 나온 것만 쓴다. 지난 답변·과거 계획·전망을 이번 회의의 결정처럼 쓰지 마라.',
+    '  · 정해진 것이 없으면 없다고 분명히 적는다.',
+    '',
+    '넷째 부분만 출력한다. 다른 부분이나 머리말을 덧붙이지 마라.',
+    ...buildOutputLanguageRuleList({ language }),
+  ].join('\n');
+}
+
+module.exports = { buildSummarySystemPrompt, buildDecisionPartPrompt, SUMMARY_PART_TITLE_MAP };
