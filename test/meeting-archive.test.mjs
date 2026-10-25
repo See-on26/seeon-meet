@@ -69,6 +69,33 @@ test('요약 상태와 요약 음성을 따로 저장하고 read 가 상태를 �
   await rm(rootDir, { recursive: true, force: true });
 });
 
+test('meeting-archive: 시작 때 남은 pending 은 failed 로 바꾸고 다른 상태는 그대로 둔다', async () => {
+  const { rootDir, archive } = await makeArchive();
+  const statusBySessionMap = { a: 'pending', b: 'done', c: 'failed', d: null, e: 'pending' };
+  const idBySessionMap = {};
+  for (const [index, [sessionId, status]] of Object.entries(statusBySessionMap).entries()) {
+    const meetingStartedAt = startedAt + index * 3_600_000;
+    const meetingDir = await archive.saveScript({
+      sessionId, startedAt: meetingStartedAt, endedAt: meetingStartedAt + 60_000, title: `회의 ${sessionId}`, scriptText: 'x',
+    });
+    if (status) await archive.setSummaryStatus({ sessionId, startedAt: meetingStartedAt, status });
+    idBySessionMap[sessionId] = path.basename(meetingDir);
+  }
+  await writeFile(path.join(rootDir, 'stray.txt'), '폴더가 아닌 파일');
+
+  assert.equal(await archive.failStalePendingSummary(), 2);
+  const readMeeting = async (sessionId) => (await archive.read({ id: idBySessionMap[sessionId] })).meeting;
+  assert.deepEqual(
+    await Promise.all(Object.keys(statusBySessionMap).map(async (sessionId) => (await readMeeting(sessionId)).summaryStatus)),
+    ['failed', 'done', 'failed', null, 'failed'],
+  );
+  const changed = await readMeeting('a');
+  assert.equal(changed.title, '회의 a', '제목·끝 시각은 그대로');
+  assert.equal(changed.endedAt, startedAt + 60_000);
+  assert.equal(await archive.failStalePendingSummary(), 0, '다시 불러도 바꿀 것이 없다');
+  await rm(rootDir, { recursive: true, force: true });
+});
+
 test('같은 분에 시작한 다른 회의는 번호를 붙여 따로 저장한다', async () => {
   const { rootDir, archive } = await makeArchive();
   await archive.saveScript({ sessionId: 's1', startedAt, scriptText: 'a' });

@@ -118,6 +118,20 @@ function createMeetingArchive({ rootDir }) {
     return meetingDir;
   }
 
+  // 앱 시작 때 한 번 부른다. 요약을 만드는 중에 앱이 꺼진 회의는 pending 으로 남아 지난 회의가 "만드는 중"을
+  // 계속 보이므로 실패로 바꾼다. 시작 시점에는 도는 요약이 없다. 바꾼 회의 수를 돌려준다.
+  async function failStalePendingSummary() {
+    let changedCount = 0;
+    for (const dirName of await listMeetingDirName()) {
+      const meetingDir = path.join(rootDir, dirName);
+      const meta = await readMeta(meetingDir);
+      if (meta?.summaryStatus !== SUMMARY_STATUS_MAP.pending) continue;
+      await writeMeta({ meetingDir, meta: { ...meta, summaryStatus: SUMMARY_STATUS_MAP.failed } });
+      changedCount += 1;
+    }
+    return changedCount;
+  }
+
   async function saveSummary({ sessionId, startedAt, summaryText }) {
     const meetingDir = await ensureMeetingDir({ sessionId, startedAt });
     await fs.promises.writeFile(path.join(meetingDir, ARCHIVE_FILE_NAME_MAP.summary), summaryText, 'utf8');
@@ -165,7 +179,9 @@ function createMeetingArchive({ rootDir }) {
     };
   }
 
-  return { rootDir, saveScript, setSummaryStatus, saveSummary, saveSummaryAudio, list, read };
+  return {
+    rootDir, saveScript, setSummaryStatus, failStalePendingSummary, saveSummary, saveSummaryAudio, list, read,
+  };
 }
 
 module.exports = {

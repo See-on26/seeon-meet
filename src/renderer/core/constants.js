@@ -101,6 +101,14 @@ export const USER_COMMAND_MAP = {
 
 export const SUMMARY_TOGGLE_KEY = '0';
 
+// 회의 요약 진행 알림(summary-progress)의 단계. main summary/summary-generator.js 의 SUMMARY_STAGE_MAP 과 같은 사본이다.
+export const SUMMARY_STAGE_MAP = {
+  start: 'start',
+  done: 'done',
+  fail: 'fail',
+  audioDone: 'audio-done',
+};
+
 export const SIC_WAVE_COLOR_MAP = {
   original: '#3ecf6f',
   caption: '#e04545',

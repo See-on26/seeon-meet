@@ -7,6 +7,7 @@ const require = createRequire(import.meta.url);
 const mainNarrationTypes = require('../src/main/caption-pipeline/contracts/narration-types.js');
 const mainDebugEvents = require('../src/main/caption-pipeline/contracts/debug-events.js');
 const mainNarrationClass = require('../src/main/caption-pipeline/contracts/narration-class.js');
+const mainSummaryGenerator = require('../src/main/summary/summary-generator.js');
 
 test('재생 분류 enum 은 main 과 렌더러가 같다', () => {
   assert.deepEqual(rendererConstants.NARRATION_CLASS_MAP, mainNarrationTypes.NARRATION_CLASS_MAP);
@@ -41,6 +42,10 @@ test('AD 카드 코드는 재생 분류마다 하나이고 아키텍처 순서(A
 
 test('내레이션 유형 enum 은 main 과 렌더러가 같다', () => {
   assert.deepEqual(rendererConstants.NARRATION_TYPE_MAP, mainNarrationTypes.NARRATION_TYPE_MAP);
+});
+
+test('회의 요약 진행 단계 enum 은 main 과 렌더러가 같다', () => {
+  assert.deepEqual(rendererConstants.SUMMARY_STAGE_MAP, mainSummaryGenerator.SUMMARY_STAGE_MAP);
 });
 
 test('디버그 단계 enum 은 main 과 렌더러가 같다', () => {
