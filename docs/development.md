@@ -67,6 +67,7 @@ npm start
 | `SEEON_FACT_CARD` | 화면 사실 카드(`on`·`off`). 새 슬라이드가 확정될 때 화면을 읽는 서버에 한 번 물어 패널별 사실(라벨·값·단위·범례)을 카드로 만들어 두고, 해설 때 발화와 가까운 카드를 받는 에이전트의 프롬프트에 넣는다. 끄면 프롬프트가 지금과 같다. 세부: `SEEON_FACT_CARD_AGENTS`(받는 에이전트 쉼표 목록, 기본 `interpretation,scale`, `deixis` 도 고를 수 있음), `SEEON_FACT_CARD_JSON_MODE`(카드 JSON 을 받는 방법, `prompt` 만) | `on` |
 | `SEEON_SCREEN_CHANGE` | 같은 슬라이드 안 화면 변화 해설. `off` 는 감지·기록을 하지 않음, `shadow` 는 감지·글자 차이·이미 말한 값 거르기까지 하고 기록만 남김(해설 없음), `same_slide` 는 새 글자·강조가 나타나면 변화 해설을 내고 근거가 늦게 뜬 해설을 다시 시도한다. `all` 은 아직 `same_slide` 로 돈다. 세부: `SEEON_SCREEN_CHANGE_KINDS`(사건 종류 쉼표 목록, 기본 `new_text,highlight`, 글자 없는 변화 `visual` 은 오탐이 많아 기본에서 뺌), `SEEON_SCREEN_CHANGE_MIN_INTERVAL_MS`(변화 해설끼리 간격, 기본 `20000`), `SEEON_SCREEN_CHANGE_PER_SLIDE_MAX`(슬라이드당 상한, 기본 `2`), `SEEON_SCREEN_CHANGE_IMAGE`(보내는 그림 `outline`·`crop`·`full`, 기본 `outline`) | `same_slide` |
 | `SEEON_SLIDE_TEXT_BACKEND` | 화면 글자를 읽는 방법. `vlm` 은 화면을 읽는 서버, `ocr` 은 임베딩 서버(8804)의 글자 인식(`/ocr`, 주소는 `SEEON_OCR_URL` 로 바꿀 수 있음)이고 OCR 이 응답하지 않으면 VLM 으로 읽는다. 개발자 모드에서 고르면 그 값이 먼저다 | `vlm` |
+| `SEEON_SUMMARY_LIVE_SEGMENTS` | 회의 중 구간 요약(`on`·`off`). 슬라이드 방문(또는 오래 머문 화면을 시간으로 자른 구간)이 닫히면 그 구간을 실시간 해설 요청이 없을 때 화면을 읽는 서버에 짧게 요약해 두고, 회의 뒤 요약은 이 구간 요약을 모아 만든다. 회의 요약 스위치를 끄면 하지 않는다. `off` 면 회의 중에는 하지 않고 회의 뒤에 모든 구간을 요약한다 | `on` |
 | `SEEON_GPU_SSH_HOST` · `SEEON_GPU_SSH_USER` | 앱이 켜질 때 여는 GPU 서버 SSH 터널의 서버 주소·계정. 실제 값은 저장소에 두지 않는다 | 비어 있음 (비면 터널을 열지 않음) |
 | `SEEON_GPU_SSH_PORT` | 그 서버의 SSH 포트 | `22` |
 | `SEEON_GPU_SSH_HOST_FINGERPRINT` | 서버 호스트 키 지문(`SHA256:…`). 다르면 연결하지 않는다 | 비어 있음 (비면 터널을 열지 않음) |
@@ -149,7 +150,11 @@ npm run dist:mac:dir    # 맥에서 설치본 동작만 확인할 때 — dist/m
 - 개발 실행은 `out/summaries/` 에 `summary-session-<id>.txt`(요약 글), `summary-session-<id>.mp3`(요약 음성),
   `summary-session-<id>-script.txt`(회의 스크립트)를 남겨요.
 - 사용자에게 보이는 기록은 `문서/SEEON 회의 기록/<날짜 시각> 회의/` 의 `대화 스크립트.txt`·`회의 요약.txt`·`회의 요약.mp3` 이고,
-  같은 폴더의 `meeting.json` 에 회의 정보(시작·끝 시각, 제목, 슬라이드·발화 수)를 둬요.
+  같은 폴더의 `meeting.json` 에 회의 정보(시작·끝 시각, 제목, 슬라이드·발화 수)와 요약 상태 `summaryStatus` 를 둬요.
+- `summaryStatus` 는 회의 뒤 요약을 만드는 동안 `pending`, 회의 기록에 요약 글을 저장하면 `done`,
+  요약을 만들지 못했거나(구간 요약이 모두 실패한 경우 포함) 회의 기록에 저장하지 못하면 `failed` 예요.
+  요약 기능을 끈 회의에는 이 칸이 없어요. 요약을 만드는 중에 앱이 꺼지면 다음 실행 때 `pending` 을 `failed` 로 바꿔요.
+  지난 회의 목록·상세는 요약 글이 없을 때 이 상태로 `요약 만드는 중`·`요약 실패`를 보여요.
 
 ---
 

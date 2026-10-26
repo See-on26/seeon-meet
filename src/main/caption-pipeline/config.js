@@ -42,7 +42,8 @@ const DEFAULT_BEDROCK_MODEL_ID = 'anthropic.claude-sonnet-5';
 
 const DEFAULT_ROUTER_MODE = 'unified';
 
-const DEFAULT_SUMMARY_MODEL_ID = 'anthropic.claude-opus-4-7';
+// 회의 중 닫힌 슬라이드 구간을 미리 요약해 둔다. off 면 회의 중에는 하지 않고 회의 뒤에 모든 구간을 요약한다(실시간 해설에 주는 영향을 견줄 때).
+const DEFAULT_SUMMARY_LIVE_SEGMENTS = 'on';
 
 
 // ASR 전사 언어. auto 는 GPU 서버가 ko·en 중 감지 확률이 높은 쪽으로 전사한다.
@@ -288,9 +289,9 @@ function readPipelineConfig(env = process.env) {
     judgeBackend: readJudgeBackend({ env }),
     judgeGpuUrl: env.SEEON_JUDGE_GPU_URL || DEFAULT_JUDGE_GPU_URL,
     judgeGpuModel: env.SEEON_JUDGE_GPU_MODEL || DEFAULT_JUDGE_GPU_MODEL,
-    summaryModelId: env.SEEON_BEDROCK_SUMMARY_MODEL_ID || DEFAULT_SUMMARY_MODEL_ID,
-    // 회의 요약 마무리 재구성(듣는 글) — Sonnet. Opus 요약 초안을 낭독용으로 다듬는다.
-    summaryRewriteModelId: env.SEEON_BEDROCK_SUMMARY_REWRITE_MODEL_ID || bedrockModelId,
+    isLiveSegmentSummaryEnabled: readOnOffSwitch({
+      env, envName: 'SEEON_SUMMARY_LIVE_SEGMENTS', defaultValue: DEFAULT_SUMMARY_LIVE_SEGMENTS,
+    }) === 'on',
     routerMode: env.SEEON_ROUTER_MODE || DEFAULT_ROUTER_MODE,
     // 추상적 척도 해설(화면에 보이는 대상의 정도)은 기본으로 켠다. 'false' 로 두면 척도 후보를 생성하지 않는다.
     isScaleEnabled: env.SEEON_ROUTER_SCALE_ENABLED !== 'false',

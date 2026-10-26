@@ -45,27 +45,31 @@ test('요약 문서 머리 글: 영어는 Meeting summary·길이·규모·잘�
   assert.equal(TRUNCATED_NOTICE, '이 요약은 길이 제한에 걸려 뒷부분이 잘렸습니다.');
 });
 
-test('요약 생성기는 세션 캡션 언어로 요약·재구성·음성 합성을 부르고 진행 안내도 그 언어로 낸다', async () => {
+test('요약 생성기는 세션 캡션 언어로 구간 요약·요약·재구성·음성 합성을 부르고 진행 안내도 그 언어로 낸다', async (context) => {
+  // 단계별 진행 로그가 시험 출력에 섞이지 않게 막는다(시험이 끝나면 되돌린다).
+  context.mock.method(console, 'log', () => {});
   const summariesDir = fs.mkdtempSync(path.join(os.tmpdir(), 'summary-language-'));
   const callList = [];
   const progressList = [];
   const generator = createSummaryGenerator({
     config: {},
     summariesDir,
-    onProgress: ({ message }) => progressList.push(message),
+    onProgress: ({ stage, message }) => progressList.push({ stage, message }),
+    segmentSummaryAgent: { summarize: async (args) => { callList.push(['segment', args.language]); return { text: 'They said hello.' }; } },
     summaryAgent: { summarize: async (args) => { callList.push(['summarize', args.language]); return { text: 'Draft.', isTruncated: false }; } },
     rewriteAgent: { rewrite: async (args) => { callList.push(['rewrite', args.language]); return { text: 'Overview.', isTruncated: false }; } },
     ttsClient: { synthesizeLong: async (args) => { callList.push(['speak', args.language]); return Buffer.from('mp3'); } },
   });
-  const result = await generator.generate({
+  const result = await generator.generateText({
     session: {
       sessionId: 'session-1', startedAt: 0, endedAt: 60_000, captionLanguage: 'en',
       asrEntryList: [{ ts: 1000, text: 'hello', speakerHint: null }], slideMarkList: [],
     },
   });
-  assert.deepEqual(callList, [['summarize', 'en'], ['rewrite', 'en'], ['speak', 'en']]);
+  await generator.generateAudio({ sessionId: 'session-1', documentText: result.documentText, language: 'en' });
+  assert.deepEqual(callList, [['segment', 'en'], ['summarize', 'en'], ['rewrite', 'en'], ['speak', 'en']]);
   assert.match(result.documentText, /^Meeting summary\n/);
-  assert.ok(progressList.length >= 4);
-  for (const message of progressList) assert.ok(!HANGUL_PATTERN.test(message), message);
+  assert.deepEqual(progressList.map(({ stage }) => stage), ['start', 'done']);
+  for (const { message } of progressList) assert.ok(!HANGUL_PATTERN.test(message), message);
   fs.rmSync(summariesDir, { recursive: true, force: true });
 });

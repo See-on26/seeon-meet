@@ -11,6 +11,13 @@ const LABEL_STATUS_MAP = {
   failed: 'failed',
 };
 
+// 구간 요약(segment-plan 의 구간 하나를 요약한 글)의 상태.
+const SEGMENT_STATUS_MAP = {
+  requested: 'requested',
+  ready: 'ready',
+  failed: 'failed',
+};
+
 const SLIDE_FRAME_KIND_BASE = 'base';
 const USER_COMMAND_CLASS = 'user_command';
 // 전환 고지 생성이 이 사유로 끝나면 고지 문장 대신 화면 주제로 스크립트에 한 줄을 남긴다. 다른 사유(무관한 화면·같은 화면)는 남기지 않는다.
@@ -61,6 +68,8 @@ function createContextStore({ onChange = () => {} } = {}) {
   let transitionList = [];
   // 체류 3초를 못 채워 취소된 전환. 스크립트에서 그 전환 줄과 방문을 뺀다. 고지·마크보다 먼저 와도 되게 따로 둔다.
   let cancelledTransitionList = [];
+  // 구간 key 마다 구간 요약 하나.
+  let segmentSummaryMap = new Map();
   let currentMajor = null;
 
   // 파일 쓰기 같은 후속 처리가 실패해도 저장소 반영은 계속한다.
@@ -258,6 +267,28 @@ function createContextStore({ onChange = () => {} } = {}) {
     notifyChange();
   }
 
+  function markSegmentRequested({ key, slideMajor, startTs, endTs, isRevisit }) {
+    segmentSummaryMap.set(key, {
+      key, slideMajor, startTs, endTs, isRevisit: Boolean(isRevisit), text: '', status: SEGMENT_STATUS_MAP.requested,
+    });
+  }
+
+  // 요청 표시가 없는 구간의 결과는 시각을 몰라 받지 않는다.
+  function setSegmentSummary({ key, text = '', status }) {
+    const segmentSummary = segmentSummaryMap.get(key);
+    if (!segmentSummary) return false;
+    segmentSummary.text = typeof text === 'string' ? text.trim() : '';
+    segmentSummary.status = status;
+    notifyChange();
+    return true;
+  }
+
+  function getSegmentSummaryList() {
+    return [...segmentSummaryMap.values()]
+      .sort((left, right) => left.startTs - right.startTs)
+      .map((segmentSummary) => ({ ...segmentSummary }));
+  }
+
   function addQa({ ts, question, answer = '', route, slideMajorList = [] }) {
     qaList.push({ ts, question, answer, route, slideMajorList: [...slideMajorList] });
     notifyChange();
@@ -313,6 +344,7 @@ function createContextStore({ onChange = () => {} } = {}) {
     qaList = [];
     transitionList = [];
     cancelledTransitionList = [];
+    segmentSummaryMap = new Map();
     currentMajor = null;
   }
 
@@ -333,6 +365,7 @@ function createContextStore({ onChange = () => {} } = {}) {
       qaList: qaList.map((qa) => ({ ...qa, slideMajorList: [...qa.slideMajorList] })),
       transitionList: transitionList.map((transition) => ({ ...transition })),
       cancelledTransitionList: cancelledTransitionList.map((cancelled) => ({ ...cancelled })),
+      segmentSummaryList: getSegmentSummaryList(),
     };
   }
 
@@ -340,6 +373,7 @@ function createContextStore({ onChange = () => {} } = {}) {
     start, reset,
     getSessionInfo: () => ({ sessionId, startedAt }),
     applyRecord, applySlideText, cancelTransition, forgetNarration, listReadyForLabelMajors, markLabelRequested, setLabel, addQa,
+    markSegmentRequested, setSegmentSummary, getSegmentSummaryList,
     getSlide, getSlideList, getCurrentSlideMajor: () => currentMajor,
     getUtteranceList, getNarrationList,
     getQaList: () => qaList.map((qa) => ({ ...qa, slideMajorList: [...qa.slideMajorList] })),
@@ -347,4 +381,4 @@ function createContextStore({ onChange = () => {} } = {}) {
   };
 }
 
-module.exports = { createContextStore, toSlideMajor, LABEL_STATUS_MAP };
+module.exports = { createContextStore, toSlideMajor, LABEL_STATUS_MAP, SEGMENT_STATUS_MAP, SLIDE_FRAME_KIND_BASE };

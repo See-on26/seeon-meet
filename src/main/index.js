@@ -29,6 +29,12 @@ app.whenReady().then(() => {
   registerIpc({ getViewerView: window.getViewerView });
 
   const meetingArchive = createDocumentsMeetingArchive();
+  // 요약을 만드는 중에 앱이 꺼졌던 회의는 "만드는 중"으로 남지 않게 실패로 돌린다.
+  meetingArchive.failStalePendingSummary()
+    .then((changedCount) => {
+      if (changedCount) console.log(`[archive] 끝나지 않은 요약 ${changedCount}건을 실패로 표시`);
+    })
+    .catch((error) => console.warn(`[archive] 끝나지 않은 요약 정리 실패(무시): ${error.message}`));
   registerMeetingArchive({ meetingArchive });
   const pipelineHandle = registerPipeline({ getViewerView: window.getViewerView, meetingArchive });
   registerSummary({ getViewerView: window.getViewerView, pipelineHandle, meetingArchive });

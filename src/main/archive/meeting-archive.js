@@ -9,6 +9,14 @@ const ARCHIVE_FILE_NAME_MAP = {
   summaryAudio: '회의 요약.mp3',
 };
 
+// 회의 뒤 요약은 백그라운드로 만든다. 지난 회의 화면이 요약 자리에 만드는 중·실패를 알릴 수 있게 메타에 남긴다.
+const SUMMARY_STATUS_MAP = {
+  pending: 'pending',
+  done: 'done',
+  failed: 'failed',
+};
+const SUMMARY_STATUS_LIST = Object.values(SUMMARY_STATUS_MAP);
+
 const pad2 = (value) => String(value).padStart(2, '0');
 
 // 폴더 이름에 쓸 수 없는 ':' 대신 '-' 로 시각을 적는다(윈도우 호환).
@@ -99,19 +107,46 @@ function createMeetingArchive({ rootDir }) {
     return meetingDir;
   }
 
-  // 회의 후 처리에서 화면 줄을 채운 스크립트로 바꿔 쓴다. 메타는 회의 종료 때 쓴 것을 그대로 둔다.
-  async function replaceScript({ sessionId, startedAt, scriptText }) {
+  // 회의 종료 때 쓴 메타(제목·길이·규모)는 그대로 두고 요약 상태만 바꾼다.
+  async function setSummaryStatus({ sessionId, startedAt, status }) {
+    if (!SUMMARY_STATUS_LIST.includes(status)) {
+      throw new RangeError(`요약 상태는 ${SUMMARY_STATUS_LIST.join('·')} 가운데 하나여야 한다: ${status}`);
+    }
     const meetingDir = await ensureMeetingDir({ sessionId, startedAt });
-    await fs.promises.writeFile(path.join(meetingDir, ARCHIVE_FILE_NAME_MAP.script), scriptText, 'utf8');
+    const meta = await readMeta(meetingDir);
+    await writeMeta({ meetingDir, meta: { sessionId, startedAt, ...meta, summaryStatus: status } });
     return meetingDir;
   }
 
-  async function saveSummary({ sessionId, startedAt, summaryText, audioFilePath = null }) {
+  // 앱 시작 때 한 번 부른다. 요약을 만드는 중에 앱이 꺼진 회의는 pending 으로 남아 지난 회의가 "만드는 중"을
+  // 계속 보이므로 실패로 바꾼다. 시작 시점에는 도는 요약이 없다. 바꾼 회의 수를 돌려준다.
+  // 한 회의의 메타를 쓰지 못해도 나머지 회의는 계속 바꾼다.
+  async function failStalePendingSummary() {
+    let changedCount = 0;
+    for (const dirName of await listMeetingDirName()) {
+      const meetingDir = path.join(rootDir, dirName);
+      try {
+        const meta = await readMeta(meetingDir);
+        if (meta?.summaryStatus !== SUMMARY_STATUS_MAP.pending) continue;
+        await writeMeta({ meetingDir, meta: { ...meta, summaryStatus: SUMMARY_STATUS_MAP.failed } });
+        changedCount += 1;
+      } catch (error) {
+        console.warn(`[archive] ${dirName} 의 끝나지 않은 요약을 실패로 바꾸지 못함(무시): ${error.message}`);
+      }
+    }
+    return changedCount;
+  }
+
+  async function saveSummary({ sessionId, startedAt, summaryText }) {
     const meetingDir = await ensureMeetingDir({ sessionId, startedAt });
     await fs.promises.writeFile(path.join(meetingDir, ARCHIVE_FILE_NAME_MAP.summary), summaryText, 'utf8');
-    if (audioFilePath) {
-      await fs.promises.copyFile(audioFilePath, path.join(meetingDir, ARCHIVE_FILE_NAME_MAP.summaryAudio));
-    }
+    return meetingDir;
+  }
+
+  // 요약 음성은 진행 중인 회의가 없을 때 만들어 글보다 늦게 온다.
+  async function saveSummaryAudio({ sessionId, startedAt, audioFilePath }) {
+    const meetingDir = await ensureMeetingDir({ sessionId, startedAt });
+    await fs.promises.copyFile(audioFilePath, path.join(meetingDir, ARCHIVE_FILE_NAME_MAP.summaryAudio));
     return meetingDir;
   }
 
@@ -130,6 +165,7 @@ function createMeetingArchive({ rootDir }) {
         utteranceCount: meta.utteranceCount ?? 0,
         hasSummary: await isFile(path.join(meetingDir, ARCHIVE_FILE_NAME_MAP.summary)),
         hasScript: await isFile(path.join(meetingDir, ARCHIVE_FILE_NAME_MAP.script)),
+        summaryStatus: meta.summaryStatus ?? null,
       });
     }
     return meetingList.sort((left, right) => (right.startedAt ?? 0) - (left.startedAt ?? 0));
@@ -142,16 +178,19 @@ function createMeetingArchive({ rootDir }) {
     if (!meta) return { isOk: false, message: '회의 기록을 찾지 못했어요' };
     return {
       isOk: true,
-      meeting: { id, ...meta },
+      meeting: { id, ...meta, summaryStatus: meta.summaryStatus ?? null },
       summaryText: await readTextOrEmpty(path.join(meetingDir, ARCHIVE_FILE_NAME_MAP.summary)),
       scriptText: await readTextOrEmpty(path.join(meetingDir, ARCHIVE_FILE_NAME_MAP.script)),
       meetingDir,
     };
   }
 
-  return { rootDir, saveScript, replaceScript, saveSummary, list, read };
+  return {
+    rootDir, saveScript, setSummaryStatus, failStalePendingSummary, saveSummary, saveSummaryAudio, list, read,
+  };
 }
 
 module.exports = {
   createMeetingArchive, formatMeetingDirName, isSafeMeetingId, pickMeetingTitle, ARCHIVE_FILE_NAME_MAP,
+  SUMMARY_STATUS_MAP,
 };
