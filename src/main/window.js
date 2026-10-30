@@ -1,6 +1,7 @@
-const { BaseWindow, WebContentsView, shell } = require('electron');
+const { BaseWindow, BrowserWindow, WebContentsView, desktopCapturer, ipcMain, shell } = require('electron');
 const path = require('path');
 const { createMeetSession } = require('./meeting/session');
+const { createSharePicker } = require('./meeting/share-picker');
 const { MEET_HOME_URL, handleMeetWindowOpen } = require('./meeting/meet-navigation');
 const { getUaForUrl } = require('./meeting/ua');
 const { computeViewBoundsPair, createMeetResizeNotifier } = require('./viewer-panel-layout');
@@ -15,6 +16,12 @@ let isViewerCollapsed = false;
 const getWindow = () => win;
 const getViewerView = () => viewerView;
 const getMeetView = () => meetView;
+
+// Meet 발표(화면 공유)에서 공유할 화면·창을 고르는 SEEON 선택 창. SEEON 창 자신은 목록에서 뺀다.
+const sharePicker = createSharePicker({
+  BrowserWindow, ipcMain, desktopCapturer, getParentWindow: getWindow,
+  getOwnSourceIdList: () => (win ? [win.getMediaSourceId()] : []),
+});
 
 // 캡처 영상은 Meet 화면 크기를 바꾸고 수십 ms 안에 새 크기로 오지만, Meet 좌표는 수백 ms 뒤에 온다.
 // 뷰어가 그 사이 옛 좌표로 새 화면을 자르지 않도록 크기를 바꾸기 전에 새 크기를 먼저 알린다.
@@ -55,7 +62,7 @@ function registerViewerPanel({ ipcMain }) {
 }
 
 function createMeetView() {
-  const meetSession = createMeetSession({ getViewerView });
+  const meetSession = createMeetSession({ getViewerView, pickShareSource: sharePicker.pick });
   const view = new WebContentsView({
     webPreferences: {
       session: meetSession,

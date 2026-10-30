@@ -1,7 +1,7 @@
-const { session, systemPreferences, desktopCapturer } = require('electron');
+const { session, systemPreferences } = require('electron');
 const { CHROME_UA, getUaForUrl } = require('./ua');
 
-function createMeetSession({ getViewerView }) {
+function createMeetSession({ getViewerView, pickShareSource }) {
   const meetSession = session.fromPartition('persist:meet');
   meetSession.setUserAgent(CHROME_UA);
 
@@ -27,8 +27,9 @@ function createMeetSession({ getViewerView }) {
       }
       return callback(null);
     }
-    desktopCapturer.getSources({ types: ['screen'] })
-      .then((sourceList) => callback(sourceList.length ? { video: sourceList[0] } : null))
+    // macOS 15 이상은 시스템 선택 창이 먼저 떠 여기로 오지 않는다. Windows 는 SEEON 선택 창에서 화면·창을 고른다.
+    pickShareSource()
+      .then((source) => callback(source ? { video: source } : null))
       .catch(() => callback(null));
   }, { useSystemPicker: true });
 
