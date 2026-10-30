@@ -2,7 +2,9 @@ const DEFAULT_DELAY_TOLERANCE_MS = 300;
 
 const DEFAULT_REBUFFER_TOLERANCE_MS = 1500;
 
-export const MIN_HEADROOM_MS = 300;
+// 지연 0 인 성능 모드도 받아 둔 소리를 이만큼 남긴다. 지연 재생은 0.2초 조각을 MSE 로 받아 트는데, 0.3초만 두면
+// 따라잡기 배속(1.5배)이 버퍼 끝에 닿아 Chromium 이 데이터를 다시 모으며 3초가량 멈추기를 되풀이한다(67초에 7번).
+export const MIN_HEADROOM_MS = 1000;
 
 export function computeActualDelayMs({ liveTimeMs, delayedTimeMs }) {
   return liveTimeMs - delayedTimeMs;
