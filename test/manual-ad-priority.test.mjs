@@ -92,7 +92,7 @@ test('동시·교차 재생기 모두 지금 재생 위치를 받아 트리거�
     ({ context, playback, dropList }) => new CaptionNarrator({
       getLiveVideo: () => ({ paused: false, volume: 1, playbackRate: 1, pause() {}, play: async () => {} }),
       createAudioContext: () => context, onDrop: (drop) => dropList.push(drop), getPlaybackTimeMs: () => playback.ms,
-      isCatchupDelegated: () => true,
+      isCatchupDelegated: () => true, sleep: () => Promise.resolve(),
     }),
   ]) {
     const { context, sourceList } = createFakeAudioContext();

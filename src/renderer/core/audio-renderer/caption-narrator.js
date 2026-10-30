@@ -7,6 +7,9 @@ import {
 import { defaultUiText } from '../i18n/ui-text.js';
 
 const START_LEAD_SEC = 0.02;
+// 회의를 멈추고 다시 틀 때 소리를 한 번에 끊지 않고 이 시간 동안 줄이고 키운다(뚝 끊기는 소리를 없앤다).
+const PAUSE_FADE_MS = 80;
+const PAUSE_FADE_STEP_MS = 10;
 
 export function computeCatchupRate({ pausedSec, minRate, maxRate, ratePerSec }) {
   return Math.min(maxRate, Math.max(minRate, minRate + pausedSec * ratePerSec));
@@ -15,8 +18,13 @@ export function computeCatchupRate({ pausedSec, minRate, maxRate, ratePerSec }) 
 export class CaptionNarrator {
   constructor({ getLiveVideo, onStatus = null, onDrop = null, onPlayStart = null, getRateRange = null, isCatchupDelegated = null,
     createAudioContext = () => new AudioContext(), now = () => performance.now(), wallNow = () => Date.now(),
-    isEntryEnabled = () => true, prepareAudio = readEntryAudio, getPlaybackTimeMs = () => null, t = defaultUiText }) {
+    isEntryEnabled = () => true, prepareAudio = readEntryAudio, getPlaybackTimeMs = () => null, t = defaultUiText,
+    waitForInsertGap = null, sleep = (ms) => new Promise((resolve) => { setTimeout(resolve, ms); }) }) {
     this.getLiveVideo = getLiveVideo;
+    // 자동 해설로 회의를 막 멈추려 할 때 부른다. 돌아오면 멈춰도 되는 때다(성능 모드는 말 틈까지 기다린다).
+    this.waitForInsertGap = waitForInsertGap || (async () => {});
+    this.sleep = sleep;
+    this.fadeToken = 0;
     this.t = t;
     this.prepareAudio = prepareAudio;
     this.onStatus = onStatus || (() => {});
@@ -87,7 +95,7 @@ export class CaptionNarrator {
     this.narratedSec = 0;
     this.currentNarrationSec = 0;
     const video = this.getLiveVideo();
-    if (video) { video.playbackRate = 1.0; video.volume = 1.0; }
+    if (video) { video.playbackRate = 1.0; this._setVolume(video, 1.0); }
     try { this.liveTapSource?.disconnect(); } catch {  }
     this.liveTapSource = null;
     if (this.audioContext) { this.audioContext.close().catch(() => {}); this.audioContext = null; }
@@ -126,10 +134,18 @@ export class CaptionNarrator {
     for (const drop of droppedList) this.onDrop(drop);
     if (!entry) { this._finishPlayback(); return; }
     const isAnswer = isImmediateCaption(entry);
-    if (isAnswer) this._enterOverlay(); else this._enterInsertion();
     this.playToken += 1;
     const token = this.playToken;
     this.currentEntry = entry;
+    if (isAnswer) {
+      this._enterOverlay();
+    } else {
+      // 회의를 막 멈출 때만 말 틈을 기다린다. 이미 멈춰 있으면 바로 이어 튼다.
+      if (!this.isInserting) await this.waitForInsertGap().catch(() => {});
+      if (token !== this.playToken) return;
+      await this._enterInsertion();
+      if (token !== this.playToken) return;
+    }
     try {
       if (this.audioContext.state === 'suspended') await this.audioContext.resume();
       // 교차 모드는 이미 회의를 멈춘 뒤라 합성하는 동안 회의가 해설 자리를 지나가지 않는다.
@@ -178,15 +194,18 @@ export class CaptionNarrator {
     this._beginNext();
   }
 
-  _enterInsertion() {
+  async _enterInsertion() {
     if (this.isOverlaying) this._leaveOverlay();
     if (this.isInserting) return;
     this.isInserting = true;
-    this.pauseStartedAt = this.now();
     this.narratedSec = 0;
     this._cancelCatchup();
     const video = this.getLiveVideo();
-    if (video) { video.pause(); video.playbackRate = 1.0; }
+    // 줄이는 도중에 멈추면(stop) 영상을 멈추지 않는다. stop 이 소리를 이미 되돌렸다.
+    if (video && !(await this._fadeVolume(video, 0))) return;
+    this.pauseStartedAt = this.now();
+    // 멈춘 뒤에는 소리 크기를 되돌려 둔다. 다른 곳(지연 버퍼)이 영상을 다시 틀어도 소리가 0 으로 남지 않는다.
+    if (video) { video.pause(); video.playbackRate = 1.0; this._setVolume(video, 1.0); }
   }
 
   _endInsertion() {
@@ -203,13 +222,33 @@ export class CaptionNarrator {
     if (this.isOverlaying) return;
     this.isOverlaying = true;
     const video = this.getLiveVideo();
-    if (video) video.volume = computeGainFromDecibel({ decibel: DEFAULT_DUCK_DB });
+    if (video) this._setVolume(video, computeGainFromDecibel({ decibel: DEFAULT_DUCK_DB }));
   }
 
   _leaveOverlay() {
     this.isOverlaying = false;
     const video = this.getLiveVideo();
-    if (video) video.volume = 1.0;
+    if (video) this._setVolume(video, 1.0);
+  }
+
+  // 진행 중인 줄이기·키우기를 멈추고 소리 크기를 바로 정한다.
+  _setVolume(video, volume) {
+    this.fadeToken += 1;
+    video.volume = volume;
+  }
+
+  // 소리를 목표 크기까지 나눠 바꾼다. 도중에 다른 크기 지정이 오면 그만두고 false 를 돌려준다.
+  async _fadeVolume(video, targetVolume) {
+    this.fadeToken += 1;
+    const token = this.fadeToken;
+    const fromVolume = video.volume;
+    const stepCount = Math.max(1, Math.round(PAUSE_FADE_MS / PAUSE_FADE_STEP_MS));
+    for (let step = 1; step <= stepCount; step += 1) {
+      await this.sleep(PAUSE_FADE_STEP_MS);
+      if (token !== this.fadeToken) return false;
+      video.volume = fromVolume + (targetVolume - fromVolume) * (step / stepCount);
+    }
+    return true;
   }
 
   _finishPlayback() {
@@ -220,7 +259,9 @@ export class CaptionNarrator {
   _startCatchup(pausedSec) {
     const video = this.getLiveVideo();
     if (!video) return;
+    this._setVolume(video, 0);
     video.play().catch(() => {});
+    this._fadeVolume(video, 1.0);
     if (this.isCatchupDelegated()) { this.onStatus(''); return; }
     if (pausedSec <= 0.05) { video.playbackRate = 1.0; this.onStatus(''); return; }
     const { rateMin, rateMax } = this.getRateRange();

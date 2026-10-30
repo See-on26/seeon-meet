@@ -49,7 +49,7 @@ function pickNearestList({ candidateList, triggerVideoTimeMs, limit }) {
 }
 
 // 소리 후보·넣기 직전 맞추기는 지연 버퍼가 라이브보다 충분히 뒤에 있어 앞의 무음을 미리 아는 모드(품질·균형)에서만 쓴다.
-// 성능 모드는 지연이 0이라 미리 아는 무음이 없고, 기다리면 해설만 늦어진다. 모드를 바꿔도 버퍼는 그대로일 수 있어
+// 성능 모드는 지연이 0이라 미리 아는 무음이 없다(대신 회의를 멈추기 직전에 무음을 잠깐 기다린다 — insert-gap-wait.js). 모드를 바꿔도 버퍼는 그대로일 수 있어
 // delayMs 는 지금 돌고 있는 지연 버퍼의 목표 지연을 받는다.
 export function isAudioGapActive({ gapSource, hasDelayBuffer, delayMs }) {
   return gapSource === GAP_CANDIDATE_SOURCE_MAP.audio && hasDelayBuffer && delayMs > 0;

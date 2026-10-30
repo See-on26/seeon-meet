@@ -32,6 +32,7 @@ import { StreamDelaySource } from '../core/audio-renderer/stream-delay-source.js
 import { NarrationScheduler } from '../core/audio-renderer/narration-scheduler.js';
 import { GapCandidateStore, resolveGapSearchFromMs } from '../core/audio-renderer/gap-candidate-store.js';
 import { SilenceSpanTracker } from '../core/audio-renderer/silence-span-tracker.js';
+import { isPlayheadInSilence, waitForPlayheadSilence, shouldWaitForInsertGap } from '../core/audio-renderer/insert-gap-wait.js';
 import {
   AsrSegmentTimeline, buildInsertionGapList, resolveInsertionTargetMs, isAudioGapActive,
   GAP_CANDIDATE_SOURCE_MAP, SNAP_REASON_MAP,
@@ -185,7 +186,24 @@ const narrator = new CaptionNarrator({
   isCatchupDelegated: () => Boolean(delayBuffer),
   // 트리거에서 10초 넘게 멀어진 자동 해설을 버리는 기준. 교차 모드는 사용자가 듣고 있는 늦춘 위치다.
   getPlaybackTimeMs: () => (delayBuffer ? delayBuffer.getDelayedTimeMs() : captureSource.videoTimeMs),
+  waitForInsertGap,
 });
+
+// 성능 모드는 고른 틈을 재생이 이미 지나가 있어, 자동 해설로 회의를 멈추기 직전에 재생 위치가 잰 무음에
+// 들어설 때까지(최대 1.5초) 기다린다. 지연 버퍼가 멈추면 기다리지 않는다.
+async function waitForInsertGap() {
+  if (!shouldWaitForInsertGap({ hasDelayBuffer: Boolean(delayBuffer), delayMs: delayBuffer?.targetDelayMs ?? 0 })) return;
+  const { isSilence, waitedMs } = await waitForPlayheadSilence({
+    isInSilence: () => !delayBuffer || isPlayheadInSilence({
+      playheadMs: delayBuffer.getDelayedTimeMs(), spanList: silenceSpanTracker.getSpanList(),
+    }),
+  });
+  markDebug({
+    stage: DEBUG_STAGE_MAP.gap, verdict: DEBUG_VERDICT_MAP.info,
+    reason: isSilence ? '성능 모드 — 말 틈에서 회의를 멈춤' : '성능 모드 — 1.5초 안에 말 틈이 없어 바로 멈춤',
+    detail: `기다림 ${(waitedMs / 1000).toFixed(2)}초`,
+  });
+}
 
 let narrationMixer = null;
 

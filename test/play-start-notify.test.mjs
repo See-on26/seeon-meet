@@ -79,7 +79,7 @@ test('교차 모드: 합성 중인 해설도 끊지 않고, 해설 → 답 순�
   const infoList = [];
   const narrator = new CaptionNarrator({
     getLiveVideo: createVideo, createAudioContext: () => context, isCatchupDelegated: () => true,
-    onPlayStart: (info) => infoList.push(info), wallNow: () => 0,
+    onPlayStart: (info) => infoList.push(info), wallNow: () => 0, sleep: () => Promise.resolve(),
   });
   narrator.start(fakeStream);
   narrator.queueCaption(makeEntry({ id: '지시' }));
