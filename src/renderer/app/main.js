@@ -318,7 +318,7 @@ function startNarrationPlayer({ stream }) {
     narrationMixer.start(stream);
 
     captureSource.detachDirectAudio();
-    console.log('[mix] 실시간 믹싱 모드 — 회의음 왼쪽 채널(해설 중 덕킹) / 해설·답 오른쪽 채널');
+    console.log('[mix] 실시간 믹싱 모드 — 회의음 가운데, 해설 중엔 왼쪽 채널로 옮기고 덕킹 / 해설·답 오른쪽 채널');
     return;
   }
 

@@ -62,13 +62,13 @@ test('사건 시각이나 재생 위치를 모르면 트리거 기준으로 버�
 
 function createFakeAudioContext() {
   const sourceList = [];
-  const param = () => ({ value: 1, cancelScheduledValues() {}, setValueAtTime() {}, linearRampToValueAtTime(target) { this.value = target; } });
+  const param = (value = 1) => ({ value, cancelScheduledValues() {}, setValueAtTime() {}, linearRampToValueAtTime(target) { this.value = target; } });
   const context = {
     state: 'running', currentTime: 0, destination: {},
     createAnalyser: () => ({ fftSize: 0, connect() {} }),
     createGain: () => ({ gain: param(), connect() {} }),
     createPanner: () => ({ positionX: { value: 0 }, positionY: { value: 0 }, positionZ: { value: 0 }, connect() {} }),
-    createStereoPanner: () => ({ pan: { value: 0 }, connect() {} }),
+    createStereoPanner: () => ({ pan: param(0), connect() {} }),
     createMediaStreamSource: () => ({ connect() {}, disconnect() {} }),
     decodeAudioData: async (buffer) => ({ duration: 2, id: buffer.id }),
     createBufferSource: () => {

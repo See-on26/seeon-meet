@@ -4,10 +4,16 @@ import { defaultUiText } from '../i18n/ui-text.js';
 export const DEFAULT_DUCK_DB = -12;
 const DEFAULT_RAMP_MS = 120;
 const START_LEAD_SEC = 0.02;
-// 소리 방향을 화면 배치와 맞춘다. 회의 화면은 왼쪽, SEEON 패널은 오른쪽이라 동시 모드에서는 회의 소리는 왼쪽 채널,
-// 해설·답은 오른쪽 채널로 나눈다. 스테레오 패너를 끝까지(±1) 밀어 반대쪽 채널에는 소리가 섞이지 않게 한다.
-const MEETING_PAN = -1;
+// 소리 방향을 화면 배치와 맞춘다. 회의 화면은 왼쪽, SEEON 패널은 오른쪽이라 동시 모드에서 해설·답은 오른쪽 채널로,
+// 해설이 나오는 동안의 회의 소리는 왼쪽 채널로 나눈다. 스테레오 패너를 끝까지(±1) 밀어 반대쪽 채널에는 소리가 섞이지 않게 한다.
+// 해설이 없을 때 회의 소리는 가운데(양쪽)에 둔다. 패너는 가운데와 끝에서 같은 세기로 나눠 보내 옮겨도 크기가 거의 같다.
+const MEETING_IDLE_PAN = 0;
+const MEETING_SIDE_PAN = -1;
 const NARRATION_PAN = 1;
+const MEETING_PAN_TO_SIDE_MS = 300;
+// 해설은 몇 초 간격으로 이어 나올 때가 많아, 끝나자마자 가운데로 돌리면 회의 소리가 왼쪽과 가운데를 오가며 흔들린다.
+const MEETING_PAN_HOLD_MS = 1500;
+const MEETING_PAN_TO_CENTER_MS = 600;
 // 교차 모드의 질문 답은 회의 소리를 줄인 채 겹쳐 튼다. 채널을 나누지 않고 오른쪽에서 들리게만 해 한쪽 귀로도 들린다.
 export const ANSWER_OVERLAY_POSITION_X = 0.7;
 const PANNER_DISTANCE_Z = -0.4;
@@ -68,6 +74,7 @@ export class NarrationMixer {
     this.analyserNode = null;
     this.duckGainNode = null;
     this.narrationGainNode = null;
+    this.meetingPanner = null;
     this.meetingSource = null;
     this.currentSource = null;
     this.currentEntry = null;
@@ -89,10 +96,11 @@ export class NarrationMixer {
     this.narrationPanner = narrationPanner;
 
     this.duckGainNode = this.audioContext.createGain();
-    const meetingPanner = this.createPanner({ pan: MEETING_PAN });
+    const meetingPanner = this.createPanner({ pan: MEETING_IDLE_PAN });
     this.duckGainNode.connect(meetingPanner);
     meetingPanner.connect(this.audioContext.destination);
     meetingPanner.connect(this.analyserNode);
+    this.meetingPanner = meetingPanner;
     try {
       if (stream.getAudioTracks().length) {
         this.meetingSource = this.audioContext.createMediaStreamSource(stream);
@@ -132,6 +140,7 @@ export class NarrationMixer {
     if (!this.isInserting) {
       this.isInserting = true;
       this.duck({ isDucked: true });
+      this.moveMeetingPan({ isInserting: true });
     }
     this.playToken += 1;
     const token = this.playToken;
@@ -181,7 +190,26 @@ export class NarrationMixer {
     if (!this.isInserting) return;
     this.isInserting = false;
     this.duck({ isDucked: false });
+    this.moveMeetingPan({ isInserting: false });
     this.onStatus('');
+  }
+
+  // 해설이 시작되면 회의 소리를 왼쪽 끝으로 옮기고, 끝나면 잠시 기다렸다가 천천히 가운데로 돌린다.
+  // 기다리는 동안 다음 해설이 오면 예약을 지우고 지금 자리에서 다시 왼쪽으로 간다.
+  moveMeetingPan({ isInserting }) {
+    if (!this.meetingPanner || !this.audioContext) return;
+    const { pan } = this.meetingPanner;
+    const now = this.audioContext.currentTime;
+    const startPan = pan.value;
+    pan.cancelScheduledValues(now);
+    pan.setValueAtTime(startPan, now);
+    if (isInserting) {
+      pan.linearRampToValueAtTime(MEETING_SIDE_PAN, now + MEETING_PAN_TO_SIDE_MS / 1000);
+      return;
+    }
+    const holdEndTime = now + MEETING_PAN_HOLD_MS / 1000;
+    pan.setValueAtTime(startPan, holdEndTime);
+    pan.linearRampToValueAtTime(MEETING_IDLE_PAN, holdEndTime + MEETING_PAN_TO_CENTER_MS / 1000);
   }
 
   duck({ isDucked }) {
@@ -210,6 +238,7 @@ export class NarrationMixer {
     this.analyserNode = null;
     this.duckGainNode = null;
     this.narrationGainNode = null;
+    this.meetingPanner = null;
     this.onStatus('');
   }
 
