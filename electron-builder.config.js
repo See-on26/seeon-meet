@@ -85,7 +85,8 @@ function createBuilderConfig({
     ],
     win: {
       target: [{ target: 'nsis', arch: ['x64'] }],
-      icon: 'build/icon.png',
+      // 설치 파일·바로가기·창 제목 줄 아이콘. 크기별(16~256px)로 다듬은 ICO 라 작은 크기에서도 둥근 모서리가 깔끔하다.
+      icon: 'build/icon.ico',
     },
     nsis: {
       oneClick: true,
