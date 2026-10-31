@@ -74,6 +74,17 @@ test('설치본 .env: 줄 가운데 CR·줄 구분 문자가 있어도 멈추지
   assert.doesNotThrow(() => sanitizeEnvText('SEEON_ASR_URL=a\u2028b'));
 });
 
+// 편집기는 CR 하나·줄 구분 문자를 줄바꿈으로 보여 준다. 그 뒤의 다른 키가 앞 SEEON_ 값에 붙어 설치본에 들어가면 안 된다.
+test('설치본 .env: 줄 가운데 CR·줄 구분 문자가 남은 줄은 넣지 않고 넣지 않는 줄로 센다', () => {
+  for (const text of ['SEEON_A=x\rOPENAI_API_KEY=sk-test\n', 'SEEON_A=x\rSEEON_GPU_SSH_KEY=/Users/me/key\n',
+    'SEEON_B=2\rA=sk-test\rSEEON_C=3\r', 'SEEON_A=a\u2028OPENAI_API_KEY=sk-test\n']) {
+    const sanitized = sanitizeEnvText(text);
+    assert.doesNotMatch(sanitized, /sk-test|SSH_KEY/, JSON.stringify(text));
+    assert.equal(countUnpackagedEnvLine(text), 1, JSON.stringify(text));
+  }
+  assert.equal(sanitizeEnvText('SEEON_ASR_URL=v\r\nSEEON_ASR_LANGUAGE=ko\r'), 'SEEON_ASR_URL=v\nSEEON_ASR_LANGUAGE=ko');
+});
+
 test('env 글에서 값 하나를 읽는다(따옴표·export 허용, 없으면 null)', () => {
   const text = 'A=1\nexport SEEON_GPU_SSH_KEY="/Users/me/key"\n';
   assert.equal(readEnvValue(text, 'SEEON_GPU_SSH_KEY'), '/Users/me/key');

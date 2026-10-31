@@ -31,15 +31,19 @@ function stripInlineComment(line) {
   return (head + (hashIndex < 0 ? value : value.slice(0, hashIndex))).trimEnd();
 }
 
+// 줄 가운데 남은 CR·줄 구분 문자. 편집기는 여기서 줄을 바꿔 보여 주므로, 그 뒤의 다른 키가 앞 값에 붙어 새지 않게 줄째 뺀다.
+const INNER_LINE_BREAK_PATTERN = /[\r\u2028\u2029]/;
+
 // 설치본에 넣을 꼴로 바꾼 줄. 넣지 않을 줄이면 null.
 function toPackagedEnvLine(line) {
+  if (INNER_LINE_BREAK_PATTERN.test(line)) return null;
   const key = readEnvKey(line);
   return key !== null && isPackagedEnvKey(key) ? stripInlineComment(line) : null;
 }
 
-// 앱(Node 의 .env 읽기)처럼 CR 은 모두 지우고 LF 로만 줄을 나눈다.
+// LF 로 줄을 나누고 줄 끝 CR(CRLF·CR 여러 개)만 지운다. 줄 가운데 CR 은 toPackagedEnvLine 이 거른다.
 function splitEnvLine(text) {
-  return text.replace(/\r/g, '').split('\n');
+  return text.split('\n').map((line) => line.replace(/\r+$/, ''));
 }
 
 function sanitizeEnvText(text) {
