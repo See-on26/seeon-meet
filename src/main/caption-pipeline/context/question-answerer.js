@@ -64,7 +64,8 @@ const DIGIT_PATTERN = /\d/;
 const SENTENCE_SPLIT_PATTERN = /(?<=[.!?。])\s+|\n+/;
 const SENTENCE_TRIM_PATTERN = /^[\s"'`*「『“]+|[\s"'`*」』”.!?。…~]+$/g;
 // 답 전체가 따옴표 한 쌍으로 싸여 있으면 화면 글자를 옮긴 것이다("요청하신 페이지를 찾을 수 없습니다").
-const QUOTED_ANSWER_PATTERN = /^(?:["“「『][^"“”「」『』]*["”」』]|'[^']*'|‘[^‘’]*’)[.!?。]?$/;
+// 둥근 작은따옴표(‘’)는 미리 '로 바꾼 뒤에 본다.
+const QUOTED_ANSWER_PATTERN = /^(?:["“「『][^"“”「」『』]*["”」』]|'[^']*')[.!?。]?$/;
 // 앞머리 사과는 떼고 본다("죄송하지만 그 정보는 …", "Sorry, I couldn't …").
 const APOLOGY_PREFIX_PATTERN = /^(?:(?:죄송하지만|죄송합니다만|미안하지만|아쉽게도)\s*,?|죄송(?:합니다|해요)\s*,|(?:(?:i'm |i am )?sorry|unfortunately)\s*,\s*(?:but\s+)?)\s*/i;
 // 사과만 하는 문장은 거절 문장 앞뒤에 붙어도 답 내용으로 보지 않는다.
@@ -78,7 +79,7 @@ const CONTENT_CLAUSE_PATTERN = new RegExp('[,;:"“”「」『』]|\\s[\'‘]'
 // 정보가 없다는 술어 앞에 말이 길면 사람 모습 같은 내용을 말한 뒤 일부만 모른다는 답이다.
 // 장소·지시어("화면과 발화에서", "해당")를 뺀 앞말이 이만큼 어절 이하일 때만 거절로 본다.
 const KO_PREFIX_MAX_WORD_COUNT = 2;
-const KO_PREFIX_FILLER_PATTERN = /^(?:(?:(?:화면|자료|슬라이드|발화|기록|회의|발표|대화)(?:과|와|이나|나|에|에는|에서|에서는|엔|만으로|만으로는)?)|현재|지금|지금은|제시된|주어진|해당|관련|그|이|그건|이건|그것은|여기|여기서|아직|잘)$/;
+const KO_PREFIX_FILLER_PATTERN = /^(?:(?:(?:화면|자료|슬라이드|발화|기록|회의|발표|대화)(?:과|와|이나|나|에|에는|에서|에서는|엔|만으로|만으로는)?)|현재|지금|지금은|제시된|주어진|해당|관련|대한|관한|요청하신|질문하신|말씀하신|그|이|그건|이건|그것은|여기|여기서|아직|잘)$/;
 const EN_PREFIX_MAX_WORD_COUNT = 4;
 const KO_ENDING = '(?:았|었)?(?:습니다|어요|아요|네요|다|음)';
 // 무엇이 어디에 있든 정보가 없다는 뜻인 술어(명시·언급·기록·찾기·알기).
@@ -143,10 +144,10 @@ function isRefusalSentence(sentence) {
 
 // 숫자 없이 답 전체가 못 찾았다고만 말하는 답인가. 이런 답은 근거 없음으로 보고 고정 문구로 바꾼다.
 function isNotFoundAnswerText(text) {
-  const trimmed = String(text ?? '').trim();
+  const trimmed = String(text ?? '').trim().replace(/[’‘]/g, "'");
   if (!trimmed || DIGIT_PATTERN.test(trimmed) || QUOTED_ANSWER_PATTERN.test(trimmed)) return false;
   const sentenceList = trimmed.split(SENTENCE_SPLIT_PATTERN)
-    .map((sentence) => sentence.replace(/[’‘]/g, "'").replace(SENTENCE_TRIM_PATTERN, '').replace(APOLOGY_PREFIX_PATTERN, ''))
+    .map((sentence) => sentence.replace(SENTENCE_TRIM_PATTERN, '').replace(APOLOGY_PREFIX_PATTERN, ''))
     .filter(Boolean);
   const contentList = sentenceList.filter((sentence) => !APOLOGY_SENTENCE_PATTERN.test(sentence));
   return contentList.length > 0 && contentList.every(isRefusalSentence);
