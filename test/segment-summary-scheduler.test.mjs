@@ -308,7 +308,7 @@ test('파이프라인: 세션 시작에 reset, 슬라이드 마크 반영 때와
   assert.match(source, /const SEGMENT_SUMMARY_POLL_MS = 15000;/);
 
   const startBody = source.slice(source.indexOf("ipcMain.handle('pipeline-session-start'"), source.indexOf("ipcMain.handle('pipeline-session-end'"));
-  assert.match(startBody, /slideTextBackend, isMeetingSummaryEnabled,\s*\} = \{\}\) => \{/);
+  assert.match(startBody, /slideTextBackend, isMeetingSummaryEnabled, speechSpeed,\s*\} = \{\}\) => \{/);
   assert.match(startBody, /contextGeneration \+= 1;\s*segmentSummaryScheduler\.reset\(\);\s*isSessionMeetingSummaryEnabled = isMeetingSummaryEnabled !== false;\s*contextStore\.start\(/);
   assert.match(startBody, /startSegmentSummaryTimer\(\);/);
 
@@ -352,7 +352,10 @@ test('렌더러: 세션 시작에 회의 요약 스위치 값을 넘기고, 스�
     { channel: 'pipeline-set-meeting-summary-enabled', payload: { isEnabled: false } },
     {
       channel: 'pipeline-session-start',
-      payload: { mode: 'delayed', asrLanguage: undefined, captionLanguage: 'ko', slideTextBackend: undefined, isMeetingSummaryEnabled: true },
+      payload: {
+        mode: 'delayed', asrLanguage: undefined, captionLanguage: 'ko', slideTextBackend: undefined, isMeetingSummaryEnabled: true,
+        speechSpeed: undefined,
+      },
     },
   ]);
 });

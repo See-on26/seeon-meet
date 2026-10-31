@@ -41,5 +41,5 @@ test('기호 읽기: 한국어는 지금처럼, 영어는 영어 낱말로 바�
 
 test('파이프라인 TTS 와 회의 요약 음성은 세션 캡션 언어로 읽는다', () => {
   const source = fs.readFileSync(new URL('../src/main/caption-pipeline/index.js', import.meta.url), 'utf8');
-  assert.match(source, /ttsClient\.synthesize\(\{ text, language: getCaptionLanguage\(\) \}\)/);
+  assert.match(source, /ttsClient\.synthesize\(\{ text, language: getCaptionLanguage\(\)[, }]/);
 });

@@ -120,6 +120,8 @@ export const UI_TEXT_MAP = {
     'settings.featureGroupAriaLabel': '기능 켜기·끄기',
     'settings.captionLanguage': '캡션 언어',
     'settings.captionLanguageNote': '해설·질문 답·요약을 들려줄 언어예요. 회의 말은 한국어·영어를 자동으로 알아들어요. 회의 캡처 중에는 바꿀 수 없어요.',
+    'settings.speechSpeed': '읽기 속도',
+    'settings.speechSpeedNote': '해설·질문 답을 읽는 빠르기예요. 느리게 읽을수록 해설을 짧게 만들어요. 회의 캡처 중에는 바꿀 수 없어요.',
     'settings.slideTextBackend': '화면 글자 읽기',
     'settings.slideTextBackendNote': 'OCR 은 글자 인식 서버로 읽고, 응답이 없으면 VLM 으로 읽어요. 회의 캡처 중에는 바꿀 수 없어요.',
     'settings.questionPresetTitle': '질문 프리셋 (Ctrl+1~9)',
@@ -173,6 +175,10 @@ export const UI_TEXT_MAP = {
 
     'captionLanguage.locked': '캡션 언어는 회의 캡처를 시작하기 전에만 바꿀 수 있어요',
     'captionLanguage.changed': '캡션 언어 {language} — 다음 회의 캡처부터 적용돼요',
+    'speechSpeed.option': '{speed}배',
+    'speechSpeed.optionDefault': '{speed}배 (기본)',
+    'speechSpeed.locked': '읽기 속도는 회의 캡처를 시작하기 전에만 바꿀 수 있어요',
+    'speechSpeed.changed': '읽기 속도 {speed}배 — 다음 회의 캡처부터 적용돼요',
     'captionLanguage.nonDefault': '캡션 언어: {language}',
     'captionLanguage.startNotice': '{notice}. 캡처를 멈춘 뒤 설정에서 바꿀 수 있어요.',
 
@@ -363,6 +369,8 @@ export const UI_TEXT_MAP = {
     'settings.featureGroupAriaLabel': 'Turn features on or off',
     'settings.captionLanguage': 'Caption language',
     'settings.captionLanguageNote': "The language for descriptions, answers, and summaries. Meeting speech in Korean or English is recognized automatically. You can't change this during meeting capture.",
+    'settings.speechSpeed': 'Speech speed',
+    'settings.speechSpeedNote': "How fast descriptions and answers are read. Slower speech makes descriptions shorter. You can't change this during meeting capture.",
     'settings.slideTextBackend': 'Screen text reading',
     'settings.slideTextBackendNote': "OCR reads text with the text recognition server and falls back to VLM if it doesn't respond. You can't change this during meeting capture.",
     'settings.questionPresetTitle': 'Question presets (Ctrl+1–9)',
@@ -416,6 +424,10 @@ export const UI_TEXT_MAP = {
 
     'captionLanguage.locked': 'Caption language can only be changed before you start meeting capture',
     'captionLanguage.changed': 'Caption language: {language} — applies from the next meeting capture',
+    'speechSpeed.option': '{speed}x',
+    'speechSpeed.optionDefault': '{speed}x (default)',
+    'speechSpeed.locked': 'Speech speed can only be changed before you start meeting capture',
+    'speechSpeed.changed': 'Speech speed: {speed}x — applies from the next meeting capture',
     'captionLanguage.nonDefault': 'Caption language: {language}',
     'captionLanguage.startNotice': '{notice}. You can change it in settings after stopping capture.',
 

@@ -9,6 +9,7 @@ const { toNarrationClass, NARRATION_ORIGIN_MAP } = require('./contracts/narratio
 const { buildSpeakerIdentityFromDom } = require('./agents/speaker-identity-agent');
 const { DEBUG_STAGE_MAP, DEBUG_VERDICT_MAP } = require('./contracts/debug-events');
 const { DEFAULT_CAPTION_LANGUAGE, resolveCaptionLanguage } = require('./contracts/caption-language');
+const { DEFAULT_SPEECH_SPEED, resolveSpeechSpeed } = require('./contracts/speech-speed');
 const { createDevFlow } = require('../dev-flow');
 const { flattenPlaybackReport } = require('../dev-flow/playback-report');
 const { createAgentFieldMap } = require('./agents');
@@ -138,6 +139,9 @@ function registerPipeline({ getViewerView, meetingArchive = null }) {
   // 해설 에이전트·질문 답·무발화·전환 머리말이 부를 때마다 이 값을 읽는다.
   let sessionCaptionLanguage = DEFAULT_CAPTION_LANGUAGE;
   const getCaptionLanguage = () => sessionCaptionLanguage;
+  // 해설·질문 답을 읽는 빠르기. 캡처를 시작할 때 설정 화면에서 고른 값이 넘어와 TTS 요청에 실린다.
+  let sessionSpeechSpeed = DEFAULT_SPEECH_SPEED;
+  const getSpeechSpeed = () => sessionSpeechSpeed;
   const agentFieldMap = createAgentFieldMap({ config, getCaptionLanguage });
   const embedClient = createEmbedClient({ config });
   const ttsClient = createTtsClient({ config });
@@ -460,7 +464,7 @@ function registerPipeline({ getViewerView, meetingArchive = null }) {
   // 전달 Layer 앞의 TTS. 렌더러 대기 줄이 이번에 재생할 해설로 고른 것만 합성한다.
   ipcMain.handle('pipeline-tts', async (_event, { ts = Date.now(), text = '', source = null } = {}) => {
     try {
-      const wavData = await ttsClient.synthesize({ text, language: getCaptionLanguage() });
+      const wavData = await ttsClient.synthesize({ text, language: getCaptionLanguage(), speed: getSpeechSpeed() });
       await appendRecord({ kind: RECORD_KIND_MAP.tts, ts, byteLength: wavData.byteLength });
       markDebug({
         stage: DEBUG_STAGE_MAP.tts, verdict: DEBUG_VERDICT_MAP.pass, narrationType: source, ts,
@@ -478,7 +482,7 @@ function registerPipeline({ getViewerView, meetingArchive = null }) {
   });
 
   ipcMain.handle('pipeline-session-start', async (_event, {
-    mode = '', asrLanguage, captionLanguage, slideTextBackend, isMeetingSummaryEnabled,
+    mode = '', asrLanguage, captionLanguage, slideTextBackend, isMeetingSummaryEnabled, speechSpeed,
   } = {}) => {
     describedStore.reset();
     captionDescribed.reset();
@@ -496,6 +500,7 @@ function registerPipeline({ getViewerView, meetingArchive = null }) {
     const meetingLanguage = applySessionMeetingLanguage({ asrLanguageSession, asrLanguage });
     sessionSlideTextBackend = resolveSlideTextBackend({ requested: slideTextBackend, fallback: config.slideTextBackend });
     sessionCaptionLanguage = resolveCaptionLanguage(captionLanguage);
+    sessionSpeechSpeed = resolveSpeechSpeed(speechSpeed);
     const { sessionId } = sessionStore.startSession({ mode, asrLanguage: meetingLanguage, captionLanguage: sessionCaptionLanguage });
     devFlow.recorder.start({ sessionId, mode });
     contextGeneration += 1;
@@ -503,7 +508,7 @@ function registerPipeline({ getViewerView, meetingArchive = null }) {
     isSessionMeetingSummaryEnabled = isMeetingSummaryEnabled !== false;
     contextStore.start({ sessionId, startedAt: Date.now() });
     startSegmentSummaryTimer();
-    console.log(`[pipeline] ■ 캡처 세션 시작 (모드=${mode}, 받아쓰기=${meetingLanguage}, 캡션 언어=${sessionCaptionLanguage}, 화면 글자=${sessionSlideTextBackend}, 화면 변화=${screenChange.describeSessionText()}, ${sessionId}) — 중복 이력·화면 레지스트리 초기화`);
+    console.log(`[pipeline] ■ 캡처 세션 시작 (모드=${mode}, 받아쓰기=${meetingLanguage}, 캡션 언어=${sessionCaptionLanguage}, 읽기 속도=${sessionSpeechSpeed}배, 화면 글자=${sessionSlideTextBackend}, 화면 변화=${screenChange.describeSessionText()}, ${sessionId}) — 중복 이력·화면 레지스트리 초기화`);
     markDebug({
       stage: DEBUG_STAGE_MAP.session, verdict: DEBUG_VERDICT_MAP.info,
       reason: '세션 시작', detail: `모드=${mode} · 받아쓰기=${meetingLanguage} · 캡션 언어=${sessionCaptionLanguage} · 화면 글자=${sessionSlideTextBackend} · 화면 변화=${screenChange.describeSessionText()} · ${sessionId} · 기록=${recordStore.filePath}`,
