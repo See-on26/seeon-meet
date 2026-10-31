@@ -34,11 +34,14 @@ function sanitizeMultilineForSpeech({ text, language = 'ko' }) {
 
 function createTtsClient({ config }) {
   // language 는 캡션 언어(ko·en)다. 서버에는 언어 코드(KR·EN)로 보낸다.
-  async function synthesize({ text, language = 'ko' }) {
+  // speed 는 세션 읽기 속도(MeloTTS speed)다. 없으면 보내지 않아 서버 기본 속도(2.0)로 읽는다.
+  async function synthesize({ text, language = 'ko', speed }) {
+    const body = { text: sanitizeForSpeech({ text, language }), language: TTS_LANGUAGE_MAP[language] || DEFAULT_TTS_LANGUAGE };
+    if (Number.isFinite(speed)) body.speed = speed;
     const response = await fetch(config.ttsUrl, {
       method: 'POST',
       headers: { 'content-type': 'application/json' },
-      body: JSON.stringify({ text: sanitizeForSpeech({ text, language }), language: TTS_LANGUAGE_MAP[language] || DEFAULT_TTS_LANGUAGE }),
+      body: JSON.stringify(body),
       signal: AbortSignal.timeout(REQUEST_TIMEOUT_MS),
     });
     if (!response.ok) throw new Error(`TTS HTTP ${response.status}`);

@@ -17,6 +17,9 @@ export const DWELL_MS = 3000;
 
 const SPEECH_MS_PER_WORD = 450;
 
+// SPEECH_MS_PER_WORD 는 MeloTTS speed 2.0 으로 잰 값이다. 읽기 속도를 고르면 어절당 시간을 이 속도에 반비례해 늘리거나 줄인다.
+export const REFERENCE_SPEECH_SPEED = 2.0;
+
 const CONTEXT_BEFORE_MS = 60000;
 
 const CONTEXT_AFTER_LISTENING_MS = 30000;
@@ -165,13 +168,18 @@ export function resolveBeforeAnchorTs({ mode, screenTransitionTs = null }) {
   return Number.isFinite(screenTransitionTs) ? screenTransitionTs : null;
 }
 
-export function computeSpeechDurationMs({ wordCount }) {
-  return Math.max(0, wordCount) * SPEECH_MS_PER_WORD;
+export function computeSpeechMsPerWord({ speechSpeed } = {}) {
+  if (!(speechSpeed > 0)) return SPEECH_MS_PER_WORD;
+  return Math.round(SPEECH_MS_PER_WORD * REFERENCE_SPEECH_SPEED / speechSpeed);
 }
 
-export function computeWordCountFromDurationMs({ durationMs }) {
+export function computeSpeechDurationMs({ wordCount, speechSpeed }) {
+  return Math.max(0, wordCount) * computeSpeechMsPerWord({ speechSpeed });
+}
+
+export function computeWordCountFromDurationMs({ durationMs, speechSpeed }) {
   if (!(durationMs > 0)) return 0;
-  return Math.floor(durationMs / SPEECH_MS_PER_WORD);
+  return Math.floor(durationMs / computeSpeechMsPerWord({ speechSpeed }));
 }
 
 export function getWordRange({ narrationType, subKind = null }) {
@@ -194,23 +202,23 @@ export function computeAvailableMs({ mode, currentDelayMs = 0 }) {
   return Math.min(policy.maxNarrationMs, remainingDelayMs);
 }
 
-export function computeWordBudget({ mode, narrationType, subKind = null, currentDelayMs = 0 }) {
+export function computeWordBudget({ mode, narrationType, subKind = null, currentDelayMs = 0, speechSpeed }) {
   const range = getWordRange({ narrationType, subKind });
   if (!range) return { minWordCount: 0, maxWordCount: 0, isDroppable: true };
-  return computeWordBudgetInRange({ mode, range, currentDelayMs });
+  return computeWordBudgetInRange({ mode, range, currentDelayMs, speechSpeed });
 }
 
 // 무발화 해설은 발표자가 화면을 보라며 말없이 기다려 주는 자리라 사진 반응 해설(최대 12어절)보다 길게 둔다.
 // 구조도는 구성 요소와 연결 관계까지 말해야 해서 머리말("이미지 제시,") 2어절 + 묘사 12어절이다.
 export const SILENCE_DESCRIPTION_WORD_RANGE = { minWordCount: 5, maxWordCount: 14 };
 
-export function computeSilenceWordBudget({ mode, currentDelayMs = 0 }) {
-  return computeWordBudgetInRange({ mode, range: SILENCE_DESCRIPTION_WORD_RANGE, currentDelayMs });
+export function computeSilenceWordBudget({ mode, currentDelayMs = 0, speechSpeed }) {
+  return computeWordBudgetInRange({ mode, range: SILENCE_DESCRIPTION_WORD_RANGE, currentDelayMs, speechSpeed });
 }
 
-function computeWordBudgetInRange({ mode, range, currentDelayMs }) {
+function computeWordBudgetInRange({ mode, range, currentDelayMs, speechSpeed }) {
   const availableMs = computeAvailableMs({ mode, currentDelayMs });
-  const affordableWordCount = computeWordCountFromDurationMs({ durationMs: availableMs });
+  const affordableWordCount = computeWordCountFromDurationMs({ durationMs: availableMs, speechSpeed });
   if (affordableWordCount < range.minWordCount) {
     return { minWordCount: range.minWordCount, maxWordCount: range.maxWordCount, isDroppable: true };
   }

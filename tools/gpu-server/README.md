@@ -43,6 +43,7 @@ GPU_SSH_HOST=<서버 주소> GPU_SSH_USER=<계정> GPU_SSH_PORT=<SSH 포트> GPU
 | `asr_server.py` | ASR FastAPI (`POST /asr` webm→전사). 쿼리 `language=ko\|en\|auto`(없으면 `ko`, 그 밖은 400) — `auto`는 ko·en 중 감지 확률이 높은 쪽으로 전사하고 응답에 `language`·`languageProbability`를 더한다 |
 | `asr_language.py` | ASR 언어 판정(쿼리 검증·ko/en 고르기). `asr_server.py`가 import한다 — 시험: `python3 -m unittest test_asr_language` |
 | `tts_server.py` | TTS FastAPI (`POST /tts` 텍스트→wav · `POST /tts-long` 긴 텍스트→mp3) |
+| `speech_speed.py` | 요청에 실린 읽기 속도(앱 설정 화면, 1~2)를 고른다. `tts_server.py` 가 import 한다 — 시험: `python3 -m unittest test_speech_speed` |
 | `embed_server.py` | 임베딩 FastAPI (`POST /embed` jpeg→벡터, Stage 1 슬라이드 전환 확정용) |
 | `ocr_lines.py` | OCR 상자 → 줄 단위 글·평균 점수·세로 글씨 비율. `embed_server.py`의 `/ocr`가 쓴다 — 시험: `python3 -m unittest test_ocr_lines` |
 | `ocr_engine.py` | RapidOCR 엔진(모델 경로 명시, 각도 분류기 끔, 4스레드). `embed_server.py`가 import한다 — 시험: `python3 -m unittest test_ocr_engine` |
@@ -267,8 +268,9 @@ curl -s localhost:8803/tts-long -H 'content-type: application/json' -d '{"text":
 | `speed=2.0` (리터럴) | `POST /tts` | 2.0 | **실시간 어절 예산의 교정 상수** |
 | `SUMMARY_SPEECH_SPEED` | `POST /tts-long` | 1.5 | 요약본 낭독 속도 (독립) |
 
-`/tts`의 값은 함부로 바꾸면 안 된다 — `renderer/core/mode/mode-policy.js`의 `SPEECH_MS_PER_WORD`
+`/tts`의 기본 속도(`DEFAULT_SPEECH_SPEED` 2.0)는 함부로 바꾸면 안 된다 — `renderer/core/mode/mode-policy.js`의 `SPEECH_MS_PER_WORD`
 (잠정 450ms, M-1 미실측)가 여기에 종속돼 있어, **바꾸면 M-1을 다시 재야 한다.**
+앱 설정 화면의 읽기 속도(1.4·1.6·1.8·2.0)는 요청의 `speed` 로 오고, 앱은 이 기본 속도 대비 비율로 어절 예산을 늘리거나 줄인다.
 요약본 속도만 조정하려면 `SUMMARY_SPEECH_SPEED`만 건드린다.
 
 ```bash
@@ -306,7 +308,7 @@ sudo systemctl restart seeon-tts
 |---|---|---|---|
 | 8801 | VLM | `cyankiwi/gemma-4-26B-A4B-it-qat-AWQ-INT4` @ `18a3c72` (`gemma-4-26b-a4b-qat`, `max_model_len` 32768, 이미지 토큰 예산 560) | `/data/venv-vllm-35` — py3.12.15 · vLLM 0.30.1rc1.dev583 · torch 2.13.0+cu132 · transformers 5.17.0 |
 | 8802 | ASR | faster-whisper `large-v3-turbo`, float16, VAD | `~/venv-audio` — py3.10.22 · torch 2.5.1+cu121 · faster-whisper 1.2.1 · ctranslate2 4.8.2 |
-| 8803 | TTS | MeloTTS-Korean (`/tts` speed 2.0 · `/tts-long` 1.5) | `~/venv-audio` — transformers 4.27.4 |
+| 8803 | TTS | MeloTTS-Korean (`/tts` 요청의 speed, 없으면 2.0 · `/tts-long` 1.5) | `~/venv-audio` — transformers 4.27.4 |
 | 8804 | EMBED | `google/siglip-base-patch16-224` → 768차원 | `~/venv-embed` — py3.10.22 · torch 2.5.1+cu121 · transformers 4.49.0 |
 | 8805 | JUDGE | 8801 과 같은 가중치 (`gemma-4-26b-a4b-qat`, `max_model_len` 8192, `--language-model-only`) | `/data/venv-vllm-35` (VLM 과 같음) |
 

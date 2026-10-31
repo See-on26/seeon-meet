@@ -76,7 +76,7 @@ test('무발화 해설 어절 예산은 사진 반응보다 길게(최대 14어�
 
 test('제품 화면은 무발화 해설에 무발화 예산을 쓰고, 시각묘사 에이전트는 무발화 칸으로 읽는다', () => {
   const mainSource = fs.readFileSync(new URL('../src/renderer/app/main.js', import.meta.url), 'utf8');
-  assert.match(mainSource, /const wordBudget = computeSilenceWordBudget\(\{ mode: getCurrentMode\(\) \}\);/);
+  assert.match(mainSource, /const wordBudget = computeSilenceWordBudget\(\{ mode: getCurrentMode\(\), speechSpeed: speechSpeedStore\.get\(\) \}\);/);
   const agentSource = fs.readFileSync(new URL('../src/main/caption-pipeline/agents/visual-description-agent.js', import.meta.url), 'utf8');
   assert.match(agentSource, /parseSlotCaption\(\{[^}]*origin,?[^}]*\}\)/);
 });

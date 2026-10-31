@@ -25,6 +25,9 @@ import {
 import {
   createSlideTextBackendStore, SLIDE_TEXT_BACKEND_OPTION_LIST, readSlideTextBackendLabel,
 } from '../core/mode/slide-text-backend-store.js';
+import {
+  createSpeechSpeedStore, SPEECH_SPEED_LIST, isSpeechSpeedLocked, readSpeechSpeedLabel,
+} from '../core/mode/speech-speed-store.js';
 import { createUiText, applyUiTextToDom } from '../core/i18n/ui-text.js';
 
 import { DelayBuffer, isCaptionDroppable, EXCESS_DROP_MS } from '../core/audio-renderer/delay-buffer.js';
@@ -147,6 +150,7 @@ const t = createUiText({ getLanguage: () => captionLanguageStore.get() });
 document.documentElement.lang = captionLanguageStore.get();
 applyUiTextToDom({ root: document, t });
 const slideTextBackendStore = createSlideTextBackendStore({ storage: readLocalStorage() });
+const speechSpeedStore = createSpeechSpeedStore({ storage: readLocalStorage() });
 const questionPresetStore = createQuestionPresetStore({ storage: readLocalStorage() });
 const isNarrationEntryEnabled = (entry) => featureToggleStore.isClassOn(entry.narrationClass);
 
@@ -310,7 +314,7 @@ const MODE_BUTTON_LIST = [
 const getCurrentMode = () => currentMode;
 
 function buildWordBudget({ narrationType, subKind = null }) {
-  return computeWordBudget({ mode: getCurrentMode(), narrationType, subKind, currentDelayMs: 0 });
+  return computeWordBudget({ mode: getCurrentMode(), narrationType, subKind, currentDelayMs: 0, speechSpeed: speechSpeedStore.get() });
 }
 
 const ROUTABLE_TYPE_LIST = [
@@ -1689,6 +1693,7 @@ function applyCaptionLanguageToUi({ language }) {
   renderModeButtons();
   buildFeatureToggleList();
   renderSlideTextBackendOptions();
+  renderSpeechSpeedOptions();
   buildQuestionPresetChips();
   buildQuestionPresetEditor();
   rerenderGpuTunnelStatus();
@@ -1702,6 +1707,68 @@ captionLanguageStore.subscribe(({ language }) => {
 });
 
 buildCaptionLanguageSelect();
+
+// 읽기 속도도 캡션 언어처럼 캡처를 시작할 때 main 에 넘겨 그 회의 동안 쓴다. 해설 어절 예산도 이 속도를 따른다.
+function isSpeechSpeedLockedNow() {
+  return isSpeechSpeedLocked({ isCaptureActive: captureSource.isActive });
+}
+
+function announceSpeechSpeedLocked() {
+  announce(t('speechSpeed.locked'));
+}
+
+function blockLockedSpeechSpeedInput(event) {
+  if (!isSpeechSpeedLockedNow()) return;
+  if (event.type === 'keydown' && !CAPTION_LANGUAGE_OPEN_KEY_LIST.includes(event.key)) return;
+  event.preventDefault();
+  announceSpeechSpeedLocked();
+}
+
+function handleChangeSpeechSpeed() {
+  const select = $('speechSpeedSelect');
+  if (isSpeechSpeedLockedNow()) {
+    select.value = String(speechSpeedStore.get());
+    announceSpeechSpeedLocked();
+    return;
+  }
+  speechSpeedStore.set(select.value);
+}
+
+// 선택지 이름은 캡션 언어가 바뀌면 다시 만든다. 이벤트는 buildSpeechSpeedSelect 에서 한 번만 단다.
+function renderSpeechSpeedOptions() {
+  const select = $('speechSpeedSelect');
+  if (!select) return;
+  select.replaceChildren(...SPEECH_SPEED_LIST.map((speed) => {
+    const option = document.createElement('option');
+    option.value = String(speed);
+    option.textContent = readSpeechSpeedLabel({ speed, t });
+    return option;
+  }));
+  syncSpeechSpeedUi();
+}
+
+function buildSpeechSpeedSelect() {
+  const select = $('speechSpeedSelect');
+  if (!select) return;
+  select.addEventListener('mousedown', blockLockedSpeechSpeedInput);
+  select.addEventListener('keydown', blockLockedSpeechSpeedInput);
+  select.addEventListener('change', handleChangeSpeechSpeed);
+  renderSpeechSpeedOptions();
+}
+
+function syncSpeechSpeedUi() {
+  const select = $('speechSpeedSelect');
+  if (!select) return;
+  select.value = String(speechSpeedStore.get());
+  select.setAttribute('aria-disabled', String(isSpeechSpeedLockedNow()));
+}
+
+speechSpeedStore.subscribe(({ speed }) => {
+  showNotice(t('speechSpeed.changed', { speed: speed.toFixed(1) }));
+  syncSpeechSpeedUi();
+});
+
+buildSpeechSpeedSelect();
 
 // 화면 글자 읽기(VLM·OCR)도 캡션 언어처럼 캡처를 시작할 때 main 에 넘겨 그 회의 동안 쓴다.
 // 고른 적이 없으면 main 의 .env 값(SEEON_SLIDE_TEXT_BACKEND)을 보여 주고, 그 값으로 읽는다.
@@ -2196,7 +2263,7 @@ async function handleSilenceTrigger({ silenceMs }) {
   const recentTranscript = transcriptWindow.getBefore({
     nowTs: performance.now(), windowMs: SILENCE_TRANSCRIPT_WINDOW_MS,
   });
-  const wordBudget = computeSilenceWordBudget({ mode: getCurrentMode() });
+  const wordBudget = computeSilenceWordBudget({ mode: getCurrentMode(), speechSpeed: speechSpeedStore.get() });
   const precondition = evaluateSilencePrecondition({ slideLabel, recentTranscript, wordBudget });
   const silenceLog = `무음 ${Math.round(silenceMs / 1000)}초 · 슬라이드=${slideLabel || '-'} · 모드=${getCurrentMode()}`;
   if (!precondition.isReady) {
@@ -2292,7 +2359,7 @@ async function attemptStartExperiment() {
 
     const sessionResult = await window.seeon.startPipelineSession({
       mode: getCurrentMode(), captionLanguage: captionLanguageStore.get(), slideTextBackend: slideTextBackendStore.get(),
-      isMeetingSummaryEnabled: featureToggleStore.isOn(FEATURE_KEY_MAP.meetingSummary),
+      isMeetingSummaryEnabled: featureToggleStore.isOn(FEATURE_KEY_MAP.meetingSummary), speechSpeed: speechSpeedStore.get(),
     }).catch(() => null);
     currentSessionId = sessionResult?.sessionId || null;
     gapSource = sessionResult?.gapSource === GAP_CANDIDATE_SOURCE_MAP.audio
@@ -2376,6 +2443,7 @@ async function attemptStartExperiment() {
     syncFeatureToggleUi();
     syncCaptionLanguageUi();
     syncSlideTextBackendUi();
+    syncSpeechSpeedUi();
     renderModeButtons();
 
     if (!audioTrack) {
@@ -2459,6 +2527,7 @@ function stopExperiment() {
   syncFeatureToggleUi();
   syncCaptionLanguageUi();
   syncSlideTextBackendUi();
+  syncSpeechSpeedUi();
   renderModeButtons();
   markDebug({
     stage: DEBUG_STAGE_MAP.session, verdict: DEBUG_VERDICT_MAP.info,
@@ -2775,6 +2844,7 @@ function setSettingsPanelOpen(isOpen) {
   syncFeatureToggleUi();
   syncCaptionLanguageUi();
   syncSlideTextBackendUi();
+  syncSpeechSpeedUi();
 }
 
 $('settingsBtn').addEventListener('click', () => setSettingsPanelOpen($('settingsPanel').hidden));

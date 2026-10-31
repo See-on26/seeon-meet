@@ -8,11 +8,14 @@ import re
 import shutil
 import subprocess
 import tempfile
+from typing import Optional
 
 from fastapi import FastAPI, HTTPException
 from fastapi.responses import Response
 from melo.api import TTS
 from pydantic import BaseModel
+
+from speech_speed import resolve_speech_speed
 
 app = FastAPI()
 
@@ -59,10 +62,15 @@ MAX_CHUNK_CHARS = 300
 # 요약본은 삽입할 틈도 어절 예산도 없는 독립 파일이라 그 제약을 물려받을 이유가 없다.
 SUMMARY_SPEECH_SPEED = 1.5
 
+# 실시간 해설(/tts)의 기본 속도. 앱이 요청에 speed(설정 화면의 읽기 속도)를 실으면 그 값으로 읽는다.
+# renderer/core/mode/mode-policy.js 의 SPEECH_MS_PER_WORD 가 이 기본 속도로 잰 값이고, 앱은 고른 속도에 맞춰 그 값을 늘리거나 줄인다.
+DEFAULT_SPEECH_SPEED = 2.0
+
 
 class SynthesisRequest(BaseModel):
     text: str
     language: str = DEFAULT_LANGUAGE
+    speed: Optional[float] = None
 
 
 @app.post("/tts")
@@ -73,11 +81,11 @@ def synthesize(request: SynthesisRequest):
         raise HTTPException(status_code=422, detail="합성할 텍스트가 비어 있다")
     output_path = tempfile.mktemp(suffix=".wav")
     try:
-        # speed=2.0 은 실시간 캡션의 운영값이다.
-        # 어절당 발화 초(M-1)를 재잴 때는 반드시 이 값을 기준으로 해야 한다 —
+        # 어절당 발화 초(M-1)를 재잴 때는 반드시 기본 속도(DEFAULT_SPEECH_SPEED)를 기준으로 해야 한다 —
         # renderer/core/mode/mode-policy.js 의 SPEECH_MS_PER_WORD 가 여기에 종속된다.
         model, speaker_id = resolve_tts(request.language)
-        model.tts_to_file(text, speaker_id, output_path, speed=2.0)
+        speed = resolve_speech_speed(request.speed, default_speed=DEFAULT_SPEECH_SPEED)
+        model.tts_to_file(text, speaker_id, output_path, speed=speed)
         with open(output_path, "rb") as wav_file:
             wav_bytes = wav_file.read()
     except KeyError as exc:
