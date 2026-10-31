@@ -1,0 +1,32 @@
+# 의존성
+node_modules/
+
+# 빌드·실행 산출물
+dist/
+out/
+
+# 한국어 트리거용 Kiwi 모델 — npm run setup:kiwi 가 받는다 (약 87MB, 저장소에 올리지 않는다)
+vendor/
+
+# 환경변수 — 실제 키가 들어간다. 커밋 금지 (템플릿은 .env.example)
+.env
+.env.*
+!.env.example
+
+# SSH 개인 키 — GPU 터널 앱 전용 키 등 키 파일은 커밋 금지
+gpu-tunnel-key
+gpu-tunnel-key.*
+seeon-app-tunnel
+seeon-app-tunnel.*
+*.pem
+
+# 대용량 미디어·부가 자료 (저장소에 올리지 않는다)
+*.mp4
+*.mov
+*.xlsx
+demo-video-maker/
+
+# 에디터·OS
+.DS_Store
+.idea/
+.vscode/

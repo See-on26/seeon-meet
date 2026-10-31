@@ -1,0 +1,15 @@
+[Unit]
+Description=seeon EMBED (SigLIP 이미지 임베딩 — Stage 1 슬라이드 전환 확정)
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+User=@GPU_USER@
+Environment=HOME=/home/@GPU_USER@
+WorkingDirectory=/home/@GPU_USER@/gpu-server
+ExecStart=/home/@GPU_USER@/venv-embed/bin/uvicorn embed_server:app --host 127.0.0.1 --port 8804
+Restart=always
+RestartSec=5
+
+[Install]
+WantedBy=multi-user.target

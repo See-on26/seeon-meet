@@ -1,0 +1,39 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+  <meta charset="UTF-8" />
+  <title>seeon</title>
+  <style>
+    :root {
+      color-scheme: light; font-family: -apple-system, "Segoe UI", "Apple SD Gothic Neo", "Malgun Gothic", sans-serif;
+      --primary: #0066cc; --primary-soft: #e8f1fd; --ink: #1d1d1f; --ink-60: #6e6e73; --line: #d2d2d7;
+    }
+    html, body { margin: 0; height: 100%; background: #ffffff; color: var(--ink); font-size: 14px; }
+    body { display: flex; flex-direction: column; }
+    header { padding: 16px 20px 8px; }
+    h1 { margin: 0; font-size: 17px; font-weight: 600; }
+    #list { flex: 1; overflow-y: auto; padding: 0 20px 12px; }
+    h2 { margin: 16px 0 8px; font-size: 13px; font-weight: 600; color: var(--ink-60); }
+    .grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(200px, 1fr)); gap: 12px; }
+    .item {
+      display: flex; flex-direction: column; gap: 6px; padding: 8px; border: 1px solid var(--line); border-radius: 10px;
+      background: #ffffff; color: var(--ink); font: inherit; text-align: left; cursor: pointer;
+    }
+    .item:hover { background: var(--primary-soft); }
+    .item:focus-visible { outline: 3px solid var(--primary); outline-offset: 2px; }
+    .item img { width: 100%; aspect-ratio: 16 / 9; object-fit: contain; background: #f2f2f7; border-radius: 6px; }
+    .name { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+    footer { display: flex; justify-content: flex-end; padding: 12px 20px; border-top: 1px solid var(--line); }
+    #cancelBtn {
+      padding: 6px 16px; border: 1px solid var(--line); border-radius: 8px; background: #ffffff; color: var(--ink); font: inherit; cursor: pointer;
+    }
+    #cancelBtn:focus-visible { outline: 3px solid var(--primary); outline-offset: 2px; }
+  </style>
+</head>
+<body>
+  <header><h1 id="heading"></h1></header>
+  <main id="list"></main>
+  <footer><button type="button" id="cancelBtn"></button></footer>
+  <script type="module" src="./picker.js"></script>
+</body>
+</html>
