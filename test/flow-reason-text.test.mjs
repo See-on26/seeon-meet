@@ -58,7 +58,8 @@ test('후보마다 판단 기록이 없는 막힘은 그 단계의 사유를 그
 test('버려진 이유 코드는 흐름 창에서 문장으로 보인다(기록 파일의 코드값은 그대로)', () => {
   assert.equal(describeOutcomeReason('expired'), QUEUE_DROP_LABEL_MAP.expired);
   assert.equal(describeOutcomeReason('stale'), QUEUE_DROP_LABEL_MAP.stale);
-  assert.equal(describeOutcomeReason('rate-limited'), '비슷한 해설이 방금 나가 간격 억제');
+  // 간격 억제는 내용이 비슷해서가 아니라 직전 해설과 시간이 가까워 막힌 것이다(내용이 비슷한 것은 duplicate).
+  assert.equal(describeOutcomeReason('rate-limited'), '간격 규칙: 직전 해설과 너무 가까움');
   assert.equal(describeOutcomeReason('not_played'), '끝날 때까지 재생되지 않음');
   assert.equal(describeOutcomeReason('feature_off'), '기능 꺼짐 — 내보내지 않음');
   assert.equal(describeOutcomeReason('no_audio'), 'TTS 합성 실패 — 소리 없음');

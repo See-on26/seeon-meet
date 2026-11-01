@@ -81,6 +81,14 @@ test('무발화 해설은 페이지 전환 고지·화면 변화 해설 뒤 12�
   assert.equal(resolveMinIntervalMs({ rule, hasPointingRegion: true }), 12000);
 });
 
+// "방금 그 화면을 말했다"는 규칙이라, 슬라이드가 막 바뀐 뒤의 무발화 해설을 앞 슬라이드의 고지·변화 해설이 막지 않게 한다.
+test('무발화 행만 같은 슬라이드의 막는 해설만 센다', () => {
+  for (const narrationClass of CLASS_LIST) {
+    const rule = findBlockingRule({ narrationClass });
+    assert.equal(Boolean(rule?.isSameSlideOnly), narrationClass === silenceBased, narrationClass);
+  }
+});
+
 test('발화 기반 해설은 무발화·발화 기반 해설에만 막히고 지시 해설에는 막히지 않는다', () => {
   const rule = findBlockingRule({ narrationClass: speechBased });
   assert.deepEqual([...rule.blockedByClassList].sort(), [silenceBased, speechBased].sort());

@@ -1,5 +1,6 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
+import fs from 'node:fs';
 import { createRequire } from 'node:module';
 
 const require = createRequire(import.meta.url);
@@ -12,8 +13,8 @@ const {
 
 function createHistoryWith(entryList) {
   const history = createNarrationHistory();
-  entryList.forEach(({ text, narrationClass, ts, source = 'deixis' }) => {
-    history.remember({ text, source, ts, narrationClass });
+  entryList.forEach(({ text, narrationClass, ts, source = 'deixis', slideLabel = null }) => {
+    history.remember({ text, source, ts, narrationClass, slideLabel });
   });
   return history;
 }
@@ -243,4 +244,147 @@ test('화면 변화 강조 해설은 다른 항목이 강조되면 중복이 아
   assert.equal(history.findDuplicate({
     text: '강조 표시, 보기 3번', source: 'screen_change', slotMap: { target: '보기 3번' }, slideLabel: '4',
   }).isDuplicate, true);
+});
+
+test('무발화 해설은 다른 슬라이드의 화면 변화·전환 고지에는 막히지 않고, 같은 슬라이드면 지금처럼 막힌다', () => {
+  for (const blockerClass of [screenChange, pageTransition]) {
+    const history = createHistoryWith([{
+      text: '새로 표시, 규칙 2', narrationClass: blockerClass, ts: 0, source: 'screen_change', slideLabel: '3',
+    }]);
+    const otherSlide = history.findRateLimited({ narrationClass: silenceBased, ts: 6000, slideLabel: '4' });
+    assert.equal(otherSlide.isRateLimited, false, blockerClass);
+    assert.equal(otherSlide.blockedByClass, null, blockerClass);
+    const sameSlide = history.findRateLimited({ narrationClass: silenceBased, ts: 6000, slideLabel: '3' });
+    assert.equal(sameSlide.isRateLimited, true, blockerClass);
+    assert.equal(sameSlide.blockedByClass, blockerClass);
+  }
+});
+
+test('같은 슬라이드인지는 큰 번호로 견준다(3-2 는 3 과 같은 화면이다)', () => {
+  const history = createHistoryWith([{
+    text: '새로 표시, 규칙 2', narrationClass: screenChange, ts: 0, source: 'screen_change', slideLabel: '3-2',
+  }]);
+  assert.equal(history.findRateLimited({ narrationClass: silenceBased, ts: 6000, slideLabel: '3' }).isRateLimited, true);
+  assert.equal(history.findRateLimited({ narrationClass: silenceBased, ts: 6000, slideLabel: '4-1' }).isRateLimited, false);
+});
+
+test('다른 슬라이드의 뒤 해설이 아니라 같은 슬라이드의 해설을 기준으로 잰다', () => {
+  const history = createHistoryWith([
+    { text: '슬라이드 4: 카드 네 장', narrationClass: pageTransition, ts: 0, source: 'page-transition', slideLabel: '4' },
+    { text: '새로 표시, 규칙 2', narrationClass: screenChange, ts: 5000, source: 'screen_change', slideLabel: '3' },
+  ]);
+  const rate = history.findRateLimited({ narrationClass: silenceBased, ts: 8000, slideLabel: '4' });
+  assert.equal(rate.isRateLimited, true);
+  assert.equal(rate.blockedByClass, pageTransition);
+  assert.equal(rate.sinceMs, 8000);
+});
+
+test('슬라이드를 모르면(들어온 해설이나 기록 쪽이 null) 지금처럼 슬라이드와 관계없이 센다', () => {
+  const unknownEntry = createHistoryWith([{ text: '새로 표시, 규칙 2', narrationClass: screenChange, ts: 0, source: 'screen_change' }]);
+  assert.equal(unknownEntry.findRateLimited({ narrationClass: silenceBased, ts: 6000, slideLabel: '4' }).isRateLimited, true);
+  const known = createHistoryWith([{
+    text: '새로 표시, 규칙 2', narrationClass: screenChange, ts: 0, source: 'screen_change', slideLabel: '3',
+  }]);
+  assert.equal(known.findRateLimited({ narrationClass: silenceBased, ts: 6000 }).isRateLimited, true);
+});
+
+test('같은 슬라이드 한정은 무발화 행에만 적용된다 — 지시·발화 기반·화면 변화 간격은 슬라이드와 관계없다', () => {
+  const history = createHistoryWith([
+    { text: '73%는 작년 대비 성장률', narrationClass: speechBased, ts: 0, source: 'interpretation', slideLabel: '3' },
+    { text: '새로 표시, 정답 3번', narrationClass: screenChange, ts: 0, source: 'screen_change', slideLabel: '3' },
+  ]);
+  assert.equal(history.findRateLimited({ narrationClass: deixis, ts: 5000, slideLabel: '4' }).isRateLimited, true);
+  assert.equal(history.findRateLimited({ narrationClass: speechBased, ts: 5000, slideLabel: '4' }).isRateLimited, true);
+  assert.equal(history.findRateLimited({ narrationClass: screenChange, ts: 5000, slideLabel: '4' }).isRateLimited, true);
+});
+
+test('간격 억제는 막은 해설의 문장도 돌려준다', () => {
+  const history = createHistoryWith([{
+    text: '새로 표시, 규칙 2', narrationClass: screenChange, ts: 0, source: 'screen_change', slideLabel: '3',
+  }]);
+  const rate = history.findRateLimited({ narrationClass: silenceBased, ts: 6000, slideLabel: '3' });
+  assert.equal(rate.blockedByText, '새로 표시, 규칙 2');
+  assert.equal(createNarrationHistory().findRateLimited({ narrationClass: silenceBased, ts: 6000 }).blockedByText, '');
+  assert.equal(createNarrationHistory().findRateLimited({ narrationClass: pageTransition, ts: 6000 }).blockedByText, '');
+});
+
+test('중복 억제는 일치한 앞 해설의 분류·출처·시각을 함께 돌려준다(같은 문장·비슷한 문장·같은 대상)', () => {
+  const history = createNarrationHistory();
+  history.remember({
+    text: 'A, 3, J, 4가 적힌 카드 4장', source: 'deixis', ts: 1000, narrationClass: deixis, slideLabel: '4',
+    slotMap: { caption: 'A 3 J 4 카드' },
+  });
+  const exact = history.findDuplicate({ text: 'A, 3, J, 4가 적힌 카드 4장', source: 'visual_description', slideLabel: '4' });
+  assert.equal(exact.reason, 'exact');
+  assert.deepEqual([exact.matchedClass, exact.matchedSource, exact.matchedTs], [deixis, 'deixis', 1000]);
+  const similar = history.findDuplicate({ text: '이미지 제시, A, 3, J, 4가 적힌 카드 4장', source: 'visual_description', slideLabel: '4' });
+  assert.equal(similar.reason, 'similar');
+  assert.deepEqual([similar.matchedClass, similar.matchedSource, similar.matchedTs], [deixis, 'deixis', 1000]);
+  const sameTarget = history.findDuplicate({
+    text: '네 장 모두 앞면', source: 'deixis', slideLabel: '4', slotMap: { caption: 'A 3 J 4 카드 앞면' },
+  });
+  assert.equal(sameTarget.reason, 'same-target');
+  assert.deepEqual([sameTarget.matchedClass, sameTarget.matchedSource, sameTarget.matchedTs], [deixis, 'deixis', 1000]);
+  const none = createNarrationHistory().findDuplicate({ text: '새 해설', source: 'deixis' });
+  assert.deepEqual([none.isDuplicate, none.matchedClass, none.matchedSource, none.matchedTs], [false, null, '', null]);
+});
+
+// 기능이 꺼진 해설은 sendCaption 이 기록 전에 끝낸다. 그래서 기억하지 않은 전환 고지는 무발화 해설을 막지 않는다.
+test('기능 꺼짐으로 기억하지 않은 전환 고지는 같은 슬라이드의 무발화 해설을 막지 않는다', () => {
+  const offHistory = createNarrationHistory();
+  const silenceRate = offHistory.findRateLimited({ narrationClass: silenceBased, ts: 18000, slideLabel: '4' });
+  assert.equal(silenceRate.isRateLimited, false);
+  assert.equal(silenceRate.blockedByClass, null);
+  assert.equal(offHistory.findDuplicate({
+    text: '이미지 제시, 카드 네 장', source: 'visual_description', slideLabel: '4',
+  }).isDuplicate, false);
+  // 켜져 있어 기억했다면 같은 조건에서 막힌다(대조).
+  const onHistory = createHistoryWith([{
+    text: '슬라이드 4: 카드 네 장', narrationClass: pageTransition, ts: 10000, source: 'page-transition', slideLabel: '4',
+  }]);
+  assert.equal(onHistory.findRateLimited({ narrationClass: silenceBased, ts: 18000, slideLabel: '4' }).isRateLimited, true);
+});
+
+const readPipelineSource = () => fs.readFileSync(new URL('../src/main/caption-pipeline/index.js', import.meta.url), 'utf8');
+
+function readSendCaptionBody() {
+  const source = readPipelineSource();
+  const start = source.indexOf('async function sendCaption(');
+  assert.ok(start >= 0, 'sendCaption');
+  return source.slice(start, source.indexOf('\n  }\n', start));
+}
+
+test('sendCaption 은 기능 꺼짐이면 중복·간격 기록(narrationHistory.remember) 전에 끝낸다', () => {
+  const body = readSendCaptionBody();
+  const gateAt = body.indexOf('if (!featureGate.isEnabled(resolvedClass)) {');
+  const featureOffReturnAt = body.indexOf("return { isEmitted: false, reason: 'feature_off' };");
+  const rememberAt = body.indexOf('narrationHistory.remember(');
+  assert.ok(gateAt >= 0 && featureOffReturnAt > gateAt, '기능 꺼짐 갈래');
+  assert.ok(rememberAt > featureOffReturnAt, '기록은 기능 꺼짐 return 뒤');
+  assert.equal(body.slice(gateAt, featureOffReturnAt).includes('narrationHistory.remember'), false);
+  assert.equal(body.split('narrationHistory.remember(').length - 1, 1, '기록하는 곳은 하나뿐');
+});
+
+test('sendCaption 은 무발화 간격 검사에 슬라이드를 넘기고, 막은 해설의 분류·문장을 로그와 기록에 남긴다', () => {
+  const body = readSendCaptionBody();
+  assert.match(body, /narrationHistory\.findRateLimited\(\{ narrationClass: resolvedClass, ts, hasPointingRegion, slideLabel \}\)/);
+  assert.match(body, /blockedByText: rate\.blockedByText/);
+  assert.match(body, /matchedClass: duplicate\.matchedClass, matchedSource: duplicate\.matchedSource/);
+  assert.match(body, /≈ 기존 \[\$\{matchedLabel\}\] "\$\{duplicate\.matchedText\}"/);
+  assert.match(body, /직전 \$\{blockedByLabel\} 해설 "\$\{rate\.blockedByText\}"/);
+});
+
+test('기능 꺼짐인 전환 고지는 슬라이드별로 적어 두고, 무발화 디버그에 셈하지 않았다고 알리며, 세션 시작 때 비운다', () => {
+  const source = readPipelineSource();
+  const body = readSendCaptionBody();
+  const gateAt = body.indexOf('if (!featureGate.isEnabled(resolvedClass)) {');
+  const featureOffReturnAt = body.indexOf("return { isEmitted: false, reason: 'feature_off' };");
+  assert.match(body.slice(gateAt, featureOffReturnAt),
+    /if \(resolvedClass === NARRATION_CLASS_MAP\.pageTransition && slideLabel != null\) \{\n\s*featureOffTransitionBySlideMap\.set\(toMajorSlideKey\(slideLabel\), text\);/);
+  const sessionStart = source.slice(source.indexOf("ipcMain.handle('pipeline-session-start'"));
+  assert.match(sessionStart.slice(0, sessionStart.indexOf('\n  });\n')), /featureOffTransitionBySlideMap\.clear\(\);/);
+  const silenceHandler = source.slice(source.indexOf("ipcMain.handle('pipeline-silence'"));
+  const silenceBody = silenceHandler.slice(0, silenceHandler.indexOf('\n  });\n'));
+  assert.match(silenceBody, /featureOffTransitionBySlideMap\.get\(toMajorSlideKey\(slideLabel\)\)/);
+  assert.match(silenceBody, /기능 꺼짐이라 내보내지 않아 중복·간격 검사에서 셈하지 않음/);
 });

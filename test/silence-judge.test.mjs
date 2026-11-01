@@ -97,3 +97,22 @@ test('단서는 침묵 바로 앞 마지막 문장에 있어야 한다 — 보�
   const movedOnExample = SILENCE_FEW_SHOT_LIST.find((example) => /보시죠/.test(example.input.transcript) && !example.output.cue);
   assert.ok(movedOnExample);
 });
+
+// 실시간 무음 임계는 평가 정의(5초)보다 짧다. 지시문이 "5초 이상"이라 적으면 더 짧은 침묵을 의심해 차단한다.
+test('무발화 판정 지시문은 침묵 길이를 못 박지 않고 입력의 길이를 보게 한다', () => {
+  assert.doesNotMatch(SILENCE_JUDGE_SYSTEM_PROMPT, /5초 이상/);
+  assert.match(SILENCE_JUDGE_SYSTEM_PROMPT, /길이는 입력에 있다/);
+});
+
+// "자, 여기 ~이 있습니다"처럼 방금 띄운 자료를 소개하고 멈추면 보라는 말이 없어도 그 자료를 보라는 뜻이다.
+test('방금 화면에 띄운 자료를 소개하는 말로 끝나고 멈추면 단서로 본다 — 지시문 줄과 통과 예시가 있다', () => {
+  assert.match(SILENCE_JUDGE_SYSTEM_PROMPT, /방금 화면에 띄운 자료를 소개하는 말로 끝나고 멈췄으면/);
+  assert.match(SILENCE_JUDGE_SYSTEM_PROMPT, /말로 다 전한 문장/);
+  const introducedList = SILENCE_FEW_SHOT_LIST.filter((example) => example.output.cue
+    && /여기 .*있습니다\.$/.test(example.input.transcript) && !/보(시|세|자)/.test(example.input.transcript));
+  assert.equal(introducedList.length, 1);
+  assert.equal(introducedList[0].output.reason, SILENCE_REASON_MAP.presenting);
+  assert.ok(introducedList[0].input.silenceMs < 5000, '실시간 임계 근처의 짧은 침묵');
+  // 시연 영상의 문장을 그대로 예시로 쓰지 않는다.
+  for (const example of SILENCE_FEW_SHOT_LIST) assert.doesNotMatch(example.input.transcript, /카드|이런 규칙이 있어요/);
+});
