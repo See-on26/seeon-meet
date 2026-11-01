@@ -34,7 +34,8 @@ function buildQaHistoryLineList({ qaList }) {
   return [
     '',
     ...(earlierText ? ['그 전 질문과 답 (오래된 것부터):', earlierText, ''] : []),
-    '직전 질문과 답 (되묻는 질문이면 직전 대상 슬라이드를 그대로 쓴다):',
+    '직전 질문과 답 (대상을 생략하고 되묻는 질문이면 — 예: "그럼 두 번째는?" — 직전 대상 슬라이드를 그대로 쓴다.'
+      + ' 질문에 새 대상이 나오면 색인과 현재 슬라이드에서 다시 찾는다):',
     `질문: ${lastQa.question}`,
     `답: ${lastQa.answer}`,
     `대상 슬라이드: ${formatTargetSlide({ qa: lastQa })}`,
@@ -77,6 +78,14 @@ function parseRouterResponse({ text, index }) {
   return { route: parsed.route, slideMajorList };
 }
 
+// 지나간 슬라이드를 고른 질문도 지금 듣는 슬라이드의 대상일 수 있다(앞 질문에 끌려 되묻기로 본 경우).
+// 지금 슬라이드를 함께 넣어 두면 답 재료에서 맞는 쪽을 찾는다.
+function withCurrentSlide({ parsed, currentSlideMajor }) {
+  if (parsed.route !== QUESTION_ROUTE_MAP.pastSlide || currentSlideMajor === null || currentSlideMajor === undefined) return parsed;
+  if (parsed.slideMajorList.includes(currentSlideMajor) || parsed.slideMajorList.length >= MAX_TARGET_SLIDE_COUNT) return parsed;
+  return { ...parsed, slideMajorList: [...parsed.slideMajorList, currentSlideMajor] };
+}
+
 function createQuestionRouter({ requestText }) {
   async function route(args) {
     // 라우터가 실패하면 지금 화면으로 답한다. 이 기능 이전의 동작과 같다.
@@ -92,7 +101,9 @@ function createQuestionRouter({ requestText }) {
         prompt: buildRouterPrompt(args), label: AGENT_LABEL, maxTokens: ROUTER_MAX_TOKENS,
       });
       const parsed = parseRouterResponse({ text, index: args.index });
-      return parsed ? { ...parsed, source: 'llm', reason: '' } : fallback(`해석 실패: ${String(text).slice(0, 60)}`);
+      return parsed
+        ? { ...withCurrentSlide({ parsed, currentSlideMajor: args.currentSlideMajor }), source: 'llm', reason: '' }
+        : fallback(`해석 실패: ${String(text).slice(0, 60)}`);
     } catch (error) {
       return fallback(error.message);
     }
