@@ -68,8 +68,17 @@ test('고유어로 바꾸지 않을 것: 100 이상·0·앞자리 0·개월·개
 test('글자 목록 속 숫자는 세는 말이 아니고, 뒤의 "카드 4장"만 고유어가 된다', () => {
   assert.equal(
     normalizeKoreanSpeechText('A, 3, J, 4가 적힌 분홍색 카드 4장이 있습니다.'),
-    'A, 삼, J, 사가 적힌 분홍색 카드 네 장이 있습니다.',
+    '에이, 삼, 제이, 사가 적힌 분홍색 카드 네 장이 있습니다.',
   );
+});
+
+// Ming 은 낱자 영문이 섞인 문장에서 끝맺지 못하고 웅얼거리는 일이 잦았다("A, 삼, J, 사가 적힌 카드 네 장"은 출발 값 8개 모두 첫 시도가 깨짐).
+test('낱자로 떨어진 영문자는 한글 이름으로 읽고, 단어형 약어·영문·숫자에 붙은 글자는 그대로 둔다', () => {
+  assert.equal(normalizeKoreanSpeechText('A사와 B사의 점유율'), '에이사와 비사의 점유율');
+  assert.equal(normalizeKoreanSpeechText('보기 X, Y, Z 가운데'), '보기 엑스, 와이, 제트 가운데');
+  for (const text of ['GPU 서버', 'Q3 매출', 'A100 서버', '5G 통신', 'e-mail 주소', 'AT&T']) {
+    assert.equal(normalizeKoreanSpeechText(text), text, text);
+  }
 });
 
 test('단위는 한자어 수 + 단위 말로 읽고, 단위 뒤 조사는 받침에 맞춘다', () => {
@@ -170,5 +179,6 @@ test('TTS 요청: 기호 읽기(달러)를 거친 뒤 숫자를 읽는다', asyn
   const bodyList = mockFetch();
   const client = createTtsClient({ config: { ttsUrl: 'http://tts', ttsLongUrl: 'http://tts-long' } });
   await client.synthesize({ text: 'Q&A = $30', language: 'ko' });
-  assert.equal(bodyList[0].text, 'Q앤드A 는 삼십달러');
+  // 기호 읽기로 "Q앤드A"가 된 뒤 낱자 영문도 한글 이름으로 읽는다.
+  assert.equal(bodyList[0].text, '큐앤드에이 는 삼십달러');
 });
