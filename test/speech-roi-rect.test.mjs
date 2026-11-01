@@ -102,7 +102,9 @@ test('가리킴과 발화: 합친 상자가 최대를 넘으면 발화 상자 S 
   const result = buildZoomRect({ targetList: speechTarget, pointingRect: { x: 0.5, y: 0.5, w: 0.45, h: 0.45 } });
   assert.equal(result.zoomKind, ZOOM_KIND_MAP.speech);
   assert.equal(result.pointingConflict, false);
+  assert.equal(result.isPointingMergeTooLarge, true, '지시 해설은 이때 가리킨 대상을 둘째 장으로 쓸 수 있게 알린다');
   nearRect(result.rect, { x: 0.3, y: 0.3, w: 0.4, h: 0.4 });
+  assert.ok(!buildZoomRect({ targetList: speechTarget, pointingRect: { x: 0.4, y: 0.4, w: 0.3, h: 0.3 } }).isPointingMergeTooLarge);
 });
 
 test('가리킴과 발화: 떨어져 있으면 발화 쪽 S 를 쓰고 충돌로 남긴다', () => {

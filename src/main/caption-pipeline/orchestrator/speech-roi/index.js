@@ -202,7 +202,10 @@ function createSpeechRoiResolver({ config, tokenizer = null, layoutStore = null,
     let zoomJpegBuffer = outcome.zoomJpegBuffer ?? null;
     let zoomKind = zoomJpegBuffer ? outcome.zoomKind : null;
     // 가리킴만 있는 지시 해설: 확대만 보내면 문맥을 잃었으므로 [전체, 가리킴] 두 장으로 준다. 수치·척도는 지금처럼 전체 한 장.
-    const isPointingPair = !zoomJpegBuffer && isEligible && outcome.status !== SPEECH_ROI_STATUS_MAP.error
+    // 가리킨 곳과 이름 라벨이 한 확대 상자에 함께 들지 않을 때도 가리킨 대상을 둘째 장으로 준다. 라벨 줄만 키우면
+    // 가리킨 그림(포장 위 상품명 등)이 빠지고, 라벨은 첫째 장(화면 전체)에 남는다.
+    const isPointingPreferred = Boolean(zoomJpegBuffer) && Boolean(outcome.zoom?.isPointingMergeTooLarge);
+    const isPointingPair = (!zoomJpegBuffer || isPointingPreferred) && isEligible && outcome.status !== SPEECH_ROI_STATUS_MAP.error
       && narrationType === NARRATION_TYPE_MAP.deixis && Boolean(config.isSpeechRoiPointingPairEnabled)
       && Boolean(regionFrame) && Boolean(validPointingRect);
     if (isPointingPair) {

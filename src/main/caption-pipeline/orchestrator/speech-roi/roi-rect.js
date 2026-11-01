@@ -118,7 +118,8 @@ function buildZoomRect({ targetList = [], pointingRect = null, ambiguity = null 
   // 떨어져 있으면 이름을 말한 라벨 쪽이 더 구체적이다. 화소 차 가리킴은 웹캠·커서를 잡은 일이 있었다.
   if (!isNear) return { ...base, pointingConflict: true };
   const merged = fitZoomSquare(unionRect([speech.rect, pointingRect]));
-  return merged.isTooLarge ? base : { ...base, rect: merged.rect, zoomKind: ZOOM_KIND_MAP.merged };
+  // 가까운데도 한 상자에 함께 들지 않으면 라벨 쪽만 키운다. 지시 해설은 이 표시로 가리킨 대상을 둘째 장으로 바꿔 쓸 수 있다.
+  return merged.isTooLarge ? { ...base, isPointingMergeTooLarge: true } : { ...base, rect: merged.rect, zoomKind: ZOOM_KIND_MAP.merged };
 }
 
 module.exports = {
