@@ -68,6 +68,15 @@ function toLineKey(text) {
 }
 
 // 슬라이드 글자 뒤에 줄을 덧붙인다. 띄어쓰기·문장부호를 뺀 글이 이미 들어 있는 줄은 넣지 않는다.
+// 두 글자 이하 영문·숫자만 늘어선 줄("A B C D", "1 | 2 | 3")은 그림 아래 위치 표지다. 뒤 장면이 미리 잡힌 기준 화면에서 오면
+// 앞 슬라이드 글자에 붙어 질문 답이 표지를 내용으로 읽으므로 덧붙이지 않는다. 한글 두 글자 낱말("참가 규칙")은 내용이라 둔다.
+const SHORT_LABEL_TOKEN_PATTERN = /^[A-Za-z0-9]{1,2}$/;
+
+function isShortLabelLine(line) {
+  const tokenList = line.split(/[\s|·,/]+/).filter(Boolean);
+  return tokenList.length > 0 && tokenList.every((token) => SHORT_LABEL_TOKEN_PATTERN.test(token));
+}
+
 function mergeSlideTextLines({ text, lineList }) {
   let merged = text;
   let mergedKey = toLineKey(text);
@@ -75,7 +84,7 @@ function mergeSlideTextLines({ text, lineList }) {
   for (const rawLine of lineList) {
     const line = typeof rawLine === 'string' ? rawLine.trim() : '';
     const key = toLineKey(line);
-    if (!key || mergedKey.includes(key)) continue;
+    if (!key || mergedKey.includes(key) || isShortLabelLine(line)) continue;
     merged = merged ? `${merged}\n${line}` : line;
     mergedKey += key;
     addedLineList.push(line);

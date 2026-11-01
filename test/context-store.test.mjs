@@ -283,6 +283,18 @@ test('화면 글자 보강: 새 줄을 덧붙이고, 이미 있는 줄(띄어쓰
   assert.equal(store.appendSlideTextLines({ slideLabel: 'x', lineList: ['a'] }), 0);
 });
 
+// 다음 장면의 그림 아래 위치 표지("A B C D")만 있는 줄이 앞 슬라이드 글자에 붙으면, 질문 답이 그 표지를 내용으로 읽는다.
+test('화면 글자 보강: 짧은 표지만 늘어선 줄("A B C D", "1 | 2 | 3")은 덧붙이지 않는다', () => {
+  const store = createContextStore();
+  store.applyRecord(baseMark({ ts: 0, slideLabel: '3' }));
+  store.applySlideText({ slideLabel: '3', status: 'ready', text: '규칙\n1. 신청서는 금요일까지 낸다' });
+  const addedCount = store.appendSlideTextLines({
+    slideLabel: '3', lineList: ['A B C D', '1 | 2 | 3', '2. 늦게 낸 신청서는 다음 달로 넘긴다', 'Q3 실적'],
+  });
+  assert.equal(addedCount, 2);
+  assert.equal(store.getSlide(3).slideText, '규칙\n1. 신청서는 금요일까지 낸다\n2. 늦게 낸 신청서는 다음 달로 넘긴다\nQ3 실적');
+});
+
 test('화면 글자 보강: 전사보다 새 줄이 먼저 와도 전사가 끝나면 전사 글 뒤에 남는다', () => {
   const store = createContextStore();
   store.applyRecord(baseMark({ ts: 0, slideLabel: '3' }));
