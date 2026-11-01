@@ -2,6 +2,7 @@ const { USER_COMMAND_MAP } = require('../contracts/narration-types');
 const { GROUNDING_NONE_TOKEN, computeMaxChars } = require('../agents/shared/caption-parser');
 const { buildQaHistoryLineList } = require('./question-answer');
 const { buildAnswerLengthRule } = require('./answer-length-rule');
+const { buildAnswerFidelityRuleList } = require('./answer-fidelity-rule');
 const { DEFAULT_CAPTION_LANGUAGE } = require('../contracts/caption-language');
 const { buildOutputLanguageRuleList } = require('./output-language-rule');
 
@@ -64,11 +65,12 @@ function buildFreeQuestionPrompt({ questionText,
     ...buildQaHistoryLineList({ qaHistoryText }),
     '',
     '규칙:',
-    '(1) 화면에 실제로 보이는 것에 근거해 답한다. 지어내지 않는다.',
+    '(1) 화면과 위 기록(발표자의 말 포함)에 근거해 답한다. 지어내지 않는다.',
     `(2) 화면에서 질문의 답을 찾을 수 없거나, 회의·화면과 관계없는 질문(정치·날씨·일반 상식·개인 의견 등)이면 정확히 "${GROUNDING_NONE_TOKEN}"만 출력한다.`,
     `(3) ${buildAnswerLengthRule({ minWordCount, maxWordCount, maxChars: effectiveMaxChars })}`,
-    '(4) 머리말·인사말 없이 답만 출력한다.',
-    '(5) 이미 안내했던 내용이라도 **다시 답한다** — 사용자가 직접 물었기 때문이다.',
+    ...buildAnswerFidelityRuleList({ number: 4 }),
+    '(5) 머리말·인사말 없이 답만 출력한다.',
+    '(6) 이미 안내했던 내용이라도 **다시 답한다** — 사용자가 직접 물었기 때문이다.',
     ...buildOutputLanguageRuleList({ language }),
   ].filter(Boolean).join('\n');
 }
