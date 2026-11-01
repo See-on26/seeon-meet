@@ -79,6 +79,7 @@ import {
 import { judgeScreenDependency, SCREEN_DEPENDENCY_REASON_MAP } from '../core/trigger/screen-dependency.js';
 import { PointingLocator, describeDirection } from '../core/trigger/pointing-locator.js';
 import { createRecentPointingMemory } from '../core/trigger/recent-pointing.js';
+import { createAppearanceTracker, pickDeixisRegion, DEIXIS_REGION_SOURCE_MAP } from '../core/trigger/appeared-region.js';
 import { createPointingMotionTracker } from '../core/trigger/pointing-motion-tracker.js';
 import { SlideHistogramGate } from '../core/trigger/slide-histogram-gate.js';
 import { createScreenChangeDetector } from '../core/trigger/screen-change-detector.js';
@@ -622,6 +623,8 @@ let deixisFrameSeq = 0;
 
 const pointingLocator = new PointingLocator({ rowCount: 18, colCount: 32, cellChangeThreshold: 4 });
 const recentPointingMemory = createRecentPointingMemory();
+// 가리킴 없이 붙여 넣거나 끌어다 놓은 그림·글 영역(화면의 10~50%)을 직전 정지 화면과 견줘 잠시 기억한다.
+const appearanceTracker = createAppearanceTracker();
 const pointingMotionTracker = createPointingMotionTracker();
 
 const LOCAL_EMBED_MATCH_THRESHOLD = 0.02;
@@ -707,12 +710,10 @@ function getFrameRegionPx() {
   return screen ? normRectToPx(screen, vw, vh) : null;
 }
 
+// 자를 곳은 main 에 보내는 비율 상자와 같은 여백이다(방금 나타난 그림 영역은 여백이 작다).
 function narrowToPointingRegion(frame, sub) {
-  const x0 = Math.max(0, sub.x - POINTING_CROP_MARGIN);
-  const y0 = Math.max(0, sub.y - POINTING_CROP_MARGIN);
-  const x1 = Math.min(1, sub.x + sub.w + POINTING_CROP_MARGIN);
-  const y1 = Math.min(1, sub.y + sub.h + POINTING_CROP_MARGIN);
-  return { x: frame.x + x0 * frame.w, y: frame.y + y0 * frame.h, w: (x1 - x0) * frame.w, h: (y1 - y0) * frame.h };
+  const rect = toPointingRect({ subRegion: sub, margin: POINTING_CROP_MARGIN });
+  return { x: frame.x + rect.x * frame.w, y: frame.y + rect.y * frame.h, w: rect.w * frame.w, h: rect.h * frame.h };
 }
 
 async function captureFrameJpeg() {
@@ -771,6 +772,7 @@ function syncRoiGeneration({ ts }) {
   histogramGate.reset();
   pointingLocator.reset();
   recentPointingMemory.reset();
+  appearanceTracker.reset();
   pointingMotionTracker.reset();
   screenChangeDetector?.reset();
   lastPointingMotionAt = -Infinity;
@@ -800,6 +802,7 @@ function samplePointingFrame() {
     0, 0, POINTING_SAMPLE_WIDTH, POINTING_SAMPLE_HEIGHT);
   const imageData = context.getImageData(0, 0, POINTING_SAMPLE_WIDTH, POINTING_SAMPLE_HEIGHT);
   pointingLocator.sample({ imageData, ts });
+  appearanceTracker.sample({ imageData, ts, excludedCellMask: pointingLocator.findConstantChangeCells({ nowTs: ts }) });
   detectSlideTransition({ imageData, ts });
   attachPointingMotion();
   sampleScreenChange({ imageData, ts });
@@ -842,6 +845,7 @@ function sampleScreenChange({ imageData, ts }) {
       .catch((error) => console.warn('[screen-change] 기준 화면 전송 오류', error));
   }
   if (result.event) {
+    rememberAppearance({ slideLabel });
     reportScreenChange({ event: result.event, slideLabel })
       .catch((error) => console.warn('[screen-change] 변화 전송 오류', error));
   }
@@ -947,6 +951,9 @@ async function confirmSlideCandidate({ isFirst, imageData }) {
   const decision = slideRegistry.handleCandidate(isRemoteEmbedding
     ? { embedding }
     : { embedding, matchThreshold: LOCAL_EMBED_MATCH_THRESHOLD });
+  // 그림을 붙여 넣은 정도의 변화는 같은 슬라이드로도, 새 슬라이드로도 판정된다. 어느 쪽이든 늘 변하는 칸 기록을 비우기 전에
+  // 직전 정지 화면과 견줘 방금 나타난 그림 영역을 기억한다(슬라이드 전체가 바뀌었으면 기억하지 않는다).
+  rememberAppearance({ slideLabel: decision.label });
   const distance = decision.distance.toFixed(3);
   const source = isRemoteEmbedding ? 'gpu' : 'local';
   if (decision.isSameSlide) {
@@ -1202,18 +1209,39 @@ const deixisDetector = new DeixisDetector({
   },
 });
 
+const formatRegionRatio = (rect) => `(${rect.x.toFixed(2)},${rect.y.toFixed(2)} ${rect.w.toFixed(2)}×${rect.h.toFixed(2)})`;
+
+// 전환 후보 판정·같은 슬라이드 화면 변화 때 부른다. 화면의 10~50% 가 새로 나타났으면 그 영역을 잠시 기억한다.
+function rememberAppearance({ slideLabel }) {
+  const rect = appearanceTracker.capture({ slideLabel, wallTs: Date.now(), nowTs: performance.now() });
+  if (rect) console.log(`[deixis] 🖼 방금 나타난 그림 영역 기억 ${formatRegionRatio(rect)} 슬라이드=${slideLabel || '-'}`);
+}
+
 // 직전 창에 영역이 없으면, 트리거 발화보다 앞서 같은 슬라이드에서 가리킨 영역을 붙인다(말하면서 가리킨 경우).
+// 가리킨 기억도 없으면 트리거 발화 즈음 같은 슬라이드에 방금 나타난 그림 영역을 붙인다(붙여 넣으며 "이거"라고 한 경우).
 function resolveDeixisPointing({ eventWallTs, trigger }) {
-  const sequence = getPointingSequence();
-  if (sequence.region) return sequence;
-  const recalled = recentPointingMemory.recall({ eventWallTs, slideLabel: slideRegistry.currentLabel() });
-  if (!recalled) return sequence;
-  console.log(`[deixis] ✍ 직전 창에 영역 없음 → 발화 전 가리킨 영역을 붙임 트리거="${trigger}"`);
-  markDebug({
-    stage: DEBUG_STAGE_MAP.screenDependency, verdict: DEBUG_VERDICT_MAP.info, narrationType: NARRATION_TYPE_MAP.deixis,
-    reason: '발화 전에 움직이며 가리킨 영역을 붙임', detail: `트리거="${trigger}" 슬라이드=${slideRegistry.currentLabel() || '-'}`,
+  const slideLabel = slideRegistry.currentLabel();
+  const picked = pickDeixisRegion({
+    sequence: getPointingSequence(),
+    recalledPointing: recentPointingMemory.recall({ eventWallTs, slideLabel }),
+    appearedRegion: appearanceTracker.recall({ eventWallTs, slideLabel }),
   });
-  return recalled;
+  if (picked.source === DEIXIS_REGION_SOURCE_MAP.recalledPointing) {
+    console.log(`[deixis] ✍ 직전 창에 영역 없음 → 발화 전 가리킨 영역을 붙임 트리거="${trigger}"`);
+    markDebug({
+      stage: DEBUG_STAGE_MAP.screenDependency, verdict: DEBUG_VERDICT_MAP.info, narrationType: NARRATION_TYPE_MAP.deixis,
+      reason: '발화 전에 움직이며 가리킨 영역을 붙임', detail: `트리거="${trigger}" 슬라이드=${slideLabel || '-'}`,
+    });
+  }
+  if (picked.source === DEIXIS_REGION_SOURCE_MAP.appeared) {
+    console.log(`[deixis] 🖼 가리킴 없음 → 방금 나타난 그림 영역을 붙임 트리거="${trigger}"`);
+    markDebug({
+      stage: DEBUG_STAGE_MAP.screenDependency, verdict: DEBUG_VERDICT_MAP.info, narrationType: NARRATION_TYPE_MAP.deixis,
+      reason: '가리킴이 없어 방금 나타난 그림 영역을 붙임',
+      detail: `트리거="${trigger}" 슬라이드=${slideLabel || '-'} 영역=${formatRegionRatio(picked.region)}`,
+    });
+  }
+  return { region: picked.region, pointingOrderHint: picked.pointingOrderHint };
 }
 
 function attachPointingMotion() {
@@ -2344,6 +2372,7 @@ function resumeExperiment() {
   delayBuffer?.release();
   pointingLocator.reset();
   recentPointingMemory.reset();
+  appearanceTracker.reset();
   pointingMotionTracker.reset();
   screenChangeDetector?.reset();
   silenceTrigger.reset({ nowPerf: performance.now() });
@@ -2425,6 +2454,7 @@ async function attemptStartExperiment() {
     candidateScheduler.reset();
     pointingLocator.reset();
     recentPointingMemory.reset();
+    appearanceTracker.reset();
     pointingMotionTracker.reset();
     lastPointingMotionAt = -Infinity;
 
@@ -2511,7 +2541,7 @@ function stopExperiment() {
     ['발화자 폴링', () => {
       if (speakerPollTimer) { clearInterval(speakerPollTimer); speakerPollTimer = null; }
     }],
-    ['포인팅 로컬라이저', () => { pointingLocator.reset(); recentPointingMemory.reset(); pointingMotionTracker.reset(); }],
+    ['포인팅 로컬라이저', () => { pointingLocator.reset(); recentPointingMemory.reset(); appearanceTracker.reset(); pointingMotionTracker.reset(); }],
     ['화면 변화 감지기', () => { screenChangeDetector = null; screenChangeSession = null; screenChangeSlideStart = null; }],
     ['슬라이드 히스토그램 게이트', () => { histogramGate.reset(); slideCandidateGate.reset(); }],
     ['슬라이드 레지스트리', () => {

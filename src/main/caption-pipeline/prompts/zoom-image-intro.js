@@ -1,12 +1,14 @@
 // 해설 요청에 [화면 전체, 확대] 두 장을 넣을 때 프롬프트 첫 줄(그림 한 장 안내)을 바꾸는 줄 묶음.
 // 확대 안내에 넣는 낱말은 발화에서 온 말뿐이다. 화면 OCR 글자는 넣지 않는다 — 지시 해설이 옆 칸 글자를 대상에 붙였다.
 
-const ZOOM_KIND_MAP = { speech: 'speech', pointing: 'pointing', merged: 'merged' };
+// appeared: 가리킴 없이 발표자가 방금 붙여 넣거나 끌어다 놓은 그림·글 영역(렌더러가 직전 정지 화면과 견줘 찾는다).
+const ZOOM_KIND_MAP = { speech: 'speech', pointing: 'pointing', merged: 'merged', appeared: 'appeared' };
 // target: 대상 이름을 읽는 해설(지시), value: 값과 항목의 짝을 읽는 해설(수치·척도).
 const ZOOM_USAGE_MAP = { target: 'target', value: 'value' };
 
 const MAX_ZOOM_TERM_LENGTH = 20;
 const POINTING_FOCUS = '발표자가 방금 필기하거나 포인터로 가리킨 영역';
+const APPEARED_ZOOM_LINE = '둘째 이미지는 같은 순간 발표자가 방금 화면에 띄운 그림·글을 확대한 것이다.';
 
 function toSpokenFocus(zoomTerm) {
   const term = String(zoomTerm || '').replace(/["“”]/g, '').trim().slice(0, MAX_ZOOM_TERM_LENGTH);
@@ -17,6 +19,16 @@ function buildZoomFocus({ zoomKind, zoomTerm }) {
   if (zoomKind === ZOOM_KIND_MAP.pointing) return `${POINTING_FOCUS}을`;
   if (zoomKind === ZOOM_KIND_MAP.merged) return `${POINTING_FOCUS}과 ${toSpokenFocus(zoomTerm)}를`;
   return `${toSpokenFocus(zoomTerm)}를`;
+}
+
+function buildZoomTargetLine({ zoomKind, zoomTerm }) {
+  if (zoomKind === ZOOM_KIND_MAP.appeared) return APPEARED_ZOOM_LINE;
+  return `둘째 이미지는 같은 순간 그 화면에서 ${buildZoomFocus({ zoomKind, zoomTerm })} 확대한 것이다.`;
+}
+
+// 렌더러가 보낸 가리킴 비율 상자(pointingRect)의 종류로 가리킴 짝의 확대 종류를 정한다. 방금 나타난 그림이 아니면 가리킴이다.
+function readPointingZoomKind(pointingRect) {
+  return pointingRect?.kind === ZOOM_KIND_MAP.appeared ? ZOOM_KIND_MAP.appeared : ZOOM_KIND_MAP.pointing;
 }
 
 // 사실 카드·그래프 어림값은 화면 전체를 읽은 덩어리다. 덩어리의 "이미지와 다르면"·"막대 수·순서가 맞지 않으면"을 일부만 보이는
@@ -31,7 +43,7 @@ function buildZoomImageIntroLineList({ zoomKind = null, zoomTerm = null, usage =
   if (!Object.values(ZOOM_KIND_MAP).includes(zoomKind)) return [];
   return [
     '첫째 이미지는 회의에서 공유 중인 화면 전체다.',
-    `둘째 이미지는 같은 순간 그 화면에서 ${buildZoomFocus({ zoomKind, zoomTerm })} 확대한 것이다.`,
+    buildZoomTargetLine({ zoomKind, zoomTerm }),
     '글자·수치는 둘째 이미지에서 먼저 읽고, 대상이 둘째 이미지에 없거나 잘렸으면 첫째 이미지에서 찾는다. 둘째 이미지는 화면 일부라 그 밖에도 대상이 있다.',
     usage === ZOOM_USAGE_MAP.value
       ? '값·항목 이름은 둘째 이미지에서 먼저 읽되, 어느 값이 어느 항목의 것인지는 첫째 이미지의 배치로 확인한다.'
@@ -41,4 +53,4 @@ function buildZoomImageIntroLineList({ zoomKind = null, zoomTerm = null, usage =
   ].filter(Boolean);
 }
 
-module.exports = { buildZoomImageIntroLineList, ZOOM_KIND_MAP, ZOOM_USAGE_MAP };
+module.exports = { buildZoomImageIntroLineList, readPointingZoomKind, ZOOM_KIND_MAP, ZOOM_USAGE_MAP };

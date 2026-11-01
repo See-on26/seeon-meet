@@ -75,7 +75,7 @@ function countMask(mask) {
 }
 
 // 8방향으로 이웃한 칸을 한 덩어리로 묶고, MIN_COMPONENT_CELL_COUNT 칸 미만 덩어리는 뺀다.
-function keepLargeComponents({ mask, rowCount, colCount, minCellCount }) {
+export function keepLargeComponents({ mask, rowCount, colCount, minCellCount }) {
   const kept = new Uint8Array(mask.length);
   const visited = new Uint8Array(mask.length);
   for (let start = 0; start < mask.length; start += 1) {
