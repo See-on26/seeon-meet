@@ -23,7 +23,8 @@ export const FLOW_TYPE_OPTION_LIST = [
 const OUTCOME_REASON_LABEL_MAP = {
   ...QUEUE_DROP_LABEL_MAP,
   feature_off: '기능 꺼짐 — 내보내지 않음',
-  'rate-limited': '비슷한 해설이 방금 나가 간격 억제',
+  // 내용이 비슷해서가 아니라 직전 해설과 시간이 가까워 막힌 것이다(내용이 비슷한 것은 duplicate:*).
+  'rate-limited': '간격 규칙: 직전 해설과 너무 가까움',
   not_played: '끝날 때까지 재생되지 않음',
   no_audio: 'TTS 합성 실패 — 소리 없음',
 };

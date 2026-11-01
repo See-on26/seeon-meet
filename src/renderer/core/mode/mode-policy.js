@@ -168,6 +168,29 @@ export function resolveBeforeAnchorTs({ mode, screenTransitionTs = null }) {
   return Number.isFinite(screenTransitionTs) ? screenTransitionTs : null;
 }
 
+// 그-계열 지시(그걸·그것·그 뒷면·거기)는 앞에서 한 말을 받는 일이 많아, 화면 전환과 관계없이 이만큼은 앞 발화를 본다.
+export const ANAPHORIC_MIN_BEFORE_MS = 15000;
+
+// main 트리거(trigger/speech-trigger.js)의 TRIGGER_TYPE_MAP.demonstrative 값이다.
+const DEMONSTRATIVE_CANDIDATE_TYPE = 'demonstrative';
+const ANAPHORIC_DEMONSTRATIVE_PATTERN = /^(?:그|거기)/;
+
+export function isAnaphoricDeixis({ candidateList = [] } = {}) {
+  return (candidateList || []).some((candidate) => candidate?.type === DEMONSTRATIVE_CANDIDATE_TYPE
+    && ANAPHORIC_DEMONSTRATIVE_PATTERN.test(String(candidate.phrase || '')));
+}
+
+// 지시 판정의 앞 맥락 기준. 판정은 look-ahead·문장 끝 대기·화면 안정 캡처를 기다린 뒤에 나므로, 그사이 확정된 전환은
+// 트리거 발화보다 늦은 화면이라 앞 맥락을 자르는 기준이 될 수 없다. 그래서 트리거 시각 이전의 마지막 전환을 쓴다.
+export function resolveDeixisBeforeAnchorTs({ mode, transitionTsList = [], triggerTs, isAnaphoric = false }) {
+  const lastTransitionTs = (transitionTsList || [])
+    .filter((ts) => Number.isFinite(ts) && ts <= triggerTs)
+    .reduce((latest, ts) => Math.max(latest, ts), -Infinity);
+  const anchorTs = resolveBeforeAnchorTs({ mode, screenTransitionTs: lastTransitionTs });
+  if (!Number.isFinite(anchorTs)) return null;
+  return isAnaphoric ? Math.min(anchorTs, triggerTs - ANAPHORIC_MIN_BEFORE_MS) : anchorTs;
+}
+
 export function computeSpeechMsPerWord({ speechSpeed } = {}) {
   if (!(speechSpeed > 0)) return SPEECH_MS_PER_WORD;
   return Math.round(SPEECH_MS_PER_WORD * REFERENCE_SPEECH_SPEED / speechSpeed);

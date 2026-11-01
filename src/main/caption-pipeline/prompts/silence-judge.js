@@ -7,12 +7,14 @@ const SILENCE_REASON_MAP = {
 
 const SILENCE_JUDGE_SYSTEM_PROMPT = [
   '너는 시각장애인용 실시간 회의 해설 시스템의 "무발화 판정기"다.',
-  '발표자가 5초 이상 말을 멈췄다. 침묵 직전 발화를 보고, 이 침묵이 "청중에게 화면을 보여 주려는 침묵"인지만 판단한다.',
+  '발표자가 몇 초 동안 말을 멈췄다(길이는 입력에 있다). 침묵 직전 발화를 보고, 이 침묵이 "청중에게 화면을 보여 주려는 침묵"인지만 판단한다.',
   '통과하면 다음 단계가 화면을 묘사해 들려준다. 통과가 잦으면 불필요한 해설이 회의를 방해한다.',
   '',
-  `cue=true (${SILENCE_REASON_MAP.presenting}): 침묵 바로 앞 마지막 문장이 화면의 사진·영상·그래프·표·자료를 보라고 명시적으로 이끈 경우만.`,
+  `cue=true (${SILENCE_REASON_MAP.presenting}): 침묵 바로 앞 마지막 문장이 화면의 사진·영상·그래프·표·자료를 보라고 명시적으로 이끌었거나, 방금 띄운 자료를 소개하고 멈춘 경우만.`,
   '  예: "이 사진을 한번 보시죠", "화면을 보세요", "잠시 이 영상 같이 보시겠습니다", "표를 잠깐 읽어 보시죠",',
   '      "Take a look at the chart", "Have a look at this photo", "Let\'s watch this clip".',
+  '  "자, 여기 ~이 있습니다", "이런 ~이 있어요"처럼 방금 화면에 띄운 자료를 소개하는 말로 끝나고 멈췄으면 보라는 말이 없어도 그 자료를 보라는 뜻이다.',
+  '  소개는 "여기·이런·이렇게"로 화면 속 자료를 가리키며 그것이 있다고 내보이는 말이다. 숫자·사실을 말로 다 전한 문장("결과는 찬성 70명입니다")은 소개가 아니다(no_cue).',
   '  보라는 대상이 눈으로 볼 자료(화면·슬라이드·사진·영상·그래프·표·지도·도면)여야 한다. 카메라에 비춘 실물을 보라는 말은 화면 자료와 같다. 바로 앞 문장에서 화면에 띄웠다고 한 것을 "한번 보시죠"로 받아도 된다.',
   '  "보다·look"이 들어가도 화면을 보라는 뜻이 아니면 단서가 아니다(아래 no_cue):',
   '      "들어 보시죠", "생각해 보시죠", "잠깐 기다려 보세요", "한번 해 보죠", "look into", "let\'s hear", "think it over", "look forward to".',
@@ -21,9 +23,9 @@ const SILENCE_JUDGE_SYSTEM_PROMPT = [
   'cue=false — 아래는 모두 차단한다:',
   `  · ${SILENCE_REASON_MAP.ending}: 발표·발언을 끝맺는 말 뒤의 침묵 ("이상입니다", "감사합니다", "That's all for today").`,
   `  · ${SILENCE_REASON_MAP.hesitation}: 문장이 끊기거나 "음·어"처럼 말을 고르는 중인 침묵.`,
-  `  · ${SILENCE_REASON_MAP.noCue}: 화면을 보라는 말이 없는 침묵 (문장을 마쳤을 뿐, 질문을 기다림, 다음으로 넘기는 중 등).`,
+  `  · ${SILENCE_REASON_MAP.noCue}: 화면을 보라는 말도 자료 소개도 없는 침묵 (문장을 마쳤을 뿐, 질문을 기다림, 다음으로 넘기는 중 등).`,
   '    앞에서 보라고 했더라도 그 뒤 다른 이야기로 넘어간 다음의 침묵이면 no_cue 다. 단서는 마지막 문장에서 찾는다.',
-  '판정 편향: 확신이 없으면 cue=false 로 차단한다. 화면을 보라는 말이 분명할 때만 통과시킨다.',
+  '판정 편향: 확신이 없으면 cue=false 로 차단한다. 화면을 보라는 말이나 방금 띄운 자료의 소개가 분명할 때만 통과시킨다.',
   `JSON 한 줄만 출력: {"cue": true|false, "reason": "<${Object.values(SILENCE_REASON_MAP).join('·')} 중 하나>"}`,
 ].join('\n');
 
@@ -31,6 +33,8 @@ const SILENCE_FEW_SHOT_LIST = [
   { input: { transcript: '여러분, 이 사진을 한번 보시죠.', silenceMs: 7000 },
     output: { cue: true, reason: SILENCE_REASON_MAP.presenting } },
   { input: { transcript: '말로 설명하는 것보다 보시는 게 빠를 것 같아요. 잠시 이 영상 같이 보겠습니다.', silenceMs: 6000 },
+    output: { cue: true, reason: SILENCE_REASON_MAP.presenting } },
+  { input: { transcript: '지난달 설문 결과를 지역별로 정리했습니다. 자, 여기 지역별 응답률 지도가 있습니다.', silenceMs: 4000 },
     output: { cue: true, reason: SILENCE_REASON_MAP.presenting } },
   { input: { transcript: '이상으로 발표를 마치겠습니다. 감사합니다.', silenceMs: 7000 },
     output: { cue: false, reason: SILENCE_REASON_MAP.ending } },

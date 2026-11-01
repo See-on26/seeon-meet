@@ -6,8 +6,8 @@ import {
 import {
   MODE_MAP, DWELL_MS, IS_DELAY_BUFFER_ENABLED,
   computeWordBudget, computeSilenceWordBudget, canSwitchMode, getModePolicy, getCatchupRateRange,
-  computeLookaheadMs, computeSentenceWaitMs, computeContextHoldMs, resolveBeforeAnchorTs,
-  computeAnswerWordBudget,
+  computeLookaheadMs, computeSentenceWaitMs, computeContextHoldMs, resolveDeixisBeforeAnchorTs, isAnaphoricDeixis,
+  computeAnswerWordBudget, ANAPHORIC_MIN_BEFORE_MS,
 } from '../core/mode/mode-policy.js';
 import { CONTEXT_TOKEN_BUDGET } from '../core/mode/context-budget.js';
 import {
@@ -71,6 +71,7 @@ import { DeixisDetector } from '../core/trigger/deixis-detector.js';
 import { resolveLastSpeechWallTs } from '../core/trigger/speech-activity.js';
 import {
   SilenceTrigger, evaluateSilencePrecondition, SILENCE_TRANSCRIPT_WINDOW_MS, SILENCE_SKIP_LABEL_MAP,
+  LIVE_SILENCE_TRIGGER_MS,
 } from '../core/trigger/silence-trigger.js';
 import {
   DeixisCandidateScheduler, CANDIDATE_SOURCE_MAP, SUBMIT_RESULT_MAP,
@@ -604,6 +605,14 @@ const POINTING_MOTION_DEBOUNCE_MS = 800;
 const transcriptWindow = new TranscriptWindow({});
 
 let lastScreenTransitionAt = null;
+// 화면 전환을 확정한 시각(performance.now()) 목록. 지시 판정의 앞 맥락 기준을 판정 시각이 아니라 트리거 시각 이전의
+// 마지막 전환으로 고르는 데 쓴다. 캡처를 시작할 때 비운다. 판정은 트리거 뒤 수십 초 안에 나므로 최근 것만 둔다.
+const screenTransitionTsList = [];
+const MAX_SCREEN_TRANSITION_TS_COUNT = 50;
+function recordScreenTransitionTs(ts) {
+  screenTransitionTsList.push(ts);
+  if (screenTransitionTsList.length > MAX_SCREEN_TRANSITION_TS_COUNT) screenTransitionTsList.shift();
+}
 
 let experimentSeq = 0;
 
@@ -960,6 +969,7 @@ async function confirmSlideCandidate({ isFirst, imageData }) {
   }
 
   lastScreenTransitionAt = performance.now();
+  recordScreenTransitionTs(lastScreenTransitionAt);
   pendingTransitions.open({ slideLabel: decision.label });
   slideEventVideoTimeMap.set(decision.label, captureSource.videoTimeMs);
   slideTransitionWallTsMap.set(decision.label, Date.now());
@@ -1157,7 +1167,7 @@ let lastResolvedSpeakerName = '';
 let lastResolvedSpeakerAt = 0;
 
 let lastSpeechBlindAt = 0;
-const silenceTrigger = new SilenceTrigger();
+const silenceTrigger = new SilenceTrigger({ thresholdMs: LIVE_SILENCE_TRIGGER_MS });
 
 function getLastSpeechWallTs() {
   return resolveLastSpeechWallTs({
@@ -1300,7 +1310,10 @@ async function runDeixisDecision(firedDecision) {
   }
   const { beforeMs, afterMs } = getModePolicy({ mode }) || {};
 
-  const anchorTs = resolveBeforeAnchorTs({ mode, screenTransitionTs: lastScreenTransitionAt });
+  const isAnaphoric = isAnaphoricDeixis({ candidateList });
+  const anchorTs = resolveDeixisBeforeAnchorTs({
+    mode, transitionTsList: screenTransitionTsList, triggerTs: captureTs, isAnaphoric,
+  });
   const { before, after, tokenCount, droppedCount } = transcriptWindow.getContext({
     triggerTs: captureTs, beforeMs: beforeMs ?? 60000, afterMs: afterMs ?? 2000, anchorTs,
   });
@@ -1327,6 +1340,7 @@ async function runDeixisDecision(firedDecision) {
     narrationType: NARRATION_TYPE_MAP.deixis,
     reason: SCREEN_DEPENDENCY_LABEL_MAP[screenVerdict.reason] || screenVerdict.reason,
     detail: `근거="${screenVerdict.trigger || label}" 앞맥락 ${describeBeforeWindow({ mode, anchorTs })}`
+      + `${isAnaphoric ? ` (그-계열 지시라 트리거 앞 ${ANAPHORIC_MIN_BEFORE_MS / 1000}초 이상)` : ''}`
       + ` · 뒤맥락(${Math.round((afterMs ?? 2000) / 1000)}초 창)="${after || '(없음)'}"`,
   });
 
@@ -2383,6 +2397,8 @@ async function attemptStartExperiment() {
     });
 
     lastScreenTransitionAt = performance.now();
+    screenTransitionTsList.length = 0;
+    recordScreenTransitionTs(lastScreenTransitionAt);
     experimentSeq += 1;
     markDebug({
       stage: DEBUG_STAGE_MAP.session, verdict: DEBUG_VERDICT_MAP.info,
