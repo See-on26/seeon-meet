@@ -46,7 +46,7 @@ function mergeNearbyEvents(eventList) {
   return mergedList;
 }
 
-function computeChangedCellMask({ grayA, grayB, width, height, rowCount, colCount, cellChangeThreshold }) {
+export function computeChangedCellMask({ grayA, grayB, width, height, rowCount, colCount, cellChangeThreshold }) {
   const changedCellMask = new Uint8Array(rowCount * colCount);
   for (let row = 0; row < rowCount; row += 1) {
     const cellY = Math.floor((row * height) / rowCount);
