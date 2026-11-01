@@ -35,10 +35,11 @@ test('먼저 낸 발화 기반 해설은 간격 안의 지시 해설을 막고, 
   assert.equal(rate.minIntervalMs, 18000);
 });
 
-test('지시 해설끼리는 지금처럼 가리킨 곳이 있으면 12초, 발화만 있으면 18초 간격으로 막는다', () => {
+// 같은 그림을 12초 남짓 뒤 다시 가리키며 한 말("뭐 이게 낫냐")로 같은 대상을 또 설명하고 로고를 잘못 읽었다. 가리킨 곳이 있어도 15초 쉰다.
+test('지시 해설끼리는 가리킨 곳이 있으면 15초, 발화만 있으면 18초 간격으로 막는다', () => {
   const history = createHistoryWith([{ text: '파란 막대그래프', narrationClass: deixis, ts: 0 }]);
-  assert.equal(history.findRateLimited({ narrationClass: deixis, ts: 11999, hasPointingRegion: true }).isRateLimited, true);
-  assert.equal(history.findRateLimited({ narrationClass: deixis, ts: 12000, hasPointingRegion: true }).isRateLimited, false);
+  assert.equal(history.findRateLimited({ narrationClass: deixis, ts: 14999, hasPointingRegion: true }).isRateLimited, true);
+  assert.equal(history.findRateLimited({ narrationClass: deixis, ts: 15000, hasPointingRegion: true }).isRateLimited, false);
   assert.equal(history.findRateLimited({ narrationClass: deixis, ts: 17999 }).isRateLimited, true);
   assert.equal(history.findRateLimited({ narrationClass: deixis, ts: 18000 }).isRateLimited, false);
 });

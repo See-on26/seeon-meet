@@ -19,7 +19,8 @@ const NARRATION_PRIORITY_MAP = {
 };
 
 // 발화 기반·지시 해설 간격. 필기·포인터로 가리킨 곳이 있으면 대상이 분명해 더 짧게 둔다.
-const POINTED_MIN_INTERVAL_MS = 12000;
+// 12초였을 때 같은 그림을 12초 남짓 뒤 다시 가리키며 한 말로 같은 대상을 또 설명하고 로고를 잘못 읽었다(15초로 늘림).
+const POINTED_MIN_INTERVAL_MS = 15000;
 const SPEECH_ONLY_MIN_INTERVAL_MS = 18000;
 // 페이지 전환 고지 직후 무발화 해설을 막는 간격. 무발화끼리는 silence-gate(60초·슬라이드당 1회)가 막는다.
 const SILENCE_AFTER_TRANSITION_MIN_INTERVAL_MS = 12000;

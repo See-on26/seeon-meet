@@ -109,12 +109,12 @@ test('화면 변화 해설은 화면 변화 해설에만 20초 간격으로 막�
   }
 });
 
-test('발화 기반·지시 해설 간격은 가리킨 곳이 있으면 12초, 발화만 있으면 18초다', () => {
-  assert.equal(POINTED_MIN_INTERVAL_MS, 12000);
+test('발화 기반·지시 해설 간격은 가리킨 곳이 있으면 15초, 발화만 있으면 18초다', () => {
+  assert.equal(POINTED_MIN_INTERVAL_MS, 15000);
   assert.equal(SPEECH_ONLY_MIN_INTERVAL_MS, 18000);
   for (const narrationClass of [speechBased, deixis]) {
     const rule = findBlockingRule({ narrationClass });
-    assert.equal(resolveMinIntervalMs({ rule, hasPointingRegion: true }), 12000, narrationClass);
+    assert.equal(resolveMinIntervalMs({ rule, hasPointingRegion: true }), 15000, narrationClass);
     assert.equal(resolveMinIntervalMs({ rule, hasPointingRegion: false }), 18000, narrationClass);
   }
 });
