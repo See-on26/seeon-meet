@@ -1,8 +1,9 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { NarrationMixer } from '../src/renderer/core/audio-renderer/narration-mixer.js';
-import { CaptionNarrator } from '../src/renderer/core/audio-renderer/caption-narrator.js';
+import { CaptionNarrator, computeCatchupRate } from '../src/renderer/core/audio-renderer/caption-narrator.js';
 import { QUEUE_DROP_REASON_MAP } from '../src/renderer/core/audio-renderer/narration-queue.js';
+import { SIC_CATCHUP_RATE_PER_SEC } from '../src/renderer/core/constants.js';
 
 function createAudioParam(value) {
   return {
@@ -195,44 +196,69 @@ test('교차 모드: 자동 해설은 지금처럼 회의 영상을 멈추고 �
   assert.equal(narrator.getSicState().isInserting, false);
 });
 
-test('교차 모드: 질문 답은 회의 영상을 멈추지 않고 소리만 줄였다가 끝나면 되돌린다', async () => {
-  const { narrator, sourceList, video } = createNarrator();
-  narrator.queueCaption(makeEntry({ id: '답', narrationClass: 'user_command' }));
+test('교차 모드: 질문 답도 자동 해설처럼 회의 영상을 멈추고 가운데에서 재생한 뒤, 끝나면 다시 틀어 따라잡는다', async () => {
+  let waitCount = 0;
+  const { narrator, sourceList, video } = createNarrator({
+    isCatchupDelegated: false, waitForInsertGap: () => { waitCount += 1; return new Promise(() => {}); },
+  });
+  narrator.queueCaption(makeEntry({ id: '답', narrationClass: 'user_command', durationSec: 2 }));
   await flush();
-  assert.equal(video.paused, false);
-  assert.ok(video.volume > 0.2 && video.volume < 0.3, `회의 소리 −12dB, 실제 ${video.volume}`);
-  assert.equal(narrator.getSicState().isInserting, true, '답 재생 중에도 해설 메아리 구간으로 본다');
-  assert.notEqual(sourceList[0].connectedNode, narrator.ttsGainNode, '답은 오른쪽 패너로 나간다');
+  assert.equal(waitCount, 0, '질문 답은 말 틈을 기다리지 않고 바로 회의를 멈춘다');
+  assert.deepEqual(startedIdList(sourceList), ['답']);
+  assert.equal(video.paused, true);
+  assert.equal(video.volume, 1.0, '멈춘 뒤에는 소리 크기를 되돌려 둔다');
+  assert.equal(narrator.isInserting, true);
+  assert.equal(narrator.getSicState().isInserting, true);
+  assert.equal(sourceList[0].connectedNode, narrator.ttsGainNode, '답은 자동 해설과 같은 가운데 출력으로 나간다');
 
   sourceList[0].onended();
   await flush();
-  assert.equal(video.volume, 1.0);
+  assert.equal(video.paused, false);
   assert.equal(narrator.getSicState().isInserting, false);
+  assert.equal(video.playbackRate, computeCatchupRate({
+    pausedSec: 2, minRate: 1.5, maxRate: 1.8, ratePerSec: SIC_CATCHUP_RATE_PER_SEC,
+  }), '답으로 멈췄던 2초를 따라잡는다');
+  narrator.stop();
 });
 
-test('교차 모드: 자동 해설 중 질문 답이 오면 해설을 끝까지 들려준 뒤 영상을 다시 틀어 소리를 줄인 채 답한다', async () => {
-  const { narrator, context, sourceList, video, dropList } = createNarrator({ isCatchupDelegated: false });
-  narrator.queueCaption(makeEntry({ id: '지시', durationSec: 3 }));
+test('교차 모드: 자동 해설로 회의가 멈춘 중에 질문 답이 오면 해설을 끝까지 들려준 뒤 회의를 다시 틀지 않고 이어 답한다', async () => {
+  let waitCount = 0;
+  const video = createRecordingVideo();
+  const { narrator, context, sourceList, dropList } = createNarrator({
+    isCatchupDelegated: false, video, waitForInsertGap: async () => { waitCount += 1; },
+  });
+  narrator.queueCaption(makeEntry({ id: '지시', durationSec: 1 }));
   await flush();
-  narrator.queueCaption(makeEntry({ id: '답', narrationClass: 'user_command' }));
+  narrator.queueCaption(makeEntry({ id: '답', narrationClass: 'user_command', durationSec: 1.5 }));
   await flush();
   assert.equal(sourceList[0].isStopped, false);
   assert.deepEqual(startedIdList(sourceList), ['지시']);
   assert.equal(video.paused, true);
 
-  context.currentTime = 3.02;
+  video.eventList.length = 0;
+  context.currentTime = 1.02;
   sourceList[0].onended();
   await flush();
   assert.deepEqual(startedIdList(sourceList), ['지시', '답']);
+  assert.equal(video.paused, true);
+  assert.deepEqual(video.eventList.filter(([kind]) => kind !== 'volume'), [], '해설과 답 사이에 회의를 다시 틀지도 새로 멈추지도 않는다');
+  assert.equal(waitCount, 1, '답은 말 틈을 기다리지 않는다');
+  assert.equal(sourceList[1].connectedNode, narrator.ttsGainNode);
+
+  sourceList[1].onended();
+  await flush();
   assert.equal(video.paused, false);
-  assert.ok(video.volume < 0.3);
-  assert.ok(video.playbackRate > 1.0, '해설로 멈췄던 3초를 따라잡는다');
+  assert.equal(video.eventList.filter(([kind]) => kind === 'play').length, 1);
+  assert.equal(video.playbackRate, computeCatchupRate({
+    pausedSec: 2.5, minRate: 1.5, maxRate: 1.8, ratePerSec: SIC_CATCHUP_RATE_PER_SEC,
+  }), '해설 1초와 답 1.5초를 합쳐 따라잡는다');
   assert.deepEqual(dropList, []);
   narrator.stop();
 });
 
-test('교차 모드: 답 뒤에 대기 중인 자동 해설은 소리를 되돌리고 영상을 멈춘 뒤 재생한다', async () => {
-  const { narrator, sourceList, video } = createNarrator();
+test('교차 모드: 답 뒤에 대기 중인 자동 해설은 회의를 멈춘 채 말 틈을 기다리지 않고 이어 재생한다', async () => {
+  let waitCount = 0;
+  const { narrator, sourceList, video } = createNarrator({ waitForInsertGap: async () => { waitCount += 1; } });
   narrator.queueCaption(makeEntry({ id: '답', narrationClass: 'user_command' }));
   await flush();
   narrator.queueCaption(makeEntry({ id: '지시' }));
@@ -244,6 +270,28 @@ test('교차 모드: 답 뒤에 대기 중인 자동 해설은 소리를 되돌�
   assert.deepEqual(startedIdList(sourceList), ['답', '지시']);
   assert.equal(video.volume, 1.0);
   assert.equal(video.paused, true);
+  assert.equal(waitCount, 0);
+});
+
+test('교차 모드: 질문 답으로 회의가 멈춘 동안도 대기 시간에 세지 않는다', async () => {
+  const clock = { nowMs: 0 };
+  const { context, sourceList } = createFakeAudioContext();
+  const video = createVideo();
+  const dropList = [];
+  const narrator = new CaptionNarrator({
+    getLiveVideo: () => video, createAudioContext: () => context, isCatchupDelegated: () => true,
+    onDrop: (drop) => dropList.push(drop), now: () => clock.nowMs, sleep: skipSleep,
+  });
+  narrator.start(fakeStream);
+  narrator.queueCaption({ ...makeEntry({ id: '긴 답', narrationClass: 'user_command', durationSec: 12 }), dueAt: 0 });
+  await flush();
+  narrator.queueCaption({ ...makeEntry({ id: '같은 지점 지시' }), dueAt: 0 });
+  clock.nowMs = 12000;
+  assert.equal(narrator.readPausedMs(), 12000);
+  sourceList[0].onended();
+  await flush();
+  assert.deepEqual(startedIdList(sourceList), ['긴 답', '같은 지점 지시']);
+  assert.deepEqual(dropList, []);
 });
 
 test('교차 모드: 회의를 멈추기 전에 말 틈을 기다리고, 그동안은 회의를 멈추지도 해설을 틀지도 않는다', async () => {
@@ -316,12 +364,21 @@ test('교차 모드: 회의를 멈출 때는 소리를 0까지 줄인 뒤 멈추
   assert.ok(fadeInList.every((value, index) => index === 0 || value >= fadeInList[index - 1]));
 });
 
-test('교차 모드: stop 은 줄인 회의 소리를 되돌린다', async () => {
-  const { narrator, video } = createNarrator();
+test('교차 모드: 질문 답으로 회의 소리를 줄이는 도중에 stop 하면 영상을 멈추지 않고 소리를 되돌린다', async () => {
+  const { context, sourceList } = createFakeAudioContext();
+  const video = createVideo();
+  const narrator = new CaptionNarrator({
+    getLiveVideo: () => video, createAudioContext: () => context, isCatchupDelegated: () => true,
+    sleep: () => new Promise(() => {}),
+  });
+  narrator.start(fakeStream);
   narrator.queueCaption(makeEntry({ id: '답', narrationClass: 'user_command' }));
   await flush();
   narrator.stop();
+  await flush();
   assert.equal(video.volume, 1.0);
+  assert.equal(video.paused, false);
+  assert.deepEqual(startedIdList(sourceList), []);
 });
 
 test('동시 모드: 한꺼번에 넣은 해설은 첫 항목부터 틀지 않고 우선순위대로 재생한다', async () => {

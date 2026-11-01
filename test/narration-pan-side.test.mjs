@@ -113,10 +113,23 @@ test('동시 모드: 가운데로 돌아가기 전에 다음 해설이 오면 �
   ]);
 });
 
-test('교차 모드: 질문 답은 채널을 나누지 않고 오른쪽(SEEON 패널 쪽)에서 들리게만 해 한쪽 귀로도 들린다', () => {
-  const narrator = new CaptionNarrator({ getLiveVideo: () => null, createAudioContext: createFakeAudioContext });
+test('교차 모드: 질문 답도 자동 해설처럼 좌우·공간 패너를 거치지 않고 가운데에서 들린다', async () => {
+  const audioContext = createFakeAudioContext();
+  let pannerCount = 0;
+  const { createPanner, createStereoPanner } = audioContext;
+  audioContext.createPanner = () => { pannerCount += 1; return createPanner(); };
+  audioContext.createStereoPanner = () => { pannerCount += 1; return createStereoPanner(); };
+  audioContext.createBufferSource = () => {
+    const source = createConnectableNode({ buffer: null, onended: null, start() {}, stop() {} });
+    audioContext.sourceList.push(source);
+    return source;
+  };
+  const narrator = new CaptionNarrator({
+    getLiveVideo: () => null, createAudioContext: () => audioContext, sleep: () => Promise.resolve(),
+  });
   narrator.start(fakeStream);
-  assert.equal(narrator.answerPanner.panningModel, 'HRTF');
-  assert.equal(narrator.answerPanner.positionX.value, 0.7);
-  assert.equal(narrator.answerPanner.connectedList[0], narrator.ttsGainNode);
+  narrator.queueCaption({ ...makeEntry('답'), narrationClass: 'user_command' });
+  await flush();
+  assert.equal(pannerCount, 0);
+  assert.deepEqual(audioContext.sourceList[0].connectedList, [narrator.ttsGainNode]);
 });
