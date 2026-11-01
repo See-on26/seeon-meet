@@ -8,7 +8,7 @@ const { DEBUG_STAGE_MAP, DEBUG_VERDICT_MAP } = require('../contracts/debug-event
 const { RECORD_KIND_MAP } = require('../instrumentation/record-store');
 const { describeAgentRejection } = require('../agents/shared/caption-parser');
 const { assembleNarration } = require('../agents/shared/narration-format');
-const { isValuePresent, readValueCheckTarget, VALUE_PRESENCE_VERDICT_MAP } = require('./value-presence');
+const { isValuePresent, readValueCheckTarget, readFirstPairArgs, VALUE_PRESENCE_VERDICT_MAP } = require('./value-presence');
 const { checkSpokenValueMatch, SPOKEN_VALUE_VERDICT_MAP } = require('../prompts/approximate-value');
 const { SLIDE_TEXT_STATUS_MAP } = require('./slide-text-store');
 const { createScreenChangeGate } = require('./screen-change-gate');
@@ -195,12 +195,14 @@ function createScreenChangeService({
         });
         return { isVlmCalled: true, isEmitted: false, skipReason: SCREEN_CHANGE_SKIP_MAP.valueAbsent };
       }
-      // 둘째 값이 새 화면에 없으면 첫 쌍만 읽는다(원래 경로와 같은 규칙).
-      if (slotMap?.value2 && text.includes(slotMap.value2) && !checkRetryValue({
+      // 둘째 값이 새 화면에 없거나 값→의미 둘째 수치가 발화의 수와 멀면 첫 쌍만 읽는다(원래 경로와 같은 규칙).
+      const isSecondValueFar = Boolean(slotMap?.value2) && isSpokenValueChecked
+        && checkSpokenValueMatch({ value: slotMap.value2, utterance: note.utterance }).verdict === SPOKEN_VALUE_VERDICT_MAP.far;
+      if (slotMap?.value2 && text.includes(slotMap.value2) && (isSecondValueFar || !checkRetryValue({
         value: slotMap.value2, subKind: valueCheckTarget.checkSubKind, note, frame, slideLabel,
-      })) {
+      }))) {
         const firstPair = assembleNarration({
-          narrationType, subKind: note.subKind, rawSlotMap: { ...slotMap, target2: '', value2: '' },
+          narrationType, subKind: note.subKind, ...readFirstPairArgs({ subKind: note.subKind, slotMap }),
           maxWordCount: result.appliedBudget?.maxWordCount, maxChars: result.appliedBudget?.maxChars,
           language: getCaptionLanguage(),
         });
@@ -277,6 +279,7 @@ function createScreenChangeService({
       utterance: generatorArgs.utterance || '', contextText: [beforeText, afterText].filter(Boolean).join(' '),
       anchorText: [
         selectedCandidate?.anchor, ...(selectedCandidate?.mergedAnchorList || []), ...(selectedCandidate?.mergedClaimList || []),
+        ...(selectedCandidate?.mergedValueList || []),
       ].filter(Boolean).join(', '),
       generatorArgs: argsWithoutImage,
     }).catch((error) => {

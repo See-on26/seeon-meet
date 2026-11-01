@@ -7,7 +7,7 @@ const { scaleWordBudget } = require('./shared/narration-format');
 const { resolveContentSwitch } = require('./shared/content-switch');
 const { toZoomImageArgs, toZoomPromptArgs } = require('./shared/zoom-image');
 const {
-  buildInterpretationPrompt, buildInterpretationScreenTextBlock, INTERPRETATION_RULE_MAP,
+  buildInterpretationPrompt, buildInterpretationScreenTextBlock, INTERPRETATION_RULE_MAP, hasSecondValue,
   DEFAULT_INTERPRETATION_MIN_WORD_COUNT, DEFAULT_INTERPRETATION_MAX_WORD_COUNT,
 } = require('../prompts/interpretive-bridge');
 const { buildFactCardBlock, FACT_CARD_USAGE_MAP } = require('../prompts/fact-card-block');
@@ -20,7 +20,7 @@ function createInterpretiveBridgeAgent({ config, getCaptionLanguage = () => DEFA
   async function generate({ jpegBuffer, utterance, recentTranscript = '',
     subKind = null, minWordCount = DEFAULT_INTERPRETATION_MIN_WORD_COUNT,
     maxWordCount = DEFAULT_INTERPRETATION_MAX_WORD_COUNT,
-    describedElementList = [], mergedAnchorList = [], mergedClaimList = [], screenLineList = [], factCardList = [],
+    describedElementList = [], mergedAnchorList = [], mergedClaimList = [], spokenValueList = [], screenLineList = [], factCardList = [],
     chartEstimate = null,
     language = getCaptionLanguage(), zoomJpegBuffer = null, zoomKind = null, zoomTerm = null }) {
     // 렌더러의 어절 예산을 캡션 언어의 단어 수로 바꾼다(영어는 상한을 ENGLISH_WORD_SCALE 배로, 한국어는 그대로).
@@ -32,7 +32,7 @@ function createInterpretiveBridgeAgent({ config, getCaptionLanguage = () => DEFA
       config, ...toZoomImageArgs({ jpegBuffer, zoomJpegBuffer }), label: AGENT_LABEL, maxTokens: SLOT_AGENT_MAX_TOKENS,
       prompt: buildInterpretationPrompt({
         utterance, recentTranscript, subKind, minWordCount, maxWordCount,
-        maxChars: effectiveMaxChars, describedElementList, mergedAnchorList, mergedClaimList, screenLineList, factCardList,
+        maxChars: effectiveMaxChars, describedElementList, mergedAnchorList, mergedClaimList, spokenValueList, screenLineList, factCardList,
         chartEstimate, language, contentSwitch,
         ...toZoomPromptArgs({ zoomJpegBuffer, zoomKind, zoomTerm }),
       }),
@@ -48,7 +48,9 @@ function createInterpretiveBridgeAgent({ config, getCaptionLanguage = () => DEFA
         content,
         narrationType: NARRATION_TYPE_MAP.interpretation,
         subKind: subKind || INTERPRETATION_KIND_MAP.valueToMeaning,
-        maxChars: effectiveMaxChars, maxWordCount, hasSecondClaim: mergedClaimList.length > 0, language, contentSwitch,
+        // 값→의미에 수치가 둘 이상 확정되면 둘째 변화처럼 짝 칸(value2·label·label2)으로 받는다.
+        maxChars: effectiveMaxChars, maxWordCount, hasSecondClaim: mergedClaimList.length > 0 || hasSecondValue({ subKind, spokenValueList }),
+        language, contentSwitch,
       }),
       screenTextBlock: { lineCount, charCount, numberLineCount },
       factCardBlock: { cardCount: factCardBlock.cardCount, charCount: factCardBlock.charCount },
