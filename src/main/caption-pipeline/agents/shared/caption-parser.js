@@ -17,6 +17,10 @@ const SLOT_PAIR_PATTERN = /"(\w+)"\s*:\s*"([^"]*)"/g;
 const HAN_CHARACTER_PATTERN = /[\u3400-\u4dbf\u4e00-\u9fff\uf900-\ufaff]/;
 const NO_HAN_RULE = '각 필드에 한자·중국어 글자를 섞지 마라. 화면 글자가 한글이면 한글 그대로 쓴다.';
 const ENGLISH_NO_HAN_RULE = 'Do not mix Chinese characters (Hanja/Hanzi) or Korean letters into any field.';
+// 해설은 음성으로 읽힌다. " - "는 "마이너스"로, 괄호 속 영어 풀이는 소리 나는 대로 앞뒤 낱말에 이어 읽혀 알아듣기 어렵다.
+// 해설 에이전트가 함께 쓰는 출력 형식 안내에 두어 모든 해설 프롬프트가 같은 규칙을 받는다.
+const SPOKEN_JOIN_RULE = '해설은 음성으로 읽힌다. 항목과 내용을 " - "로 가르거나 괄호에 영어 풀이("매출(Revenue)")를 달지 말고,'
+  + ' 이어 쓸 때는 쉼표로 잇는다.';
 // 발화에 정보 공백이 있는지는 라우터(판단 LLM)가 정한다. 에이전트가 같은 발화를 다시 판단하면 두 기준이 어긋날 때마다
 // 해설이 버려지므로, 생성 에이전트는 화면 근거로만 거절한다.
 const SPEECH_GAP_DECIDED_RULE = '발화에 정보 공백이 있다는 판단은 이미 끝났다.'
@@ -93,6 +97,7 @@ function buildSlotOutputInstruction({ narrationType, subKind, origin = null, ext
     '  끝내지 말 것: 조사(…이/가/을/를/은/는/와/과), 관형형(…하는/…되는/…나타내는), 관형사(두/세/여러/각/첫).',
     '  어절 수가 모자라면 대상을 줄이되 끝은 맺어라 — "팀 성과 공식과 두"(X) → "팀 성과 공식 두 가지"(O),'
       + ' "문제를 이기는"(X) → "문제 극복 방법"(O).',
+    SPOKEN_JOIN_RULE,
     NO_HAN_RULE,
     ...extraFieldList,
     buildSlotInstruction({ slotList }),

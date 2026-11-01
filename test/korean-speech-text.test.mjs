@@ -139,10 +139,63 @@ test('날짜·시각·번호처럼 읽을 말을 정할 수 없는 꼴은 그대
   assert.equal(normalizeKoreanSpeechText(null), '');
 });
 
+// 음성 엔진은 낱말 사이 " - "를 "마이너스"로 읽는다. 항목과 내용을 가르는 표시라 쉼표로 바꿔 읽는다.
+test('낱말 사이에 띄어 쓴 하이픈·대시(" - ", " – ", " — ")는 쉼표로 읽는다', () => {
+  assertCaseList([
+    ['항목 - 내용', '항목, 내용'],
+    ['현재 섭취량 – 권장량의 두 배', '현재 섭취량, 권장량의 두 배'],
+    ['결론 — 지출을 줄인다', '결론, 지출을 줄인다'],
+    ['여성 권장량 - 10.9g', '여성 권장량, 십 점 구 그램'],
+    ['1분기 - 2분기 - 3분기 막대', '일분기, 이분기, 삼분기 막대'],
+    ['비교표: - 왼쪽 열', '비교표: 왼쪽 열'],
+  ]);
+});
+
+test('음수·범위·낱말 속 하이픈과 양쪽이 숫자인 띄어 쓴 하이픈은 그대로 둔다', () => {
+  assertCaseList([
+    ['변화율 -0.11%', '변화율 마이너스 영 점 일일 퍼센트'],
+    ['-0.11% 하락', '마이너스 영 점 일일 퍼센트 하락'],
+    ['2~3개', '두세 개'],
+    ['2 - 3개', '두세 개'],
+    ['2 – 3개', '두세 개'],
+    ['2020 - 2025년', '2020 - 2025년'],
+    ['COVID-19 확진', 'COVID-19 확진'],
+    ['e-mail 주소', 'e-mail 주소'],
+    ['3월-6월', '3월-6월'],
+    ['010-1234-5678', '010-1234-5678'],
+    ['- 항목', '- 항목'],
+  ]);
+});
+
+// 영문 풀이를 소리 나는 대로 이어 읽어 "섭취량(Current Status)을"이 "…킛스테이터스를"처럼 들린다. 앞 한글 낱말이 같은 뜻을 이미 말한다.
+test('한글 낱말 바로 뒤 괄호 속 영문 풀이는 읽지 않는다', () => {
+  assertCaseList([
+    ['현재 소금 섭취량(Current Status)을 의미', '현재 소금 섭취량을 의미'],
+    ['금융불안지수(FSI)의 변화', '금융불안지수의 변화'],
+    ['섭취량 (Current Status)을 의미', '섭취량을 의미'],
+    ['인공지능(AI) 도입률', '인공지능 도입률'],
+    ['전년 대비(Year-over-Year) 증가', '전년 대비 증가'],
+    ['매출(Revenue) - 비용(Cost) 비교', '매출, 비용 비교'],
+  ]);
+});
+
+test('한글이 든 괄호, 글 맨 앞·영문 뒤 괄호, 숫자로 시작하거나 낱자 하나뿐인 괄호는 그대로 둔다', () => {
+  assertCaseList([
+    ['섭취량(하루 기준)', '섭취량(하루 기준)'],
+    ['나트륨(Na 성분)', '나트륨(Na 성분)'],
+    ['(Current Status) 현재 섭취량', '(Current Status) 현재 섭취량'],
+    ['GDP(Gross Domestic Product) 성장', 'GDP(Gross Domestic Product) 성장'],
+    ['나트륨(10.9g)', '나트륨(십 점 구 그램)'],
+    ['매출(Q3)', '매출(Q3)'],
+    ['보기(A)', '보기(에이)'],
+  ]);
+});
+
 test('두 번 씌워도 같다', () => {
   const textList = [
     'A, 3, J, 4가 적힌 분홍색 카드 4장이 있습니다.', '그런데 보시면 10.9g, 9.3g입니다.', '제4장 결론', '2~3개',
     '10~20개', '3시 30분', '1,200kcal', '3.2%p 상승', '3번 슬라이드', '2025년 9월', '05장',
+    '항목 - 내용', '현재 소금 섭취량(Current Status)을 의미', '변화율 -0.11%', '2020 - 2025년', '매출(Revenue) - 비용(Cost) 비교',
   ];
   for (const text of textList) {
     const once = normalizeKoreanSpeechText(text);
@@ -181,4 +234,15 @@ test('TTS 요청: 기호 읽기(달러)를 거친 뒤 숫자를 읽는다', asyn
   await client.synthesize({ text: 'Q&A = $30', language: 'ko' });
   // 기호 읽기로 "Q앤드A"가 된 뒤 낱자 영문도 한글 이름으로 읽는다.
   assert.equal(bodyList[0].text, '큐앤드에이 는 삼십달러');
+});
+
+test('TTS 요청: 한국어는 영문 풀이 괄호를 빼고 낱말 사이 하이픈을 쉼표로 읽으며, 영어는 그대로 보낸다', async () => {
+  const bodyList = mockFetch();
+  const client = createTtsClient({ config: { ttsUrl: 'http://tts', ttsLongUrl: 'http://tts-long' } });
+  await client.synthesize({ text: '현재 섭취량(Current Status) - 권장량의 2배', language: 'ko' });
+  await client.synthesizeLong({ text: '항목 - 내용\n금융불안지수(FSI)의 변화', language: 'ko' });
+  await client.synthesize({ text: 'Revenue - Cost (FY24)', language: 'en' });
+  assert.deepEqual(bodyList.map((body) => body.text), [
+    '현재 섭취량, 권장량의 2배', '항목, 내용\n금융불안지수의 변화', 'Revenue - Cost (FY24)',
+  ]);
 });
