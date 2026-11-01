@@ -3,7 +3,7 @@
 // 위치 출처: 같은 프레임 OCR 이 이미 끝나 있으면 그것 → 전환 때 뽑아 둔 위치(신선도 확인 뒤) → 없으면 확대하지 않는다.
 // 꺼져 있으면(SEEON_SPEECH_ROI=off) 아무것도 하지 않아 해설 요청이 지금과 바이트까지 같다.
 const { NARRATION_TYPE_MAP, VISUAL_DESCRIPTION_KIND_MAP, DEIXIS_FORM_MAP } = require('../../contracts/narration-types');
-const { ZOOM_KIND_MAP } = require('../../prompts/zoom-image-intro');
+const { readPointingZoomKind } = require('../../prompts/zoom-image-intro');
 const { extractSpeechTermList } = require('./term-extractor');
 const { selectRoiTarget, MATCH_KIND_MAP, ROI_SELECT_STATUS_MAP } = require('./label-matcher');
 const { estimateSpanRect, buildZoomRect, ZOOM_RECT_STATUS_MAP } = require('./roi-rect');
@@ -207,7 +207,7 @@ function createSpeechRoiResolver({ config, tokenizer = null, layoutStore = null,
       && Boolean(regionFrame) && Boolean(validPointingRect);
     if (isPointingPair) {
       zoomJpegBuffer = regionFrame;
-      zoomKind = ZOOM_KIND_MAP.pointing;
+      zoomKind = readPointingZoomKind(pointingRect);
     }
     const record = buildRecord({
       narrationType, outcome, zoomKind, hasPointingRect: Boolean(validPointingRect), elapsedMs: now() - startedAt,

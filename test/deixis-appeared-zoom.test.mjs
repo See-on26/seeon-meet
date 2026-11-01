@@ -64,8 +64,8 @@ test('나타난 그림 비율 상자(종류가 붙음)도 가리킴 짝 경로�
     pointingRect: { x: 0.0638, y: 0.1367, w: 0.2788, h: 0.8378, kind: 'appeared' },
   });
   assert.equal(result.zoomJpegBuffer, regionFrame);
-  // 확대 종류는 리졸버가 정한다: 비율 상자의 종류를 readPointingZoomKind 로 읽으면 appeared, 읽지 않으면 pointing 이다.
-  assert.ok([ZOOM_KIND_MAP.pointing, ZOOM_KIND_MAP.appeared].includes(result.zoomKind), result.zoomKind);
+  // 둘째 이미지 안내가 "가리킨 영역"이 아니라 "방금 띄운 그림"이 되도록 비율 상자의 종류를 확대 종류로 넘긴다.
+  assert.equal(result.zoomKind, ZOOM_KIND_MAP.appeared);
   assert.equal(result.record.hasPointingRect, true);
 });
 
