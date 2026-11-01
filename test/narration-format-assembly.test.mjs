@@ -47,3 +47,16 @@ test('지시 해설은 상황 칸 없이 대상 내용(caption)만 읽는다', (
   assert.equal(assemble({ narrationType: 'deixis', subKind: 'simple',
     rawSlotMap: { target: '응답 품질 변화 표', situation: '보는 중' } }), null, '옛 칸으로 온 답은 caption 이 없어 만들지 않는다');
 });
+
+// 쉼표로 늘어놓은 짧은 영문·숫자 항목은 한 어절로 센다. 낱낱이 세면 "A, 3, J, 4가 적힌 분홍색 카드 네 장"(8어절)이
+// 지시 단순형 상한(7어절)을 넘어 "A, 3, J, 4가 적힌"처럼 대상 없이 잘린다.
+test('지시 단순형: 짧은 항목 목록("A, 3, J, 4가")은 한 어절로 세어 대상이 잘리지 않는다', () => {
+  const contentSwitch = { isFactCompleteEnabled: true };
+  const text = (caption) => assembleNarration({
+    narrationType: 'deixis', subKind: 'simple', rawSlotMap: { seen: caption, caption, fact: '' }, contentSwitch,
+  })?.text ?? null;
+  assert.equal(text('A, 3, J, 4가 적힌 분홍색 카드 네 장'), 'A, 3, J, 4가 적힌 분홍색 카드 네 장');
+  assert.equal(text('보기 1, 2, 3 가운데 정답 고르기 문제 화면'), '보기 1, 2, 3 가운데 정답 고르기 문제 화면');
+  assert.equal(text('서울, 부산, 대구, 광주, 대전, 울산의 인구 비교 막대그래프'), '서울, 부산, 대구, 광주, 대전, 울산의 인구',
+    '한글 낱말 목록은 지금처럼 어절마다 센다');
+});
