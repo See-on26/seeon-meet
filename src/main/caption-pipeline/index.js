@@ -53,7 +53,7 @@ const {
   createFactCardTokenizer, selectFactCards, resolveFactCardUsage, formatFactCardSummary,
 } = require('./orchestrator/fact-card-select');
 const {
-  verifyValuePresence, readValueCheckTarget, approximateChartNarration, VALUE_PRESENCE_VERDICT_MAP, VALUE_CHECK_SOURCE_MAP,
+  verifyValuePresence, readValueCheckTarget, approximateChartNarration, readFirstPairArgs, VALUE_PRESENCE_VERDICT_MAP, VALUE_CHECK_SOURCE_MAP,
 } = require('./orchestrator/value-presence');
 const {
   createChartEstimator, detectTickSnapSuspect, toChartValueList, CHART_STATUS_MAP,
@@ -1180,6 +1180,8 @@ function registerPipeline({ getViewerView, meetingArchive = null }) {
       stage = PIPELINE_STAGE_MAP.vlm;
 
       const narrationType = selectedCandidate?.type || NARRATION_TYPE_MAP.deixis;
+      // 한 발화의 단순 수치가 둘 이상 확정되면 첫 수치 후보에 나머지 수치가 합쳐져 온다(arbiter). 해설 하나에 함께 담는다.
+      const mergedValueList = selectedCandidate?.mergedValueList || [];
       // 수치·척도 해설이면 판단 뒤 상한까지만 OCR 을 기다려 그 줄을 근거로 넘긴다. 늦거나 없으면 덩어리 없이(지금 프롬프트로) 만든다.
       // 수치 해설이면 같은 자리에서 그래프 어림도 한다(꺼져 있으면 하지 않는다).
       const screenTextPromise = isScreenTextNarrationType(narrationType) && screenTextTask
@@ -1204,6 +1206,7 @@ function registerPipeline({ getViewerView, meetingArchive = null }) {
         state: factCardState, usage: factCardUsage, utterance,
         anchorList: [
           selectedCandidate?.anchor, ...(selectedCandidate?.mergedAnchorList || []), ...(selectedCandidate?.mergedClaimList || []),
+          ...mergedValueList,
         ],
         beforeText, frameLineList: screenText?.lineList || [], requestTs: ts, tokenizer: factCardTokenizer,
       }) : null;
@@ -1214,7 +1217,7 @@ function registerPipeline({ getViewerView, meetingArchive = null }) {
         anchor: selectedCandidate?.anchor || '', slideLabel, screenFrame: frameSet.screenFrame,
         frameLayout: screenTextTask?.peekLayout() ?? null, pointingRect,
         regionFrame: fullBuffer ? frameSet.selectAgentFrame(NARRATION_TYPE_MAP.deixis) : null,
-        mergedClaimCount: selectedCandidate?.mergedClaimList?.length || 0,
+        mergedClaimCount: (selectedCandidate?.mergedClaimList?.length || 0) + mergedValueList.length,
       });
       if (speechRoiResult.record) {
         markDebug({
@@ -1230,6 +1233,8 @@ function registerPipeline({ getViewerView, meetingArchive = null }) {
         subKind: selectedCandidate?.subKind || null,
         mergedAnchorList: selectedCandidate?.mergedAnchorList || [],
         mergedClaimList: selectedCandidate?.mergedClaimList || [],
+        // 수치가 둘 이상이면 첫 수치와 합친 수치를 함께 넘겨 값→의미 에이전트가 짝 칸으로 두 값을 담게 한다. 하나면 빈 목록이다.
+        spokenValueList: mergedValueList.length ? [selectedCandidate.anchor, ...mergedValueList] : [],
         // 확대 그림이 있으면 첫째 장을 화면 전체로 바꾸고 확대를 둘째 장으로 넘긴다. 없으면 아무것도 바꾸지 않는다.
         ...buildZoomAgentArgs({ roiResult: speechRoiResult, screenFrame: frameSet.screenFrame }),
       };
@@ -1356,14 +1361,19 @@ function registerPipeline({ getViewerView, meetingArchive = null }) {
         }
         const chartCoreList = [...(valueVerdict.chartCoreList || [])];
         let isSecondPairDropped = false;
-        // 둘째 변화의 값이 화면에 없으면 둘째 쌍만 빼고 첫 쌍으로 읽는다. 첫 쌍은 에이전트가 쓴 전체 예산에 다시 맞춘다.
+        // 둘째 변화(값→의미는 둘째 수치)의 값이 화면에 없으면 둘째 쌍만 빼고 첫 쌍으로 읽는다. 첫 쌍은 에이전트가 쓴 전체 예산에 다시 맞춘다.
+        const firstPairArgs = readFirstPairArgs({ subKind: selectedCandidate?.subKind, slotMap });
         if (slotMap?.value2 && text.includes(slotMap.value2)) {
-          const secondVerdict = await verifyValueOnSlide(slotMap.value2);
+          // 값→의미 둘째 수치도 첫 수치처럼 발화의 수와 견준다. 멀면 옆 막대·다른 항목의 값이라 화면에 있어도 둘째 쌍을 뺀다.
+          const secondSpokenMatch = isSpokenValueChecked ? checkSpokenValueMatch({ value: slotMap.value2, utterance }) : null;
+          const secondVerdict = secondSpokenMatch?.verdict === SPOKEN_VALUE_VERDICT_MAP.far
+            ? { verdict: VALUE_PRESENCE_VERDICT_MAP.absent, reason: `발화 값 대조 far · ${secondSpokenMatch.reason}` }
+            : await verifyValueOnSlide(slotMap.value2);
           chartCoreList.push(...(secondVerdict.chartCoreList || []));
           if (secondVerdict.verdict === VALUE_PRESENCE_VERDICT_MAP.absent) {
             isSecondPairDropped = true;
             const firstPair = assembleNarration({
-              narrationType, subKind: selectedCandidate?.subKind, rawSlotMap: { ...slotMap, target2: '', value2: '' },
+              narrationType, subKind: selectedCandidate?.subKind, ...firstPairArgs,
               maxWordCount: appliedBudget?.maxWordCount, maxChars: appliedBudget?.maxChars,
               language: getCaptionLanguage(), contentSwitch: config.contentSwitch,
             });
@@ -1379,8 +1389,10 @@ function registerPipeline({ getViewerView, meetingArchive = null }) {
         if (chartCoreList.length) {
           const approximated = approximateChartNarration({
             narrationType, subKind: selectedCandidate?.subKind || INTERPRETATION_KIND_MAP.valueToMeaning,
-            slotMap: isSecondPairDropped ? { ...slotMap, target2: '', value2: '' } : slotMap, coreList: chartCoreList,
-            hasSecondClaim: !isSecondPairDropped && (selectedCandidate?.mergedClaimList || []).length > 0,
+            slotMap: isSecondPairDropped ? firstPairArgs.rawSlotMap : slotMap, coreList: chartCoreList,
+            hasSecondClaim: isSecondPairDropped
+              ? firstPairArgs.hasSecondClaim
+              : ((selectedCandidate?.mergedClaimList || []).length > 0 || mergedValueList.length > 0),
             maxWordCount: appliedBudget?.maxWordCount, maxChars: appliedBudget?.maxChars, language: getCaptionLanguage(),
           });
           markDebug({
@@ -1421,6 +1433,7 @@ function registerPipeline({ getViewerView, meetingArchive = null }) {
           subKind: selectedCandidate?.subKind || null,
           summary: `근거 표현=${[
             selectedCandidate?.anchor, ...(selectedCandidate?.mergedAnchorList || []), ...(selectedCandidate?.mergedClaimList || []),
+            ...mergedValueList,
           ].filter(Boolean).join(', ') || '(없음)'}`
             + `${hasPointingRegion ? ' · 필기/포인터 영역 있음' : ''}`,
         },

@@ -36,6 +36,11 @@ function isClaimToValue({ candidate }) {
     && candidate.subKind === INTERPRETATION_KIND_MAP.claimToValue;
 }
 
+function isValueToMeaning({ candidate }) {
+  return candidate.type === NARRATION_TYPE_MAP.interpretation
+    && candidate.subKind === INTERPRETATION_KIND_MAP.valueToMeaning;
+}
+
 function isScaleDescription({ candidate }) {
   return candidate.type === NARRATION_TYPE_MAP.visualDescription
     && candidate.subKind === VISUAL_DESCRIPTION_KIND_MAP.scale;
@@ -97,6 +102,20 @@ function resolveCandidateList({ candidateList, nowTs = Date.now() }) {
     survivorList = survivorList
       .filter((candidate) => !restClaimList.includes(candidate))
       .map((candidate) => (candidate === firstClaim ? { ...candidate, mergedClaimList } : candidate));
+  }
+
+  // 단순 수치 후보가 둘 이상이면("보시면 4.2, 3.1") 첫 후보로 해설 하나를 만들되, 나머지 수치를 넘겨 같은 측정량의 값이면
+  // 두 값을 함께 담게 한다. 넘기지 않으면 에이전트가 발화 속 수치 가운데 하나만 골라 해설해 나머지 값의 뜻이 빠진다.
+  const valueList = survivorList.filter((candidate) => isValueToMeaning({ candidate }));
+  if (valueList.length > 1) {
+    const [firstValue, ...restValueList] = valueList;
+    const mergedValueList = restValueList
+      .map((candidate) => candidate.anchor)
+      .filter((anchor) => typeof anchor === 'string' && anchor.trim());
+    for (const candidate of restValueList) drop({ candidate, skipReason: SKIP_REASON_MAP.mergedIntoOther });
+    survivorList = survivorList
+      .filter((candidate) => !restValueList.includes(candidate))
+      .map((candidate) => (candidate === firstValue ? { ...candidate, mergedValueList } : candidate));
   }
 
   const resolvedList = [...survivorList].sort((left, right) => (

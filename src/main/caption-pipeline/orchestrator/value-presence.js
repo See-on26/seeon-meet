@@ -131,6 +131,17 @@ async function verifyValuePresence({ value, subKind, utterance = '', contextText
   };
 }
 
+// 둘째 값이 화면에 없거나 발화의 수와 멀어 둘째 쌍을 뺄 때 다시 조립할 칸과 칸 목록 갈래.
+// 주장→값은 둘째 대상·값을 비우고 첫 쌍 칸 목록으로 조립한다. 값→의미는 둘째 값·항목만 비우고 짝 칸 목록을 그대로 써
+// 첫 값의 항목 이름(label)을 남긴다("…는 서울 방문객 수를 의미"). 짝 칸 없이 조립하면 항목 이름이 버려진다.
+function readFirstPairArgs({ subKind, slotMap }) {
+  const isValuePair = subKind === INTERPRETATION_KIND_MAP.valueToMeaning;
+  return {
+    rawSlotMap: isValuePair ? { ...slotMap, value2: '', label2: '' } : { ...slotMap, target2: '', value2: '' },
+    hasSecondClaim: isValuePair,
+  };
+}
+
 // 어림값으로 통과한 숫자는 어림 표지를 붙여 읽는다. 앞("약 770", "about 770")이나 뒤("770쯤", "770명 정도")에 이미 있으면 그대로 둔다.
 const APPROXIMATE_PREFIX_PATTERN = /(?:(?:^|[^가-힣])(?:약|대략)|\b(?:about|around|approximately|roughly)|~)\s*$/i;
 const APPROXIMATE_SUFFIX_PATTERN = /^[^\s\d]{0,3}\s*(?:정도|쯤|가량)/;
@@ -177,5 +188,5 @@ function approximateChartNarration({ narrationType, subKind, slotMap, coreList, 
 
 module.exports = {
   isValuePresent, verifyValuePresence, findMissingNumberCoreList, readValueCheckTarget, VALUE_PRESENCE_VERDICT_MAP, VALUE_CHECK_SOURCE_MAP,
-  markApproximateNumber, hasUnmarkedApproximateNumber, approximateChartNarration,
+  markApproximateNumber, hasUnmarkedApproximateNumber, approximateChartNarration, readFirstPairArgs,
 };
