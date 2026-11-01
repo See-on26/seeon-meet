@@ -147,9 +147,22 @@ function readCounter(text) {
   });
 }
 
+// 낱자로 떨어진 영문자("A, 3, J, 4", "A사")는 한글 이름으로 읽는다. Ming 은 낱자 영문이 섞인 문장에서 끝맺지 못하고 웅얼거리는
+// 일이 잦았다. 영문·숫자·&·하이픈·작은따옴표에 붙은 글자(GPU, Q3, 5G, e-mail, AT&T)는 단어라 그대로 둔다.
+// 숫자·단위를 읽은 뒤에 바꿔 "%p"·"10.9g" 의 글자는 이미 읽는 말이 되어 있다.
+const LATIN_LETTER_NAME_MAP = {
+  A: '에이', B: '비', C: '씨', D: '디', E: '이', F: '에프', G: '지', H: '에이치', I: '아이', J: '제이', K: '케이', L: '엘', M: '엠',
+  N: '엔', O: '오', P: '피', Q: '큐', R: '알', S: '에스', T: '티', U: '유', V: '브이', W: '더블유', X: '엑스', Y: '와이', Z: '제트',
+};
+const LONE_LATIN_LETTER_PATTERN = /(?<![A-Za-z0-9&'’-])([A-Za-z])(?![A-Za-z0-9&'’-])/g;
+
+function readLoneLatinLetter(text) {
+  return text.replace(LONE_LATIN_LETTER_PATTERN, (letter) => LATIN_LETTER_NAME_MAP[letter.toUpperCase()]);
+}
+
 function normalizeKoreanSpeechText(text) {
   const counterRead = readCounter(readRangeCounter(readUnit(readOrdinal(String(text ?? '')))));
-  return readNumbersForSpeech({ text: counterRead, language: 'ko' });
+  return readLoneLatinLetter(readNumbersForSpeech({ text: counterRead, language: 'ko' }));
 }
 
 module.exports = { normalizeKoreanSpeechText };
