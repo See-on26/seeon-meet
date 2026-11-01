@@ -20,6 +20,11 @@ function isSentenceComplete(text) {
   return classifyUtteranceEnding(text) === BOUNDARY_KIND_MAP.complete;
 }
 
+// 결정에 담긴 마지막 조각(합친 뒤 조각이 없으면 트리거 조각).
+function readLastText({ followList = [], utterance = '' }) {
+  return followList.length ? followList[followList.length - 1] : utterance;
+}
+
 // ASR 응답은 순서가 뒤바뀌어 올 수 있다. 트리거 조각보다 먼저 녹음된 조각(endTs ≤ chunkEndWallTs)은 뒤 조각이 아니다.
 function isBeforeTriggerChunk({ endTs, chunkEndWallTs }) {
   return Number.isFinite(endTs) && Number.isFinite(chunkEndWallTs) && endTs <= chunkEndWallTs;
@@ -108,9 +113,16 @@ export class DeixisCandidateScheduler {
     const validList = (candidateList || []).filter((candidate) => candidate?.phrase);
     const trigger = describeTriggerCandidateList(validList);
     if (this.held) {
-      this.held.tailList.push(trimmed);
-      if (!validList.length) return { isAppended: false, isDecided: false };
+      const { held } = this;
+      held.tailList.push(trimmed);
+      // 보류 끝에 문장을 기다리던 결정은 문장을 맺는 조각이 오면 그 조각까지 담아 바로 봉합한다.
+      const isSealNow = held.isSealWaited && isSentenceComplete(trimmed);
+      if (!validList.length) {
+        if (isSealNow) { this.mergeHeld({ trigger: '', candidateList: [] }); this.seal(held); }
+        return { isAppended: false, isDecided: false };
+      }
       this.mergeHeld({ trigger, candidateList: validList });
+      if (isSealNow) this.seal(held);
       return { isAppended: true, isDecided: false };
     }
     this.pending.followList.push(trimmed);
@@ -213,6 +225,16 @@ export class DeixisCandidateScheduler {
 
   seal(entry) {
     if (!this.holdingSet.has(entry)) return;
+    // 보류가 끝났는데 합친 마지막 조각이 문장을 맺지 않았으면("…근데 보시면 10.9") 문장 끝 대기만큼 한 번 더 열어 두어
+    // 바로 뒤 조각의 값("9.3 거의 2배…")까지 같은 판단에 담는다. 다른 결정이 합치는 중이면 열지 않는다.
+    const isOpenable = this.held === null || this.held === entry;
+    if (!entry.isSealWaited && this.sentenceWaitMs > 0 && isOpenable && !isSentenceComplete(readLastText(entry))) {
+      entry.isSealWaited = true;
+      entry.isSentenceWaited = true;
+      this.held = entry;
+      entry.sealTimerHandle = this.setTimer(() => this.seal(entry), this.sentenceWaitMs);
+      return;
+    }
     this.holdingSet.delete(entry);
     if (this.held === entry) this.held = null;
     if (entry.mergeTimerHandle !== null) { this.clearTimer(entry.mergeTimerHandle); entry.mergeTimerHandle = null; }

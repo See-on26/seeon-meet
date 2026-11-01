@@ -359,6 +359,43 @@ const CLAIM_SECOND_PAIR_SLOT_LIST = [
   { key: 'value2', label: '그 대상의 근거 값 — 반드시 수치. 같거나 없으면 빈 문자열', minWordCount: 0, maxWordCount: 5 },
 ];
 
+// 값→의미 짝. 한 발화의 단순 수치가 둘 이상 확정되면(hasSecondClaim) 같은 그래프·표에서 한 측정량을 항목마다 나눈 두 수치를
+// 해설 하나에 담는다. 첫 값 뒤에 그 값의 항목(label)·둘째 값(value2)·둘째 항목(label2) 칸을 두고, 해석틀은 두 값이 함께 속한 측정량으로 받는다.
+// 짝 칸은 모두 비어도 된다 — 둘째 값이 다른 대상의 값이거나 항목을 가를 수 없으면 비우고, 조립이 남은 칸에 맞는 꼴을 고른다.
+const VALUE_PAIR_LABEL_SLOT = {
+  key: 'label', label: '첫 수치가 속한 항목 — 둘째 수치와 가르는 범례·축 라벨 그대로(성별·연도·지역 등). 가를 수 없으면 빈 문자열 (예: 서울)',
+  minWordCount: 0, maxWordCount: 2, isPhrase: true,
+};
+const VALUE_PAIR_SECOND_SLOT_LIST = [
+  {
+    key: 'value2', label: '발표자가 말한 둘째 수치 — 첫 수치와 같은 그래프·표에서 같은 측정량을 나눈 값일 때만, 화면에 적힌 꼴 그대로. 아니면 빈 문자열 (예: 140)',
+    minWordCount: 0, maxWordCount: 2,
+  },
+  { key: 'label2', label: '둘째 수치가 속한 항목 — 범례·축 라벨 그대로. 가를 수 없으면 빈 문자열 (예: 부산)', minWordCount: 0, maxWordCount: 2, isPhrase: true },
+];
+const VALUE_PAIR_FRAME_LABEL = '값의 해석틀 — 화면에서 찾은 대상·기준. 두 수치를 함께 쓰면 두 수치가 함께 속한 측정량(항목 이름은 label·label2 칸에)'
+  + ' (예: 작년 대비 A사 기업가치 성장률, 방문객 수)';
+const ENGLISH_VALUE_PAIR_LABEL_MAP = {
+  label: 'the item the first figure belongs to — the legend or axis label that tells it apart from the second figure (gender, year,'
+    + ' region, etc.), as written; empty string if they cannot be told apart (e.g. Seoul)',
+  value2: 'the second figure the speaker said — only if it splits the same measure on the same chart or table as the first figure,'
+    + ' as written on screen; otherwise empty string (e.g. 140)',
+  label2: 'the item the second figure belongs to — the legend or axis label as written; empty string if they cannot be told apart (e.g. Busan)',
+  frame: 'what the figure measures — the item/basis found on screen; when both figures are used, the measure they share'
+    + ' (item names go in label and label2) (e.g. "Company A\'s year-over-year valuation growth rate", "daily visitors")',
+};
+
+function isValuePairSlotList({ narrationType, subKind, hasSecondClaim }) {
+  return hasSecondClaim && narrationType === NARRATION_TYPE_MAP.interpretation && subKind === INTERPRETATION_KIND_MAP.valueToMeaning;
+}
+
+function toValuePairSlotList(slotList) {
+  return slotList.flatMap((slot) => {
+    if (slot.key === 'value') return [slot, VALUE_PAIR_LABEL_SLOT, ...VALUE_PAIR_SECOND_SLOT_LIST];
+    return slot.key === 'frame' ? [{ ...slot, label: VALUE_PAIR_FRAME_LABEL }] : [slot];
+  });
+}
+
 // 영어 캡션의 칸 설명. 칸 이름·어절(단어) 수는 한국어 칸과 같고, 설명만 영어 구에 맞게 바꾼다.
 const ENGLISH_DEIXIS_SEEN_LABEL = 'what is actually visible where the speaker pointed — text as written, drawings/marks briefly';
 const ENGLISH_SLOT_LABEL_MAP = {
@@ -488,6 +525,7 @@ function readSlotList({ narrationType, subKind, origin = null, hasSecondClaim = 
   const slotList = baseSlotList && isScreenValueLabelSlotList({ narrationType, subKind, contentSwitch })
     ? baseSlotList.map((slot) => (slot.key === 'value' ? { ...slot, label: SCREEN_VALUE_FIRST_VALUE_LABEL } : slot))
     : baseSlotList;
+  if (slotList && isValuePairSlotList({ narrationType, subKind, hasSecondClaim })) return toValuePairSlotList(slotList);
   const isClaimPair = hasSecondClaim && narrationType === NARRATION_TYPE_MAP.interpretation
     && subKind === INTERPRETATION_KIND_MAP.claimToValue;
   if (!slotList || !isClaimPair) return slotList;
@@ -514,12 +552,13 @@ function scaleWordBudget({ minWordCount, maxWordCount, language }) {
   return { minWordCount, maxWordCount: scaleMaxWordCount({ count: maxWordCount, language }) };
 }
 
-function readEnglishLabelMap({ narrationType, subKind, contentSwitch }) {
+function readEnglishLabelMap({ narrationType, subKind, contentSwitch, hasSecondClaim = false }) {
   return {
     ...(ENGLISH_SLOT_LABEL_MAP[narrationType]?.[subKind] || {}),
     ...(contentSwitch.isFactCompleteEnabled ? ENGLISH_FACT_COMPLETE_LABEL_MAP[narrationType]?.[subKind] : null),
     ...(isScreenValueLabelSlotList({ narrationType, subKind, contentSwitch }) ? { value: ENGLISH_SCREEN_VALUE_FIRST_VALUE_LABEL } : null),
     ...(isScaleValueFirstSlotList({ narrationType, subKind, contentSwitch }) ? ENGLISH_SCALE_VALUE_FIRST_LABEL_MAP : null),
+    ...(isValuePairSlotList({ narrationType, subKind, hasSecondClaim }) ? ENGLISH_VALUE_PAIR_LABEL_MAP : null),
   };
 }
 
@@ -531,7 +570,7 @@ function getSlotList({ narrationType, subKind, origin = null, hasSecondClaim = f
   if (!slotList || language !== CAPTION_LANGUAGE_MAP.en) return slotList;
   const isSilenceDescription = slotList === SILENCE_DESCRIPTION_SLOT_LIST;
   const labelMap = isSilenceDescription
-    ? ENGLISH_SILENCE_DESCRIPTION_LABEL_MAP : readEnglishLabelMap({ narrationType, subKind, contentSwitch: resolvedSwitch });
+    ? ENGLISH_SILENCE_DESCRIPTION_LABEL_MAP : readEnglishLabelMap({ narrationType, subKind, contentSwitch: resolvedSwitch, hasSecondClaim });
   return slotList.map((slot) => ({
     ...slot,
     label: labelMap[slot.key] || slot.label,
@@ -843,6 +882,42 @@ function assembleClaimToValue({ slotMap, maxWordCount, maxChars, language = CAPT
   return Number.isFinite(maxWordCount) && countWord({ text: both }) > maxWordCount ? first : both;
 }
 
+// 값→의미 짝에서 모델이 두 값을 첫 값 칸에 몰아 쓰면("320, 140") 둘째 값 칸으로 나눠 옮기고, 항목 칸도 둘로 나뉘면("서울, 부산") 함께 나눈다.
+// 숫자 안의 쉼표("1,200명")는 값 경계가 아니다(splitItemList). 짝 칸 목록이 아니면 칸을 그대로 둔다.
+function splitPackedValuePair({ narrationType, subKind, rawSlotMap, hasSecondClaim }) {
+  if (!isValuePairSlotList({ narrationType, subKind, hasSecondClaim }) || rawSlotMap?.value2) return rawSlotMap;
+  const valueItemList = splitItemList({ text: rawSlotMap?.value });
+  if (valueItemList.length !== 2 || !valueItemList.every((item) => hasValueToken({ text: item }))) return rawSlotMap;
+  const labelItemList = splitItemList({ text: rawSlotMap?.label });
+  const labelPair = labelItemList.length === 2 && !rawSlotMap.label2 ? { label: labelItemList[0], label2: labelItemList[1] } : {};
+  return { ...rawSlotMap, value: valueItemList[0], value2: valueItemList[1], ...labelPair };
+}
+
+// 값→의미 조립. 짝 칸이 없으면(수치 하나) 예전처럼 "X는 …을 의미"다.
+// 짝이면 두 항목 이름이 다 있을 때 "A는 x, B는 y …을 의미", 하나라도 없으면 "A, B는 …을 의미"로 두 값을 함께 읽는다.
+// 둘째 값이 비었거나 수치가 아니면(다른 대상의 값) 첫 값만 읽고, 첫 값의 항목 이름이 있으면 해석틀 앞에 붙인다("…는 서울 방문객 수를 의미").
+// 짝 해설이 전체 예산(어절·글자)을 넘으면 항목 이름부터 빼고, 그래도 넘으면 첫 값만 읽는다.
+function assembleValueToMeaning({ slotMap, maxWordCount = null, maxChars = null, language = CAPTION_LANGUAGE_MAP.ko }) {
+  const { value, label, value2, label2, frame } = slotMap;
+  const isEnglish = language === CAPTION_LANGUAGE_MAP.en;
+  const topic = (text) => attachJosa({ text, withFinal: '은', withoutFinal: '는' });
+  const meaning = `${attachJosa({ text: frame, withFinal: '을', withoutFinal: '를' })} 의미`;
+  const single = isEnglish
+    ? `${value} means ${frame}${label ? ` for ${label}` : ''}`
+    : `${topic(value)} ${label ? `${label} ` : ''}${meaning}`;
+  if (!hasValueToken({ text: value2 })) return single;
+  const both = isEnglish ? `${value} and ${value2} mean ${frame}` : `${value}, ${topic(value2)} ${meaning}`;
+  let labeled = null;
+  if (label && label2) {
+    labeled = isEnglish
+      ? `${both} for ${label} and ${label2}, respectively`
+      : `${topic(value)} ${label}, ${topic(value2)} ${label2} ${meaning}`;
+  }
+  const isOver = (text) => (Number.isFinite(maxWordCount) && countWord({ text }) > maxWordCount)
+    || (Number.isFinite(maxChars) && text.length > maxChars);
+  return [labeled, both].find((text) => text && !isOver(text)) || single;
+}
+
 // 지시 단순형의 식별 사실(fact)은 대상(caption) 뒤에 쉼표로 잇는다. fact 낱말이 모두 caption 에 이미 있으면 되풀이라 붙이지 않는다.
 // 이은 해설은 지시 단순형 읽기 상한(영어는 1.9배)과 렌더러 예산(maxWordCount) 가운데 작은 쪽을 넘지 않는다. 넘으면 caption 끝의
 // 자료 종류 낱말(표·그래프 등)만 떼고, 그래도 넘으면 fact 없이 caption 만 그대로 읽는다.
@@ -931,8 +1006,10 @@ const TIME_RESTORE_RULE_MAP = {
     },
   },
   [NARRATION_TYPE_MAP.interpretation]: {
-    // 조립 틀이 붙이는 "의미"(영어 "means") 1어절도 읽히는 길이에 든다.
-    [INTERPRETATION_KIND_MAP.valueToMeaning]: { sourceKey: 'source', targetKey: 'frame', readKeyList: ['value', 'frame'], fixedWordCount: 1 },
+    // 조립 틀이 붙이는 "의미"(영어 "means") 1어절도 읽히는 길이에 든다. 짝 칸(label·value2·label2)은 수치가 하나면 비어 있다.
+    [INTERPRETATION_KIND_MAP.valueToMeaning]: {
+      sourceKey: 'source', targetKey: 'frame', readKeyList: ['value', 'label', 'value2', 'label2', 'frame'], fixedWordCount: 1,
+    },
     [INTERPRETATION_KIND_MAP.claimToValue]: {
       sourceKey: 'source', targetKey: 'target', readKeyList: ['target', 'value', 'target2', 'value2'], isBudgetFitted: true,
     },
@@ -1012,10 +1089,7 @@ const NARRATION_ASSEMBLE_MAP = {
     [DEIXIS_FORM_MAP.complete]: ({ slotMap }) => slotMap.caption,
   },
   [NARRATION_TYPE_MAP.interpretation]: {
-    [INTERPRETATION_KIND_MAP.valueToMeaning]: ({ slotMap }) => (
-      `${attachJosa({ text: slotMap.value, withFinal: '은', withoutFinal: '는' })} `
-      + `${attachJosa({ text: slotMap.frame, withFinal: '을', withoutFinal: '를' })} 의미`
-    ),
+    [INTERPRETATION_KIND_MAP.valueToMeaning]: ({ slotMap, maxWordCount, maxChars }) => assembleValueToMeaning({ slotMap, maxWordCount, maxChars }),
     [INTERPRETATION_KIND_MAP.claimToValue]: assembleClaimToValue,
   },
   [NARRATION_TYPE_MAP.visualDescription]: {
@@ -1053,7 +1127,9 @@ const ENGLISH_NARRATION_ASSEMBLE_MAP = {
     [DEIXIS_FORM_MAP.complete]: ({ slotMap }) => slotMap.caption,
   },
   [NARRATION_TYPE_MAP.interpretation]: {
-    [INTERPRETATION_KIND_MAP.valueToMeaning]: ({ slotMap }) => `${slotMap.value} means ${slotMap.frame}`,
+    [INTERPRETATION_KIND_MAP.valueToMeaning]: ({ slotMap, maxWordCount, maxChars }) => assembleValueToMeaning({
+      slotMap, maxWordCount, maxChars, language: CAPTION_LANGUAGE_MAP.en,
+    }),
     [INTERPRETATION_KIND_MAP.claimToValue]: ({ slotMap, maxWordCount, maxChars, keepsTimeMark }) => assembleClaimToValue({
       slotMap, maxWordCount, maxChars, language: CAPTION_LANGUAGE_MAP.en, keepsTimeMark,
     }),
@@ -1087,7 +1163,10 @@ function assembleEnglishNarration({ narrationType, subKind, rawSlotMap, index, o
   const slotList = getSlotList({ narrationType, subKind, origin, hasSecondClaim, language: CAPTION_LANGUAGE_MAP.en, contentSwitch });
   const assemble = ENGLISH_NARRATION_ASSEMBLE_MAP[narrationType]?.[subKind];
   if (!slotList || !assemble) return null;
-  const normalizedSlotMap = normalizeEnglishSlotMap({ slotList, rawSlotMap: pairClaimSlot({ narrationType, subKind, rawSlotMap }) });
+  const pairedRawSlotMap = splitPackedValuePair({
+    narrationType, subKind, hasSecondClaim, rawSlotMap: pairClaimSlot({ narrationType, subKind, rawSlotMap }),
+  });
+  const normalizedSlotMap = normalizeEnglishSlotMap({ slotList, rawSlotMap: pairedRawSlotMap });
   if (hasEmptyRequiredSlot({ slotList, slotMap: normalizedSlotMap })) return null;
   if (hasValuelessSlot({ slotList, slotMap: normalizedSlotMap })) return null;
   const keepsTimeMark = contentSwitch.isTimeMarkEnabled;
@@ -1122,9 +1201,10 @@ function assembleNarration({ narrationType, subKind, rawSlotMap, index = '', ori
   const slotList = getSlotList({ narrationType, subKind, origin, hasSecondClaim, contentSwitch: resolvedSwitch });
   const assemble = NARRATION_ASSEMBLE_MAP[narrationType]?.[subKind];
   if (!slotList || !assemble) return null;
-  const normalizedSlotMap = normalizeSlotMap({
-    slotList, rawSlotMap: pairClaimSlot({ narrationType, subKind, rawSlotMap }), contentSwitch: resolvedSwitch,
+  const pairedRawSlotMap = splitPackedValuePair({
+    narrationType, subKind, hasSecondClaim, rawSlotMap: pairClaimSlot({ narrationType, subKind, rawSlotMap }),
   });
+  const normalizedSlotMap = normalizeSlotMap({ slotList, rawSlotMap: pairedRawSlotMap, contentSwitch: resolvedSwitch });
   if (hasEmptyRequiredSlot({ slotList, slotMap: normalizedSlotMap })) return null;
   if (hasValuelessSlot({ slotList, slotMap: normalizedSlotMap })) return null;
   if (hasInvalidTailSlot({ slotList, slotMap: normalizedSlotMap })) return null;

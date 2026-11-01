@@ -76,6 +76,27 @@ function buildInterpretationScreenTextBlock({ screenLineList = [], utterance = '
   });
 }
 
+// 값→의미에 확정된 수치가 둘 이상이면(spokenValueList) 짝 칸(value2·label·label2)으로 두 수치를 해설 하나에 담는다.
+// 수치가 하나면 짝 칸·안내 없이 예전 프롬프트 그대로다.
+function hasSecondValue({ subKind, spokenValueList = [] }) {
+  return (subKind || INTERPRETATION_KIND_MAP.valueToMeaning) === INTERPRETATION_KIND_MAP.valueToMeaning && spokenValueList.length > 1;
+}
+
+// 발화 속 수치 가운데 공백으로 확정된 것만 알린다. 알리지 않으면 모델이 발화의 다른 수(기준치 등)나 한 수치만 골라 해설한다.
+function buildValuePairLineList(spokenValueList) {
+  return [
+    `발표자는 수치를 여럿 말했다: ${spokenValueList.map((value) => `"${value}"`).join(', ')}.`
+      + ' 같은 그래프·표에서 한 측정량을 항목(성별·연도·지역 등)마다 나눈 값이면 해설 하나에 앞의 두 수치를 함께 담는다:'
+      + ' "value"·"value2"에 두 수치를, "label"·"label2"에 각 수치가 속한 항목 이름(범례·축 라벨)을, "frame"에 두 수치가 함께 속한 측정량을 쓴다.',
+    '  각 수치의 항목 이름은 그 수치 옆·위의 범례·축 라벨 글자에서 찾는다. 어느 수치가 어느 항목인지 화면에서 가를 수 없으면 "label"·"label2"는 빈 문자열로 둔다.'
+      + ' 서로 다른 대상의 값이면 첫 수치만 쓰고 "value2"·"label2"는 빈 문자열로 둔다.',
+    '  "label"·"label2"를 비울 때는 "frame"에 두 수치가 무엇으로 나뉘는지(성별·연도·지역 등)를 넣는다 (예: "성별에 따른 방문객 수").'
+      + ' "label"·"label2"를 채웠으면 "frame"에 항목 기준 말(남녀별·지역별·연도별 등)을 다시 쓰지 않는다.',
+    '  예) "보시면 320, 140이에요" + 화면 "지역별 방문객 수 — 서울 320명, 부산 140명"'
+      + ' → value "320", label "서울", value2 "140", label2 "부산", frame "방문객 수" (시스템이 "320은 서울, 140은 부산 방문객 수를 의미"로 조립)',
+  ];
+}
+
 // 그래프 어림값이 있으면 "화면에 수치가 없으면 NONE" 앞에 어림값도 화면의 수치라는 줄을 둔다.
 const SCREEN_VALUE_ABSENT_RULE_PREFIX = '**화면에 수치가 없으면';
 
@@ -88,10 +109,11 @@ function applyChartEstimateRuleList({ ruleList, hasChartEstimate }) {
 function buildInterpretationPrompt({ utterance, recentTranscript = '', subKind = null,
   minWordCount = DEFAULT_INTERPRETATION_MIN_WORD_COUNT,
   maxWordCount = DEFAULT_INTERPRETATION_MAX_WORD_COUNT,
-  maxChars = null, describedElementList = [], mergedAnchorList = [], mergedClaimList = [],
+  maxChars = null, describedElementList = [], mergedAnchorList = [], mergedClaimList = [], spokenValueList = [],
   screenLineList = [], factCardList = [], chartEstimate = null, language = DEFAULT_CAPTION_LANGUAGE, contentSwitch = null,
   zoomKind = null, zoomTerm = null }) {
   const resolvedSwitch = resolveContentSwitch(contentSwitch);
+  const isValuePair = hasSecondValue({ subKind, spokenValueList });
   const effectiveMaxChars = Number.isFinite(maxChars) ? maxChars : computeMaxChars({ maxWordCount, language });
   const screenTextBlock = buildInterpretationScreenTextBlock({
     screenLineList, utterance, subKind, mergedAnchorList, mergedClaimList, contentSwitch: resolvedSwitch,
@@ -129,6 +151,7 @@ function buildInterpretationPrompt({ utterance, recentTranscript = '', subKind =
         + ' 그 대상이 첫 변화의 대상과 다르면(예: 매출과 방문자 수) "target2"·"value2"에 그 대상과 화면의 값을 쓴다.'
         + ' 같은 대상·같은 값을 다시 말한 것이면 "target2"·"value2"는 빈 문자열로 둔다.'
       : '',
+    ...(isValuePair ? buildValuePairLineList(spokenValueList) : []),
     approximateValueLine,
     // 사실 카드 덩어리는 화면 글자 덩어리 바로 앞에 빈 줄 하나를 두고 넣는다. 카드가 없으면 프롬프트는 글자 하나까지 그대로다.
     factCardBlock.text ? `${factCardBlock.text}\n` : '',
@@ -144,7 +167,7 @@ function buildInterpretationPrompt({ utterance, recentTranscript = '', subKind =
     buildSlotOutputInstruction({
       narrationType: NARRATION_TYPE_MAP.interpretation,
       subKind: subKind || INTERPRETATION_KIND_MAP.valueToMeaning,
-      hasSecondClaim: mergedClaimList.length > 0,
+      hasSecondClaim: mergedClaimList.length > 0 || isValuePair,
       language,
       contentSwitch: resolvedSwitch,
     }),
@@ -167,6 +190,6 @@ function buildInterpretationPrompt({ utterance, recentTranscript = '', subKind =
 }
 
 module.exports = {
-  buildInterpretationPrompt, buildInterpretationScreenTextBlock, INTERPRETATION_RULE_MAP,
+  buildInterpretationPrompt, buildInterpretationScreenTextBlock, INTERPRETATION_RULE_MAP, hasSecondValue,
   DEFAULT_INTERPRETATION_MIN_WORD_COUNT, DEFAULT_INTERPRETATION_MAX_WORD_COUNT,
 };

@@ -242,3 +242,45 @@ test('탐지기는 바로 이어 온 조각의 후보도 버리지 않고 이벤
   assert.equal(eventList.length, 2);
   assert.equal(eventList[1].trigger, 'This chart, grew');
 });
+
+// 균형 모드: "WHO 권장량이 5g이에요." 결정에 "근데 보시면 10.9" 가 합쳐진 채 보류가 끝나 봉합되고, 0.7초 뒤 온 "9.3 거의 2배…" 는
+// 따로 판단되어 값 하나만 설명했다. 합친 마지막 조각이 문장을 맺지 않았으면 한 번만 더 기다려 뒤 조각의 값까지 함께 판단한다.
+test('보류가 끝났는데 합친 마지막 조각이 문장을 맺지 않았으면 문장 끝 대기만큼 한 번 더 기다리고, 맺는 조각이 오면 바로 봉합한다', async () => {
+  const fiveGram = { type: 'number', phrase: '5g' };
+  const value109 = { type: 'number', phrase: '10.9' };
+  const value93 = { type: 'number', phrase: '9.3' };
+  const twice = { type: 'number', phrase: '2배' };
+  const { scheduler, decisionList, timerList } = makeScheduler({ sentenceWaitMs: 1500 });
+  receiveChunk(scheduler, { text: 'WHO에서 하루 권장량이 5g이에요.', candidateList: [fiveGram], endTs: 1000 });
+  timerList[0].fn();
+  assert.equal(decisionList.length, 1);
+  const sealTimer = timerList.length - 1;
+  assert.equal(receiveChunk(scheduler, { text: '근데 보시면 10.9', candidateList: [value109], endTs: 2500 }).submitResult, SUBMIT_RESULT_MAP.merged);
+  timerList[sealTimer].fn();
+  let isSealed = false;
+  decisionList[0].whenSealed.then(() => { isSealed = true; });
+  await Promise.resolve();
+  assert.equal(isSealed, false, '문장을 맺지 않아 아직 봉합하지 않는다');
+  assert.equal(timerList[timerList.length - 1].ms, 1500);
+  const third = receiveChunk(scheduler, { text: '9.3 거의 2배 가까이세요.', candidateList: [value93, twice], endTs: 3300 });
+  assert.equal(third.isAppended, true);
+  const sealed = await decisionList[0].whenSealed;
+  assert.equal(decisionList.length, 1, '새 결정을 따로 만들지 않는다');
+  assert.deepEqual(sealed.candidateList.map((candidate) => candidate.phrase), ['5g', '10.9', '9.3', '2배']);
+  assert.match(sealed.utterance, /10\.9 9\.3 거의 2배/);
+});
+
+test('보류 끝 추가 대기는 한 번만 한다(문장을 맺는 조각이 끝내 오지 않으면 그 시간 뒤 봉합)', async () => {
+  const value109 = { type: 'number', phrase: '10.9' };
+  const { scheduler, decisionList, timerList } = makeScheduler({ sentenceWaitMs: 1500 });
+  receiveChunk(scheduler, { text: '근데 보시면 10.9', candidateList: [value109], endTs: 1000 });
+  timerList[0].fn();
+  timerList[timerList.length - 1].fn(); // 판정 전 문장 끝 대기 → 판정, 보류 시작
+  assert.equal(decisionList.length, 1);
+  timerList[timerList.length - 1].fn(); // 보류 끝 → 문장을 맺지 않아 한 번 더 기다림
+  const extensionCount = timerList.length;
+  timerList[timerList.length - 1].fn(); // 추가 대기 끝 → 봉합(다시 늘리지 않는다)
+  assert.equal(timerList.length, extensionCount, '추가 대기를 또 걸지 않는다');
+  const sealed = await decisionList[0].whenSealed;
+  assert.deepEqual(sealed.candidateList.map((candidate) => candidate.phrase), ['10.9']);
+});

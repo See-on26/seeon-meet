@@ -1,7 +1,9 @@
-// TTS 로 보내는 한국어 글의 숫자·세는 말·단위를 읽는 말로 바꾼다. 화면 캡션·기록·중복 거르기·어절 예산은 원문을 쓰고,
+// TTS 로 보내는 한국어 글의 숫자·세는 말·단위를 읽는 말로 바꾸고, 소리 내면 거슬리는 꼴(낱말 사이 대시·괄호 속 영문 풀이)을
+// 다듬는다. 화면 캡션·기록·중복 거르기·어절 예산은 원문을 쓰고,
 // 음성 요청 글에만 씌운다. 음성 엔진(MeloTTS·Ming·Qwen)마다 숫자 읽기 규칙이 달라("카드 4장" → 사장/네 장,
 // "10.9g" → 십.9g) 엔진 쪽에서 맞추면 대신 읽는 엔진으로 넘어갈 때 다시 틀린다. 그래서 앱에서 한 번 바꿔 같은 글을 보낸다.
-// 순서: 제N(한자어) → 단위 → 범위 + 세는 말 → 세는 말 → 나머지 수(readNumbersForSpeech: 소수·쉼표·큰 수·조사 앞 정수·%).
+// 순서: 괄호 속 영문 풀이 빼기 → 낱말 사이 대시를 쉼표로 → 제N(한자어) → 단위 → 범위 + 세는 말 → 세는 말
+// → 나머지 수(readNumbersForSpeech: 소수·쉼표·큰 수·조사 앞 정수·%) → 낱자 영문.
 const { readSinoKoreanNumber, readNumbersForSpeech } = require('../../summary/speech-number');
 
 const DIGIT_WORD_LIST = ['영', '일', '이', '삼', '사', '오', '육', '칠', '팔', '구'];
@@ -160,8 +162,36 @@ function readLoneLatinLetter(text) {
   return text.replace(LONE_LATIN_LETTER_PATTERN, (letter) => LATIN_LETTER_NAME_MAP[letter.toUpperCase()]);
 }
 
+// 한글 낱말 바로 뒤(빈칸 하나까지) 괄호에 영문으로 덧붙인 풀이("섭취량(Current Status)을", "금융불안지수(FSI)의")는 읽지 않는다.
+// 음성 엔진이 영문을 소리 나는 대로 앞뒤에 이어 붙여("…킛스테이터스를") 알아듣기 어렵고, 앞 한글 낱말이 같은 뜻을 이미 말한다.
+// 영문자로 시작하고 영문 두 글자 이상이 이어진 괄호만 풀이로 본다. 한글이 든 괄호(하루 기준), 글 맨 앞·영문 뒤 괄호,
+// 숫자로 시작하는 괄호(10.9g), 낱자 이름표(A)·영문 낱자 + 숫자(Q3)는 내용이라 그대로 둔다.
+// 숫자·낱자 영문을 읽기 전에 빼야 괄호 속 숫자·글자가 한글로 바뀌어 풀이로 보이지 않게 되는 일이 없다.
+const LATIN_GLOSS_PATTERN = /([가-힣])[ \t]?\(([A-Za-z][A-Za-z0-9 .,'’&/:-]*)\)/g;
+const LATIN_WORD_PATTERN = /[A-Za-z]{2}/;
+
+function dropLatinGloss(text) {
+  return text.replace(LATIN_GLOSS_PATTERN, (match, hangul, gloss) => (LATIN_WORD_PATTERN.test(gloss) ? hangul : match));
+}
+
+// 낱말 사이에 띄어 쓴 하이픈·대시(" - ", " – ", " — ")는 항목과 내용을 가르는 표시라 쉼표로 읽는다. 그대로 두면 음성 엔진이
+// "마이너스"로 읽는다. 빈칸 없이 붙은 하이픈(-0.11%, COVID-19, e-mail, 3월-6월)과 양쪽이 숫자인 범위·뺄셈(2 - 3개)은
+// 건드리지 않는다. 앞에 문장 부호가 있으면(비교표: - 왼쪽) 쉼표를 덧붙이지 않고 대시만 뺀다.
+// 범위 + 세는 말(2 - 3개 → 두세 개)을 읽기 전에 바꾸되, 양쪽이 숫자인 꼴은 남겨 그 읽기에 맡긴다.
+const SPACED_DASH_PATTERN = /(\S)[ \t]+[-–—][ \t]+(?=(\S))/g;
+const DIGIT_CHAR_PATTERN = /\d/;
+const CLAUSE_PUNCTUATION_PATTERN = /[,.;:!?]/;
+
+function readSpacedDash(text) {
+  return text.replace(SPACED_DASH_PATTERN, (match, before, after) => {
+    if (DIGIT_CHAR_PATTERN.test(before) && DIGIT_CHAR_PATTERN.test(after)) return match;
+    return CLAUSE_PUNCTUATION_PATTERN.test(before) ? `${before} ` : `${before}, `;
+  });
+}
+
 function normalizeKoreanSpeechText(text) {
-  const counterRead = readCounter(readRangeCounter(readUnit(readOrdinal(String(text ?? '')))));
+  const separatorRead = readSpacedDash(dropLatinGloss(String(text ?? '')));
+  const counterRead = readCounter(readRangeCounter(readUnit(readOrdinal(separatorRead))));
   return readLoneLatinLetter(readNumbersForSpeech({ text: counterRead, language: 'ko' }));
 }
 

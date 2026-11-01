@@ -45,9 +45,10 @@ const ASR_MIN_SEGMENT_CROSS_MS = 2500;
 
 // 지시 후보의 look-ahead 가 끝났는데 문장이 안 끝났으면 더 기다리는 상한.
 // 동시·성능 모드는 look-ahead(2초)가 다음 청크 도착(약 3초)보다 짧아 뒤 조각을 놓친다.
-// 균형·품질 모드는 보류 시간이 뒤 맥락을 이미 모으므로 기다리지 않는다.
+// 균형·품질 모드도 판단이 다음 조각보다 먼저 나는 일이 있어("…보시면 10.9" 까지만 듣고 판단, "9.3 …" 은 0.8초 뒤 도착)
+// 같은 상한을 둔다. 교차 모드는 회의를 늦게 틀어 기다려도 해설 자리는 그대로다.
 const SENTENCE_WAIT_REALTIME_MS = 1500;
-const SENTENCE_WAIT_CROSS_MS = 0;
+const SENTENCE_WAIT_CROSS_MS = 1500;
 
 export const PIPELINE_LATENCY_MARGIN_MS = 2000;
 
