@@ -171,11 +171,13 @@ test('setSentenceWaitMs 는 0 이상의 숫자만 받는다', () => {
   assert.equal(scheduler.sentenceWaitMs, 1500);
 });
 
-test('문장 끝 추가 대기는 동시·성능 모드만 1.5초, 균형·품질 모드는 0', () => {
+// 균형 모드에서 "…근데 보시면 10.9" 까지만 듣고 판단해, 0.8초 뒤 온 "9.3 거의 2배…" 와 따로 판단되어 값 하나만 설명했다.
+// 교차 모드도 문장이 안 끝났으면 동시·성능 모드처럼 더 기다린다(회의를 늦게 틀어 해설 자리는 그대로다).
+test('문장 끝 추가 대기는 모든 모드에서 1.5초, 모르는 모드는 0', () => {
   assert.equal(computeSentenceWaitMs({ mode: MODE_MAP.realtimeMix }), 1500);
   assert.equal(computeSentenceWaitMs({ mode: MODE_MAP.realtimeSic }), 1500);
-  assert.equal(computeSentenceWaitMs({ mode: MODE_MAP.delayed }), 0);
-  assert.equal(computeSentenceWaitMs({ mode: MODE_MAP.listening }), 0);
+  assert.equal(computeSentenceWaitMs({ mode: MODE_MAP.delayed }), 1500);
+  assert.equal(computeSentenceWaitMs({ mode: MODE_MAP.listening }), 1500);
   assert.equal(computeSentenceWaitMs({ mode: 'unknown' }), 0);
 });
 
