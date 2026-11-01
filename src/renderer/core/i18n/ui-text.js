@@ -206,7 +206,7 @@ export const UI_TEXT_MAP = {
 
     'narration.tapFailed': '파형 탭 실패(무시): {message}',
     'narration.playing': '캡션 내레이션 재생 중…',
-    'narration.answerPlaying': '질문 답 재생 중(회의음 줄임)…',
+    'narration.answerPlaying': '질문 답 재생 중…',
     'narration.playFailed': '내레이션 재생 실패: {message}',
     'narration.catchup': 'x{rate} 따라잡기',
     'narration.meetingAudioFailed': '회의음 연결 실패(무시): {message}',
@@ -455,7 +455,7 @@ export const UI_TEXT_MAP = {
 
     'narration.tapFailed': 'Waveform tap failed (ignored): {message}',
     'narration.playing': 'Playing caption narration…',
-    'narration.answerPlaying': 'Playing answer (meeting audio lowered)…',
+    'narration.answerPlaying': 'Playing answer…',
     'narration.playFailed': 'Narration playback failed: {message}',
     'narration.catchup': 'x{rate} catching up',
     'narration.meetingAudioFailed': 'Meeting audio connection failed (ignored): {message}',

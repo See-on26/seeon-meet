@@ -14,9 +14,6 @@ const MEETING_PAN_TO_SIDE_MS = 300;
 // 해설은 몇 초 간격으로 이어 나올 때가 많아, 끝나자마자 가운데로 돌리면 회의 소리가 왼쪽과 가운데를 오가며 흔들린다.
 const MEETING_PAN_HOLD_MS = 1500;
 const MEETING_PAN_TO_CENTER_MS = 600;
-// 교차 모드의 질문 답은 회의 소리를 줄인 채 겹쳐 튼다. 채널을 나누지 않고 오른쪽에서 들리게만 해 한쪽 귀로도 들린다.
-export const ANSWER_OVERLAY_POSITION_X = 0.7;
-const PANNER_DISTANCE_Z = -0.4;
 
 // 재생 시작 알림에 싣는 정보. 음성 데이터는 빼고, 무엇이 언제부터 얼마 동안 들렸는지만 남긴다.
 export function buildPlayStartInfo({ entry, durationSec, wallMs }) {
@@ -45,16 +42,6 @@ export function createSidePanner({ audioContext, pan }) {
   panner.channelCount = 1;
   panner.channelCountMode = 'explicit';
   panner.pan.value = pan;
-  return panner;
-}
-
-export function createSpatialPanner({ audioContext, positionX }) {
-  const panner = audioContext.createPanner();
-  panner.panningModel = 'HRTF';
-  panner.distanceModel = 'linear';
-  panner.positionX.value = positionX;
-  panner.positionY.value = 0;
-  panner.positionZ.value = PANNER_DISTANCE_Z;
   return panner;
 }
 
