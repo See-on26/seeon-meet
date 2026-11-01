@@ -23,6 +23,8 @@ const USER_COMMAND_CLASS = 'user_command';
 // 전환 고지 생성이 이 사유로 끝나면 고지 문장 대신 화면 주제로 스크립트에 한 줄을 남긴다. 다른 사유(무관한 화면·같은 화면)는 남기지 않는다.
 const TOPIC_FALLBACK_SKIP_REASON = 'incomplete_description';
 const PPT_SCREEN_TYPE = 'ppt';
+// 화면이 바뀌기 직전에 시작해 새 화면 내용을 말한 발화도 새 슬라이드 재료로 쓴다(발화는 시작 시각으로 슬라이드에 붙는다).
+const LEAD_IN_UTTERANCE_MS = 1500;
 
 function toSlideMajor(slideLabel) {
   const major = Number.parseInt(String(slideLabel ?? '').split('-')[0], 10);
@@ -43,6 +45,8 @@ function createSlideEntry(major) {
     describedElementList: [],
     slideText: '',
     slideTextStatus: 'missing',
+    // 전사 뒤 화면 변화 OCR 이 찾아 slideText 에 덧붙인 줄(원문). 전사가 늦게 끝나도 이 줄을 다시 붙인다.
+    slideTextAddedLineList: [],
     label: null,
     labelStatus: LABEL_STATUS_MAP.pending,
   };
@@ -53,8 +57,30 @@ function copySlide(slide) {
     ...slide,
     visitList: slide.visitList.map((visit) => ({ ...visit })),
     describedElementList: [...slide.describedElementList],
+    slideTextAddedLineList: [...slide.slideTextAddedLineList],
     label: slide.label ? { ...slide.label, keywordList: [...slide.label.keywordList] } : null,
   };
+}
+
+// 띄어쓰기·문장부호를 뺀 글. 덧붙일 줄이 슬라이드 글자에 이미 있는지 볼 때 쓴다.
+function toLineKey(text) {
+  return String(text ?? '').toLowerCase().replace(/[^\p{L}\p{N}]/gu, '');
+}
+
+// 슬라이드 글자 뒤에 줄을 덧붙인다. 띄어쓰기·문장부호를 뺀 글이 이미 들어 있는 줄은 넣지 않는다.
+function mergeSlideTextLines({ text, lineList }) {
+  let merged = text;
+  let mergedKey = toLineKey(text);
+  const addedLineList = [];
+  for (const rawLine of lineList) {
+    const line = typeof rawLine === 'string' ? rawLine.trim() : '';
+    const key = toLineKey(line);
+    if (!key || mergedKey.includes(key)) continue;
+    merged = merged ? `${merged}\n${line}` : line;
+    mergedKey += key;
+    addedLineList.push(line);
+  }
+  return { text: merged, addedLineList };
 }
 
 function createContextStore({ onChange = () => {} } = {}) {
@@ -238,9 +264,24 @@ function createContextStore({ onChange = () => {} } = {}) {
     if (major === null) return null;
     const slide = ensureSlide(major);
     slide.slideTextStatus = status;
-    slide.slideText = typeof text === 'string' ? text.trim() : '';
+    const baseText = typeof text === 'string' ? text.trim() : '';
+    slide.slideText = mergeSlideTextLines({ text: baseText, lineList: slide.slideTextAddedLineList }).text;
     notifyChange();
     return major;
+  }
+
+  // 화면 글자 전사는 새 슬라이드를 확정한 순간 한 번뿐이라, 줄이 차례로 나타나는 슬라이드는 뒤에 나타난 줄이 빠진다.
+  // 화면 변화 OCR 이 찾은 새 줄을 덧붙여 질문 답·라벨·요약 재료가 모든 줄을 보게 한다. 전사 상태(라벨 준비 판정)는 바꾸지 않는다.
+  function appendSlideTextLines({ slideLabel, lineList = [] }) {
+    const major = toSlideMajor(slideLabel);
+    if (major === null || !Array.isArray(lineList)) return 0;
+    const slide = ensureSlide(major);
+    const merged = mergeSlideTextLines({ text: slide.slideText, lineList });
+    if (!merged.addedLineList.length) return 0;
+    slide.slideText = merged.text;
+    slide.slideTextAddedLineList.push(...merged.addedLineList);
+    notifyChange();
+    return merged.addedLineList.length;
   }
 
   // 전환 고지가 오지 않는 슬라이드(체류 미달·예산 부족)도 다음 슬라이드로 넘어가면 라벨을 붙인다.
@@ -304,9 +345,19 @@ function createContextStore({ onChange = () => {} } = {}) {
       .sort((left, right) => (firstSeenOf(left) - firstSeenOf(right)) || (left.major - right.major));
   }
 
-  function getUtteranceList({ fromTs = -Infinity, toTs = Infinity, slideMajor = null, speakerHint = null } = {}) {
+  // 다른 슬라이드에 붙었지만 이 슬라이드 방문이 시작되기 직전(LEAD_IN_UTTERANCE_MS 안)에 시작한 발화인가.
+  function isLeadInUtterance({ utterance, slideMajor }) {
+    const slide = slideMap.get(slideMajor);
+    return Boolean(slide) && slide.visitList.some((visit) => visit.startTs > utterance.ts
+      && visit.startTs - utterance.ts <= LEAD_IN_UTTERANCE_MS);
+  }
+
+  // includeLeadIn 이면 전환 직전에 시작한 발화도 새 슬라이드 쪽에 함께 돌려준다(질문 답 재료용). 원래 슬라이드에서도 빠지지 않는다.
+  function getUtteranceList({ fromTs = -Infinity, toTs = Infinity, slideMajor = null, speakerHint = null,
+    includeLeadIn = false } = {}) {
     return utteranceList.filter((utterance) => utterance.ts >= fromTs && utterance.ts <= toTs
-      && (slideMajor === null || utterance.slideMajor === slideMajor)
+      && (slideMajor === null || utterance.slideMajor === slideMajor
+        || (includeLeadIn && isLeadInUtterance({ utterance, slideMajor })))
       && (speakerHint === null || utterance.speakerHint === speakerHint));
   }
 
@@ -372,7 +423,8 @@ function createContextStore({ onChange = () => {} } = {}) {
   return {
     start, reset,
     getSessionInfo: () => ({ sessionId, startedAt }),
-    applyRecord, applySlideText, cancelTransition, forgetNarration, listReadyForLabelMajors, markLabelRequested, setLabel, addQa,
+    applyRecord, applySlideText, appendSlideTextLines, cancelTransition, forgetNarration,
+    listReadyForLabelMajors, markLabelRequested, setLabel, addQa,
     markSegmentRequested, setSegmentSummary, getSegmentSummaryList,
     getSlide, getSlideList, getCurrentSlideMajor: () => currentMajor,
     getUtteranceList, getNarrationList,
@@ -381,4 +433,6 @@ function createContextStore({ onChange = () => {} } = {}) {
   };
 }
 
-module.exports = { createContextStore, toSlideMajor, LABEL_STATUS_MAP, SEGMENT_STATUS_MAP, SLIDE_FRAME_KIND_BASE };
+module.exports = {
+  createContextStore, toSlideMajor, LABEL_STATUS_MAP, SEGMENT_STATUS_MAP, SLIDE_FRAME_KIND_BASE, LEAD_IN_UTTERANCE_MS,
+};

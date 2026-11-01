@@ -15,8 +15,9 @@ const { createScreenChangeGate } = require('./screen-change-gate');
 const { createPendingEvidence } = require('./pending-evidence');
 const { createScreenChangeBaseline } = require('./screen-change-baseline');
 const {
-  createScreenChangeNarrator, toEmitSkipReason, SCREEN_CHANGE_DECISION_MAP, SCREEN_CHANGE_SKIP_MAP,
+  createScreenChangeNarrator, toEmitSkipReason, SCREEN_CHANGE_DECISION_MAP, SCREEN_CHANGE_SKIP_MAP, ADDED_LINE_ORIGIN_MAP,
 } = require('./screen-change-narrator');
+const { SLIDE_LAYOUT_STATUS_MAP, SLIDE_LAYOUT_NONE_REASON_MAP } = require('./speech-roi/slide-layout-store');
 const { SCREEN_CHANGE_MODE_MAP } = require('../config');
 
 // 이미 말한 값 거르기에 쓰는 최근 해설 창. 이 안에 낸 해설에 같은 값이 있으면 변화 해설 VLM 을 부르지 않는다.
@@ -39,6 +40,28 @@ function formatRegion(regionNorm) {
   return ['x', 'y', 'w', 'h'].map((key) => Number(regionNorm[key]).toFixed(2)).join(',');
 }
 
+const ADDED_LINE_ORIGIN_LABEL_MAP = {
+  [ADDED_LINE_ORIGIN_MAP.sameSlide]: '화면 변화',
+  [ADDED_LINE_ORIGIN_MAP.slideStart]: '슬라이드 시작',
+};
+
+// 발화 ROI 위치 사전(화면 글자 전사와 같은 전환 프레임의 OCR 줄, 0~1 비율 상자)을 글자 차이에 쓰는 OCR 꼴로 바꾼다.
+// 전환 프레임에 글자가 없던 장은 빈 줄 목록이다. 아직 OCR 중·실패·세로쓰기면 견줄 수 없어 null 이다.
+function toSlideStartScreenText(layoutEntry) {
+  if (layoutEntry?.status === SLIDE_LAYOUT_STATUS_MAP.ready && layoutEntry.layout) {
+    return {
+      lineList: layoutEntry.layout.lineList.map(({ text, score, rect }) => ({
+        text, score, left: rect.x, top: rect.y, width: rect.w, height: rect.h,
+      })),
+      imageWidth: 1, imageHeight: 1,
+    };
+  }
+  if (layoutEntry?.status === SLIDE_LAYOUT_STATUS_MAP.none && layoutEntry.reason === SLIDE_LAYOUT_NONE_REASON_MAP.noText) {
+    return { lineList: [], imageWidth: 1, imageHeight: 1 };
+  }
+  return null;
+}
+
 function formatChangeRecord(entry) {
   const ocr = entry.ocr;
   return `슬라이드=${entry.slideLabel ?? '-'} 영역=${formatRegion(entry.regionNorm)} 칸=${entry.cellCount ?? '-'}`
@@ -50,11 +73,24 @@ function formatChangeRecord(entry) {
     + `${entry.rejectReason ? ` · 거절="${entry.rejectReason}"` : ''}`;
 }
 
+// contextStore 가 있으면 같은 슬라이드에서 새로 나타난 줄을 그 슬라이드 글자에 덧붙인다(질문 답 재료 보강).
+// slideLayoutStore(발화 ROI 위치 사전)가 있으면 슬라이드 시작 기준 화면을 전환 프레임 OCR 과 견준다.
 function createScreenChangeService({
   config, agentFieldMap, ocrClient, narrationHistory, describedStore, captionDescribed, slideTextStore,
-  sendCaption, appendRecord, markDebug, getCaptionLanguage = () => undefined, now = Date.now,
+  sendCaption, appendRecord, markDebug, getCaptionLanguage = () => undefined, contextStore = null, slideLayoutStore = null,
+  now = Date.now,
 }) {
   const getMode = () => config.screenChangeMode;
+
+  function appendSlideTextLines({ slideLabel, lineList, origin }) {
+    if (!contextStore) return;
+    const addedCount = contextStore.appendSlideTextLines({ slideLabel, lineList });
+    markDebug({
+      stage: DEBUG_STAGE_MAP.screenChange, verdict: DEBUG_VERDICT_MAP.info,
+      reason: `화면 글자 보강 ${addedCount}줄(${ADDED_LINE_ORIGIN_LABEL_MAP[origin] || origin})`,
+      detail: `슬라이드=${slideLabel} 새 줄 ${lineList.length} · 보탬 ${addedCount} · "${lineList.slice(0, 3).join(' / ')}"`,
+    });
+  }
 
   async function recordChange(entry) {
     await appendRecord(entry);
@@ -203,6 +239,8 @@ function createScreenChangeService({
     retry: retryAgent,
     emit: emitChange,
     record: recordChange,
+    onAddedLines: appendSlideTextLines,
+    readSlideStartScreenText: ({ slideLabel }) => (slideLayoutStore ? toSlideStartScreenText(slideLayoutStore.get(slideLabel)) : null),
     now,
   });
 

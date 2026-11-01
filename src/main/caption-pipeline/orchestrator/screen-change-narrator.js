@@ -5,7 +5,7 @@
 const { SCREEN_CHANGE_MODE_MAP } = require('../config');
 const { SCREEN_CHANGE_KIND_MAP, INTERPRETATION_KIND_MAP } = require('../contracts/narration-types');
 const { RECORD_KIND_MAP } = require('../instrumentation/record-store');
-const { diffScreenText, isConfidentLine } = require('./screen-text-diff');
+const { diffScreenText, filterLinesClearOfBaseline, isConfidentLine } = require('./screen-text-diff');
 const { filterSpokenLines } = require('./spoken-value-filter');
 const { evaluateOcrResult, SCREEN_TEXT_SKIP_REASON_MAP } = require('./screen-text-grounding');
 const { isValuePresent, VALUE_PRESENCE_VERDICT_MAP } = require('./value-presence');
@@ -15,6 +15,8 @@ const { isRetriableUnresolved } = require('./pending-evidence');
 
 const SCREEN_CHANGE_ORIGIN_MAP = { sameSlide: 'same_slide', newSlide: 'new_slide', retry: 'retry' };
 const SCREEN_CHANGE_DECISION_MAP = { emitted: 'emitted', skipped: 'skipped', shadow: 'shadow' };
+// 새 줄을 찾은 곳: 같은 슬라이드 변화 사건, 슬라이드 시작 기준 화면(전환 프레임 OCR 과 견줌).
+const ADDED_LINE_ORIGIN_MAP = { sameSlide: 'same_slide', slideStart: 'slide_start' };
 const SCREEN_CHANGE_SKIP_MAP = {
   gateInterval: `gate:${SCREEN_CHANGE_GATE_REASON_MAP.interval}`,
   ocrError: 'ocr_error',
@@ -47,9 +49,12 @@ function isValueOnLineList({ value, lineList }) {
   }).verdict !== VALUE_PRESENCE_VERDICT_MAP.absent;
 }
 
+// onAddedLines: 같은 슬라이드에서 새로 나타난 줄을 알린다(해설 여부와 상관없이, 슬라이드 글자 보강용).
+// readSlideStartScreenText: 화면 글자 전사에 쓴 전환 프레임의 OCR 줄({ lineList, imageWidth, imageHeight }), 없으면 null.
 function createScreenChangeNarrator({
   getMode, kindList = DEFAULT_KIND_LIST, gate, pendingEvidence, baselineStore,
-  recognize, findRateLimited, getRecentNarrationTextList, describe, retry, emit, record, now = Date.now,
+  recognize, findRateLimited, getRecentNarrationTextList, describe, retry, emit, record,
+  onAddedLines = () => {}, readSlideStartScreenText = () => null, now = Date.now,
 }) {
   async function finish(base, patch) {
     const entry = { ...base, ...patch };
@@ -84,6 +89,32 @@ function createScreenChangeNarrator({
       lineList: evaluation.lineList, imageWidth: response.imageWidth, imageHeight: response.imageHeight,
       confidentText: evaluation.lineList.filter(isConfidentLine).map((line) => line.text.trim()).join('\n'),
     };
+  }
+
+  function reportAddedLines({ slideLabel, lineList, origin }) {
+    if (!lineList.length) return;
+    try {
+      onAddedLines({ slideLabel, lineList: lineList.map((line) => line.text), origin });
+    } catch (error) {
+      console.warn(`[screen-change] 새 줄 알림 실패(무시): ${error.message}`);
+    }
+  }
+
+  // 슬라이드 시작 조용 구간 안에 나타난 줄은 기준 화면에 들어가 변화 사건이 되지 않는다. 화면 글자 전사에 쓴
+  // 전환 프레임의 OCR 줄과 견줘 그 사이 새로 나타난 줄을 알린다. 바뀐 영역이 없어 화면 전체를 보므로,
+  // 전환 프레임 줄과 자리가 겹치는 줄(같은 글을 다르게 읽은 흔들림)은 뺀다.
+  function reportSlideStartLines({ slideLabel, screenText }) {
+    let lineList = [];
+    try {
+      const transition = readSlideStartScreenText({ slideLabel });
+      if (!transition || !Array.isArray(transition.lineList)) return;
+      const diff = diffScreenText({ baseline: transition, current: screenText });
+      lineList = filterLinesClearOfBaseline({ lineList: diff.addedLineList, current: screenText, baseline: transition });
+    } catch (error) {
+      console.warn(`[screen-change] 슬라이드 시작 새 줄 찾기 실패(무시): ${error.message}`);
+      return;
+    }
+    reportAddedLines({ slideLabel, lineList, origin: ADDED_LINE_ORIGIN_MAP.slideStart });
   }
 
   function toOcrRecord(screenText, diff = null) {
@@ -157,6 +188,7 @@ function createScreenChangeNarrator({
     const diff = diffScreenText({ baseline, current: screenText, regionNorm });
     const ocr = toOcrRecord(screenText, diff);
     if (diff.skipReason) return { ocr, skipReason: diff.skipReason };
+    reportAddedLines({ slideLabel, lineList: diff.addedLineList, origin: ADDED_LINE_ORIGIN_MAP.sameSlide });
     const eventKind = diff.kind;
     if (!kindList.includes(eventKind)) {
       return {
@@ -254,6 +286,7 @@ function createScreenChangeNarrator({
       baselineStore.set({
         slideLabel, lineList: screenText.lineList, imageWidth: screenText.imageWidth, imageHeight: screenText.imageHeight, ts,
       });
+      if (isSlideStart) reportSlideStartLines({ slideLabel, screenText });
     }
     const result = { isSeeded: !screenText.skipReason, ocr: toOcrRecord(screenText) };
     if (!isSlideStart || !Number.isFinite(slideStartTs)) return result;
@@ -332,4 +365,5 @@ function createScreenChangeNarrator({
 
 module.exports = {
   createScreenChangeNarrator, toEmitSkipReason, SCREEN_CHANGE_ORIGIN_MAP, SCREEN_CHANGE_DECISION_MAP, SCREEN_CHANGE_SKIP_MAP,
+  ADDED_LINE_ORIGIN_MAP,
 };

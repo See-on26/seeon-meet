@@ -374,7 +374,7 @@ function registerPipeline({ getViewerView, meetingArchive = null }) {
   // 같은 슬라이드 안 화면 변화 해설과 늦은 근거 재시도. SEEON_SCREEN_CHANGE=off(기본)이면 아무것도 하지 않는다.
   const screenChange = createScreenChangeService({
     config, agentFieldMap, ocrClient, narrationHistory, describedStore, captionDescribed, slideTextStore,
-    sendCaption, appendRecord, markDebug, getCaptionLanguage,
+    sendCaption, appendRecord, markDebug, getCaptionLanguage, contextStore, slideLayoutStore,
   });
 
   async function sendCaption({ ts, text, source, slideLabel = null, isDedupeExempt = false,

@@ -27,8 +27,8 @@ const CHANGED_LINE_LIST = [...BASE_LINE_LIST, ocrLine('3분기 매출 42억 원'
 const REGION = { x: 0.08, y: 0.58, w: 0.45, h: 0.08 };
 
 function createHarness({ mode = 'same_slide', ocrList = [], vlmContent = null, isRateLimited = false, now = () => 10000,
-  retryResult = { isVlmCalled: true, isEmitted: true, skipReason: null } } = {}) {
-  const callMap = { ocr: 0, describe: 0, retry: [], emit: [], record: [] };
+  retryResult = { isVlmCalled: true, isEmitted: true, skipReason: null }, readSlideStartScreenText } = {}) {
+  const callMap = { ocr: 0, describe: 0, retry: [], emit: [], record: [], addedLines: [] };
   const queue = [...ocrList];
   const pendingEvidence = createPendingEvidence({ now });
   const baselineStore = createScreenChangeBaseline();
@@ -44,6 +44,8 @@ function createHarness({ mode = 'same_slide', ocrList = [], vlmContent = null, i
     retry: async (args) => { callMap.retry.push(args); return retryResult; },
     emit: async (args) => { callMap.emit.push(args); return { isEmitted: true, reason: null }; },
     record: async (rec) => { callMap.record.push(rec); },
+    onAddedLines: (args) => { callMap.addedLines.push(args); },
+    readSlideStartScreenText,
     now,
   });
   return { narrator, callMap, pendingEvidence, baselineStore };
@@ -261,4 +263,62 @@ test('shadow 에서 늦게 온 미해결 결과가 보관한 변화와 짝지어
   assert.equal(record.origin, 'retry');
   assert.equal(record.wouldRetry, true);
   assert.equal(harness.pendingEvidence.peekForChange({ slideLabel: '2', changeTs: 9900 }), null);
+});
+
+// 화면 글자 전사는 새 슬라이드를 확정한 순간 한 번뿐이다. 같은 슬라이드에서 새로 나타난 줄은 해설과 상관없이
+// 맥락 저장소의 슬라이드 글자에 덧붙이도록 알린다(질문 답이 빌드 애니메이션 슬라이드의 모든 줄을 본다).
+test('같은 슬라이드 변화의 새 줄(바뀐 영역 안)을 해설 여부와 상관없이 알린다', async () => {
+  for (const mode of ['same_slide', 'shadow']) {
+    const harness = createHarness({ mode, ocrList: [ocrResponse(BASE_LINE_LIST), ocrResponse(CHANGED_LINE_LIST)], vlmContent: null });
+    await seedBaseline(harness);
+    await harness.narrator.handleChange(changePayload());
+    assert.deepEqual(harness.callMap.addedLines, [{ slideLabel: '2', lineList: ['3분기 매출 42억 원'], origin: 'same_slide' }], mode);
+  }
+});
+
+test('새 줄이 없는 변화(강조·그림)는 알리지 않는다', async () => {
+  const harness = createHarness({ ocrList: [ocrResponse(BASE_LINE_LIST), ocrResponse(BASE_LINE_LIST)] });
+  await seedBaseline(harness);
+  await harness.narrator.handleChange(changePayload());
+  assert.deepEqual(harness.callMap.addedLines, []);
+});
+
+// 슬라이드 시작 조용 구간(약 4초) 안에 나타난 줄은 기준 화면에 들어가 변화 사건이 되지 않는다.
+// 그래서 기준 화면 OCR 을 전사에 쓴 전환 프레임의 OCR 줄과 견줘, 새로 나타난 줄을 알린다.
+// 전환 프레임 줄과 자리가 겹치는 줄은 같은 글을 다르게 읽은 OCR 흔들림일 수 있어 뺀다.
+test('슬라이드 시작 기준 화면: 전환 프레임 OCR 에 없던 줄 중 자리가 겹치지 않는 줄만 알린다', async () => {
+  const transitionLine = (text, top, score = 0.97) => ({ text, left: 0.1, top, width: 0.4, height: 0.04, score });
+  const slideStartQueryList = [];
+  const harness = createHarness({
+    ocrList: [ocrResponse([
+      ocrLine('참가 규칙', 50), ocrLine('1. 신청서는 금요일까지 냈다', 150), ocrLine('2. 늦게 낸 신청서는 다음 달로 넘긴다', 250),
+      ocrLine('3. 문의는 담당자에게', 350),
+    ])],
+    readSlideStartScreenText: ({ slideLabel }) => {
+      slideStartQueryList.push(slideLabel);
+      return {
+        lineList: [transitionLine('참가 규칙', 0.05), transitionLine('1. 신청서는 금요일까지 낸다', 0.15), transitionLine('3. 문', 0.35, 0.3)],
+        imageWidth: 1, imageHeight: 1,
+      };
+    },
+  });
+  await seedBaseline(harness);
+  assert.deepEqual(slideStartQueryList, ['2']);
+  assert.deepEqual(harness.callMap.addedLines, [{
+    slideLabel: '2', lineList: ['2. 늦게 낸 신청서는 다음 달로 넘긴다', '3. 문의는 담당자에게'], origin: 'slide_start',
+  }]);
+});
+
+test('슬라이드 시작 기준 화면: 전환 프레임 OCR 이 없거나, 슬라이드 시작이 아니면 알리지 않는다', async () => {
+  const noTransition = createHarness({ ocrList: [ocrResponse(CHANGED_LINE_LIST)], readSlideStartScreenText: () => null });
+  await seedBaseline(noTransition);
+  assert.deepEqual(noTransition.callMap.addedLines, []);
+  let queryCount = 0;
+  const notStart = createHarness({
+    ocrList: [ocrResponse(CHANGED_LINE_LIST)],
+    readSlideStartScreenText: () => { queryCount += 1; return { lineList: [], imageWidth: 1, imageHeight: 1 }; },
+  });
+  await notStart.narrator.handleBaseline({ slideLabel: '2', buffer: Buffer.from('base'), ts: 1000, isSlideStart: false });
+  assert.equal(queryCount, 0);
+  assert.deepEqual(notStart.callMap.addedLines, []);
 });
