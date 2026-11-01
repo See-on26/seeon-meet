@@ -193,11 +193,12 @@ function createQuestionAnswerer({ requestText, requestImage, readImage, contextS
     return formatQaHistory({ qaList: contextStore.getQaList(), startedAt: getStartedAt() });
   }
 
+  // 화면이 바뀌기 직전에 시작한 말도 그 화면 내용을 말했을 수 있어 재료에 함께 넣는다.
   function buildSlideEvidenceText(slideList) {
     const narrationList = contextStore.getNarrationList({ limit: Infinity });
     return slideList.map((slide) => buildSlideEvidence({
       slide,
-      utteranceList: contextStore.getUtteranceList({ slideMajor: slide.major }),
+      utteranceList: contextStore.getUtteranceList({ slideMajor: slide.major, includeLeadIn: true }),
       narrationList: narrationList.filter((narration) => narration.slideMajor === slide.major),
       startedAt: getStartedAt(),
     })).join('\n\n');

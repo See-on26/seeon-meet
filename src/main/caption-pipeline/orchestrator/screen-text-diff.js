@@ -126,7 +126,19 @@ function diffScreenText({ baseline, current, regionNorm = null, regionMargin = R
   };
 }
 
+// 기준 화면의 믿을 만한 줄과 자리가 겹치지 않는 줄만 남긴다. 겹치는 새 줄은 같은 글을 다르게 읽은 OCR 흔들림일 수 있다.
+// 위치를 알 수 없는 줄은 견줄 수 없어 뺀다.
+function filterLinesClearOfBaseline({ lineList, current, baseline }) {
+  const baseBoxList = (baseline?.lineList || []).filter(isConfidentLine)
+    .map((line) => toLineBox({ line, imageWidth: baseline.imageWidth, imageHeight: baseline.imageHeight }))
+    .filter(Boolean);
+  return lineList.filter((line) => {
+    const box = toLineBox({ line, imageWidth: current.imageWidth, imageHeight: current.imageHeight });
+    return Boolean(box) && !baseBoxList.some((baseBox) => isOverlapping(baseBox, box));
+  });
+}
+
 module.exports = {
-  diffScreenText, normalizeOcrLineText, isConfidentLine, SCREEN_TEXT_DIFF_KIND_MAP, SCREEN_TEXT_DIFF_SKIP_MAP,
-  REGION_MARGIN,
+  diffScreenText, filterLinesClearOfBaseline, normalizeOcrLineText, isConfidentLine, SCREEN_TEXT_DIFF_KIND_MAP,
+  SCREEN_TEXT_DIFF_SKIP_MAP, REGION_MARGIN,
 };

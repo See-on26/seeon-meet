@@ -1,5 +1,6 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
+import fs from 'node:fs';
 import { createRequire } from 'node:module';
 
 const require = createRequire(import.meta.url);
@@ -8,12 +9,13 @@ const { createNarrationHistory } = require('../src/main/caption-pipeline/orchest
 const { createDescribedStore } = require('../src/main/caption-pipeline/orchestrator/described-store.js');
 const { createCaptionDescribedRegistry } = require('../src/main/caption-pipeline/orchestrator/caption-described-registry.js');
 const { readPipelineConfig } = require('../src/main/caption-pipeline/config.js');
+const { createContextStore } = require('../src/main/caption-pipeline/context/context-store.js');
 
 const IMAGE = { imageWidth: 1000, imageHeight: 1000 };
 const ocrLine = (text, top) => ({ text, left: 100, top, width: 400, height: 40, score: 0.97 });
 const ocrResponse = (lineList) => ({ text: '', lineList, meanScore: 0.97, verticalBoxRatio: 0, ...IMAGE });
 
-function createHarness({ env = { SEEON_SCREEN_CHANGE: 'same_slide' }, ocrList = [], agentResultMap = {} } = {}) {
+function createHarness({ env = { SEEON_SCREEN_CHANGE: 'same_slide' }, ocrList = [], agentResultMap = {}, extra = {} } = {}) {
   const callMap = { agent: [], sendCaption: [], record: [], debug: [] };
   const queue = [...ocrList];
   const describedStore = createDescribedStore();
@@ -32,6 +34,7 @@ function createHarness({ env = { SEEON_SCREEN_CHANGE: 'same_slide' }, ocrList = 
     appendRecord: async (rec) => { callMap.record.push(rec); },
     markDebug: (entry) => { callMap.debug.push(entry); },
     now: () => 10000,
+    ...extra,
   });
   return { service, callMap };
 }
@@ -242,4 +245,60 @@ test('세션 시작 기록 문구는 꺼져 있으면 off, 켜져 있으면 설�
     createHarness().service.describeSessionText(),
     'same_slide(간격 20초 · 슬라이드당 2번 · 종류 new_text,highlight · 그림 outline)',
   );
+});
+
+// 새 슬라이드 전사는 확정 순간 한 번뿐이라 뒤에 나타난 줄이 질문 답 재료에서 빠진다. 같은 슬라이드 화면 변화 OCR 이 찾은 새 줄과,
+// 슬라이드 시작 기준 화면에서 전환 프레임 OCR(발화 ROI 위치 사전)에 없던 줄을 맥락 저장소 슬라이드 글자에 덧붙인다.
+test('화면 글자 보강: 변화 사건의 새 줄과 슬라이드 시작 때 새로 보인 줄을 맥락 저장소 슬라이드 글자에 덧붙인다', async () => {
+  const contextStore = createContextStore();
+  contextStore.applyRecord({ kind: 'slide_mark', ts: 0, slideLabel: '2', frameKind: 'base', filePath: '/tmp/2.jpg' });
+  contextStore.applySlideText({ slideLabel: '2', status: 'ready', text: '분기 실적' });
+  const layoutQueryList = [];
+  const slideLayoutStore = {
+    get: (slideLabel) => {
+      layoutQueryList.push(slideLabel);
+      return {
+        status: 'ready', reason: null,
+        layout: { lineList: [{ text: '분기 실적', score: 0.97, rect: { x: 0.1, y: 0.05, w: 0.4, h: 0.04 } }], aspect: 1, thumb: null },
+      };
+    },
+  };
+  const { service, callMap } = createHarness({
+    ocrList: [
+      ocrResponse([...BASE_LINE_LIST, ocrLine('영업이익 추이', 300)]),
+      ocrResponse([...BASE_LINE_LIST, ocrLine('영업이익 추이', 300), ocrLine('3분기 매출 42억 원', 600)]),
+    ],
+    extra: { contextStore, slideLayoutStore },
+  });
+  await service.handleBaseline({ slideLabel: '2', buffer: [1], ts: 1000, isSlideStart: true, slideStartTs: 0 });
+  assert.deepEqual(layoutQueryList, ['2']);
+  assert.equal(contextStore.getSlide(2).slideText, '분기 실적\n영업이익 추이');
+  await service.handleChange({
+    ts: 9000, slideLabel: '2', buffer: [2], regionNorm: { x: 0.08, y: 0.58, w: 0.45, h: 0.08 }, firstSeenTs: 8000,
+  });
+  assert.equal(contextStore.getSlide(2).slideText, '분기 실적\n영업이익 추이\n3분기 매출 42억 원');
+  const debugList = callMap.debug.filter((entry) => entry.reason.startsWith('화면 글자 보강'));
+  assert.deepEqual(debugList.map((entry) => entry.reason), ['화면 글자 보강 1줄(슬라이드 시작)', '화면 글자 보강 1줄(화면 변화)']);
+});
+
+test('화면 글자 보강: 위치 사전이 없거나(발화 ROI 꺼짐) 아직 OCR 중이면 슬라이드 시작 때는 덧붙이지 않는다', async () => {
+  for (const slideLayoutStore of [null, { get: () => ({ status: 'pending', layout: null, reason: null }) }]) {
+    const contextStore = createContextStore();
+    const { service } = createHarness({ ocrList: [ocrResponse(CHANGED_LINE_LIST)], extra: { contextStore, slideLayoutStore } });
+    await service.handleBaseline({ slideLabel: '2', buffer: [1], ts: 1000, isSlideStart: true, slideStartTs: 0 });
+    assert.equal(contextStore.getSlide(2), null);
+  }
+});
+
+test('화면 글자 보강: 전환 프레임에 글자가 없던 장(위치 사전 none·no_text)은 기준 화면 줄을 모두 새 줄로 본다', async () => {
+  const contextStore = createContextStore();
+  const slideLayoutStore = { get: () => ({ status: 'none', layout: null, reason: 'no_text' }) };
+  const { service } = createHarness({ ocrList: [ocrResponse(BASE_LINE_LIST)], extra: { contextStore, slideLayoutStore } });
+  await service.handleBaseline({ slideLabel: '2', buffer: [1], ts: 1000, isSlideStart: true, slideStartTs: 0 });
+  assert.equal(contextStore.getSlide(2).slideText, '분기 실적');
+});
+
+test('파이프라인은 화면 변화 서비스에 맥락 저장소와 발화 ROI 위치 사전을 넘긴다', () => {
+  const source = fs.readFileSync(new URL('../src/main/caption-pipeline/index.js', import.meta.url), 'utf8');
+  assert.match(source, /createScreenChangeService\(\{[^}]*contextStore, slideLayoutStore,\s*\}\)/);
 });

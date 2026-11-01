@@ -204,3 +204,23 @@ test('답 길이 규칙은 답을 찾았을 때만 적용한다 — 못 찾으�
   await answerer.answer({ route: 'past_slide', slideMajorList: [3], questionText: '얼마 올랐어?', wordBudget });
   assert.match(textCallList[0].prompt, /답을 찾았으면 .*1~2문장/);
 });
+
+// 화면이 바뀌기 직전(1.5초 안)에 시작해 새 화면 내용을 말한 발화는 앞 슬라이드에 붙는다. 지난 화면 답과 지금 화면 답 재료에는
+// 새 슬라이드 쪽에도 넣어, 규칙의 앞 절을 말한 발화가 빠지지 않게 한다.
+test('전환 직전에 시작한 발화도 지난 화면 답과 지금 화면 답 재료에 들어간다', async () => {
+  const { buildCurrentScreenContextText } = require('../src/main/caption-pipeline/context/current-screen-context.js');
+  const store = createContextStore();
+  store.start({ sessionId: 's', startedAt: 0 });
+  store.applyRecord({ kind: 'slide_mark', ts: 1000, slideLabel: '1', frameKind: 'base', filePath: '/tmp/1.jpg' });
+  store.applyRecord({ kind: 'slide_mark', ts: 12_000, slideLabel: '2', frameKind: 'base', filePath: '/tmp/2.jpg' });
+  store.applyRecord({ kind: 'asr', ts: 5000, text: '앞 화면 이야기' });
+  store.applyRecord({ kind: 'asr', ts: 11_000, text: '신청서는 금요일까지 내야 해요' });
+  store.applyRecord({ kind: 'asr', ts: 13_000, text: '늦으면 다음 달로 넘어가요' });
+  const contextText = buildCurrentScreenContextText({ contextStore: store, major: 2 });
+  assert.match(contextText, /신청서는 금요일까지 내야 해요/);
+  assert.match(contextText, /늦으면 다음 달로 넘어가요/);
+  assert.doesNotMatch(contextText, /앞 화면 이야기/);
+  const { answerer, textCallList } = makeAnswerer({ store, textReplyList: ['답'], now: () => 20_000 });
+  await answerer.answer({ route: 'past_slide', slideMajorList: [2], questionText: '규칙이 뭐였지?', wordBudget });
+  assert.match(textCallList[0].prompt, /신청서는 금요일까지 내야 해요[\s\S]*늦으면 다음 달로 넘어가요/);
+});

@@ -1,3 +1,5 @@
+const { normalizeKoreanSpeechText } = require('./korean-speech-text');
+
 const REQUEST_TIMEOUT_MS = 15000;
 
 const LONG_REQUEST_TIMEOUT_MS = 600000;
@@ -32,11 +34,25 @@ function sanitizeMultilineForSpeech({ text, language = 'ko' }) {
     .join('\n');
 }
 
+// 서버로 보낼 읽기 글. 한국어는 숫자·세는 말·단위를 읽는 말로 바꿔 음성 엔진이 달라도 같은 글을 받게 한다.
+// sanitizeForSpeech 는 기호만 바꾸는 공용 정리라 그 안에 넣지 않는다(영어·기호 읽기 결과를 바꾸지 않는다).
+function toSpeechText({ text, language }) {
+  const sanitized = sanitizeForSpeech({ text, language });
+  return language === 'ko' ? normalizeKoreanSpeechText(sanitized) : sanitized;
+}
+
+function toMultilineSpeechText({ text, language }) {
+  return String(text || '')
+    .split('\n')
+    .map((line) => toSpeechText({ text: line, language }))
+    .join('\n');
+}
+
 function createTtsClient({ config }) {
   // language 는 캡션 언어(ko·en)다. 서버에는 언어 코드(KR·EN)로 보낸다.
   // speed 는 세션 읽기 속도(MeloTTS speed)다. 없으면 보내지 않아 서버 기본 속도(2.0)로 읽는다.
   async function synthesize({ text, language = 'ko', speed }) {
-    const body = { text: sanitizeForSpeech({ text, language }), language: TTS_LANGUAGE_MAP[language] || DEFAULT_TTS_LANGUAGE };
+    const body = { text: toSpeechText({ text, language }), language: TTS_LANGUAGE_MAP[language] || DEFAULT_TTS_LANGUAGE };
     if (Number.isFinite(speed)) body.speed = speed;
     const response = await fetch(config.ttsUrl, {
       method: 'POST',
@@ -52,7 +68,7 @@ function createTtsClient({ config }) {
     const response = await fetch(config.ttsLongUrl, {
       method: 'POST',
       headers: { 'content-type': 'application/json' },
-      body: JSON.stringify({ text: sanitizeMultilineForSpeech({ text, language }), language: TTS_LANGUAGE_MAP[language] || DEFAULT_TTS_LANGUAGE }),
+      body: JSON.stringify({ text: toMultilineSpeechText({ text, language }), language: TTS_LANGUAGE_MAP[language] || DEFAULT_TTS_LANGUAGE }),
       signal: AbortSignal.timeout(LONG_REQUEST_TIMEOUT_MS),
     });
     if (!response.ok) {
