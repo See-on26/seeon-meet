@@ -45,7 +45,7 @@ test('few-shot 은 자기 묶음 유형의 예시만 담고, 두 묶음을 합�
   const speechList = ROUTER_PROMPT_MAP[JUDGE_GROUP_MAP.speech].fewShotList;
   for (const example of deixisList) assert.ok(example.input.candidateList.every((c) => DEIXIS_TYPE_LIST.includes(c.type)));
   for (const example of speechList) assert.ok(example.input.candidateList.every((c) => SPEECH_TYPE_LIST.includes(c.type)));
-  assert.equal(deixisList.length + speechList.length, 41);
+  assert.equal(deixisList.length + speechList.length, 42);
   assert.ok(deixisList.length >= 4 && speechList.length >= 8);
 });
 
@@ -194,7 +194,7 @@ test('판단 지시문과 예시에는 시연 영상 문장이 들어 있지 않
   for (const group of Object.values(JUDGE_GROUP_MAP)) {
     const { systemPrompt, fewShotList } = ROUTER_PROMPT_MAP[group];
     const text = `${systemPrompt}\n${JSON.stringify(fewShotList)}`;
-    for (const word of ['지혜로', '익숙해지', '젤리', '왕꿈틀', '카드', '소금', '10.9', '9.3', '권장량']) assert.equal(text.includes(word), false, `${group}: ${word}`);
+    for (const word of ['지혜로', '익숙해지', '젤리', '왕꿈틀', '카드', '소금', '10.9', '9.3', '권장량', '섭취', '일본']) assert.equal(text.includes(word), false, `${group}: ${word}`);
   }
 });
 
@@ -215,6 +215,25 @@ test('단순 수치는 단위·항목 없이 숫자만 말했으면 앞뒤 발�
   assert.match(speechPrompt, /단위·항목 없이 숫자만 말했으면\("[^"\n]+"\) 각 숫자가 무엇\(누구·어느 항목\)의 값인지 앞뒤 발화가 짝지어 주지 않는 한 O 다/);
   assert.match(speechPrompt, /주제만 정해졌거나 다른 값\(기준치\)과 견준다는 것만으로는 짝이 정해지지 않는다/);
   assert.equal(deixisPrompt.includes('단위·항목 없이'), false);
+});
+
+// 값 둘("보시면 4.2, 3.1")을 앞 문맥의 공통 항목 하나("우리 시의 사용량")에 묶어 X 를 주는 누락을 줄인다.
+// 청자는 두 값이 무엇으로 나뉘는지(성별·연도·지역 등) 모른다. 바뀌기 전·후·범위처럼 두 값의 관계를 말했으면 해당하지 않는다.
+test('단순 수치는 값 둘 이상을 공통 항목 하나에만 묶어 말하면 값끼리 무엇이 다른지 몰라 O 다', () => {
+  const speechPrompt = ROUTER_PROMPT_MAP[JUDGE_GROUP_MAP.speech].systemPrompt;
+  const deixisPrompt = ROUTER_PROMPT_MAP[JUDGE_GROUP_MAP.deixis].systemPrompt;
+  assert.match(speechPrompt, /값을 둘 이상 말했는데 앞뒤 발화가 그 값들을 공통 항목 하나로만 묶었으면\("[^"\n]+"\) 값끼리 무엇이 다른지\(성별·연도·지역·조건 등\) 알 수 없으므로 그 값들은 모두 O 다/);
+  assert.match(speechPrompt, /값마다 서로 다른 이름이 붙어야\("[^"\n]+"\) X 다/);
+  assert.match(speechPrompt, /바뀌기 전·후\(…에서 …로\)나 범위\(…부터 …까지\)처럼 두 값의 관계를 말했으면 이 줄에 해당하지 않는다/);
+  assert.match(speechPrompt, /값이 둘 이상인데 그 값들에 함께 붙은 공통 항목만 있으면 근거가 아니다/);
+  assert.equal(deixisPrompt.includes('공통 항목'), false);
+  const speechList = ROUTER_PROMPT_MAP[JUDGE_GROUP_MAP.speech].fewShotList;
+  const sharedItemExample = speechList.find((example) => example.input.candidateList.length >= 2
+    && example.input.candidateList.every((candidate) => candidate.type === 'number')
+    && example.output.judgeList.every((entry) => entry.gap === 'O' && entry.evidence === ''));
+  assert.ok(sharedItemExample, '공통 항목에만 묶인 값 둘이 모두 O 인 예시');
+  assert.ok(sharedItemExample.input.candidateList.every((candidate) => sharedItemExample.input.utterance.includes(candidate.phrase)));
+  assert.ok(sharedItemExample.output.judgeList.every((entry) => /나뉘는지|무엇이 다른/.test(entry.reason)));
 });
 
 function createFakeJudgeLlm(answerByGroup) {
