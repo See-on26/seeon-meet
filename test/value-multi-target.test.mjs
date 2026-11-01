@@ -47,6 +47,9 @@ test('수치가 둘 이상이면 프롬프트가 확정된 수치를 모두 알�
   const prompt = buildInterpretationPrompt({ utterance: pairUtterance, subKind: 'value_to_meaning', spokenValueList: ['320', '140'] });
   assert.match(prompt, /발표자는 수치를 여럿 말했다: "320", "140"\./);
   assert.match(prompt, /같은 그래프·표에서 한 측정량을 항목/);
+  // 항목 이름을 비우면 "10.9, 9.3은 하루 소금 섭취량을 의미"처럼 무엇으로 갈리는지 빠지고, 채웠는데 frame 에 "남녀별"을 또 쓰면 되풀이된다.
+  assert.match(prompt, /"label"·"label2"를 비울 때는 "frame"에 두 수치가 무엇으로 나뉘는지/);
+  assert.match(prompt, /"label"·"label2"를 채웠으면 "frame"에 항목 기준 말\(남녀별·지역별·연도별 등\)을 다시 쓰지 않는다/);
   assert.match(prompt, /"value2"/);
   assert.match(prompt, /"label"/);
   assert.match(prompt, /"label2"/);
