@@ -1493,7 +1493,9 @@ function registerPipeline({ getViewerView, meetingArchive = null }) {
     wordBudget, currentSlideLabel = null, speakerHintNow = null, inputSource = 'typed',
     eventVideoTimeMs = null, heardWallTs = null, heardVideoTimeMs = null }) => {
     const startedAt = Date.now();
-    const currentSlideMajor = toSlideMajor(currentSlideLabel) ?? contextStore.getCurrentSlideMajor();
+    // 교차 모드는 회의를 늦게 듣는다. 실시간 화면은 사용자가 아직 듣지 못한 슬라이드일 수 있어, 들은 시각의 슬라이드를 먼저 쓴다.
+    const heardSlideMajor = Number.isFinite(heardWallTs) ? contextStore.findSlideMajorAt(heardWallTs) : null;
+    const currentSlideMajor = heardSlideMajor ?? toSlideMajor(currentSlideLabel) ?? contextStore.getCurrentSlideMajor();
     const qaList = contextStore.getQaList();
     try {
       const ruled = classifyQuestion(questionText);

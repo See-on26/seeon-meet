@@ -435,7 +435,7 @@ function createContextStore({ onChange = () => {} } = {}) {
     applyRecord, applySlideText, appendSlideTextLines, cancelTransition, forgetNarration,
     listReadyForLabelMajors, markLabelRequested, setLabel, addQa,
     markSegmentRequested, setSegmentSummary, getSegmentSummaryList,
-    getSlide, getSlideList, getCurrentSlideMajor: () => currentMajor,
+    getSlide, getSlideList, getCurrentSlideMajor: () => currentMajor, findSlideMajorAt,
     getUtteranceList, getNarrationList,
     getQaList: () => qaList.map((qa) => ({ ...qa, slideMajorList: [...qa.slideMajorList] })),
     buildIndex, resolveSlideNumber, snapshot,

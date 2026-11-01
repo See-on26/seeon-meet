@@ -1,5 +1,6 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
+import fs from 'node:fs';
 import { createRequire } from 'node:module';
 
 const require = createRequire(import.meta.url);
@@ -328,4 +329,22 @@ test('전환 직전 발화: 전환 1.5초 안에 시작한 발화는 새 슬라�
     '원래 슬라이드에서도 빠지지 않는다',
   );
   assert.equal(LEAD_IN_UTTERANCE_MS, 1500);
+});
+
+// 교차 모드는 회의를 늦게 듣는다. 질문의 "지금 슬라이드"는 실시간 화면이 아니라 사용자가 듣는 위치의 슬라이드다.
+test('들은 시각의 슬라이드를 찾는다(그 시각 전에 마지막으로 연 슬라이드)', () => {
+  const store = createContextStore();
+  store.applyRecord(baseMark({ ts: 1000, slideLabel: '3' }));
+  store.applyRecord(baseMark({ ts: 9000, slideLabel: '4' }));
+  assert.equal(store.findSlideMajorAt(500), null);
+  assert.equal(store.findSlideMajorAt(5000), 3);
+  assert.equal(store.findSlideMajorAt(9500), 4);
+});
+
+test('연결: 질문 갈래의 지금 슬라이드는 들은 시각의 슬라이드를 먼저 쓴다', () => {
+  const source = fs.readFileSync(new URL('../src/main/caption-pipeline/index.js', import.meta.url), 'utf8');
+  const questionStart = source.indexOf("ipcMain.handle('pipeline-question'");
+  const questionBody = source.slice(questionStart, source.indexOf('ipcMain.handle(', questionStart + 10));
+  assert.match(questionBody, /const heardSlideMajor = Number\.isFinite\(heardWallTs\) \? contextStore\.findSlideMajorAt\(heardWallTs\) : null;/);
+  assert.match(questionBody, /const currentSlideMajor = heardSlideMajor \?\? toSlideMajor\(currentSlideLabel\) \?\? contextStore\.getCurrentSlideMajor\(\);/);
 });
