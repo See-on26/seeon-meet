@@ -45,7 +45,7 @@ test('few-shot 은 자기 묶음 유형의 예시만 담고, 두 묶음을 합�
   const speechList = ROUTER_PROMPT_MAP[JUDGE_GROUP_MAP.speech].fewShotList;
   for (const example of deixisList) assert.ok(example.input.candidateList.every((c) => DEIXIS_TYPE_LIST.includes(c.type)));
   for (const example of speechList) assert.ok(example.input.candidateList.every((c) => SPEECH_TYPE_LIST.includes(c.type)));
-  assert.equal(deixisList.length + speechList.length, 39);
+  assert.equal(deixisList.length + speechList.length, 41);
   assert.ok(deixisList.length >= 4 && speechList.length >= 8);
 });
 
@@ -170,6 +170,51 @@ test('지시 대상 지시문은 뒤 발화·하나에만 붙은 말·짝지은 
   for (const rule of ['뒤 발화가 대상을 밝히면', '하나에만']) assert.equal(speechPrompt.includes(rule), false, rule);
   const deixisList = ROUTER_PROMPT_MAP[JUDGE_GROUP_MAP.deixis].fewShotList;
   assert.ok(deixisList.some((example) => /주말 오후 시간대요/.test(example.input.after)), '뒤 발화가 밝히는 X 짝 예시');
+});
+
+// "그걸 확인해 준 조사가 있다"처럼 그-계열 지시가 앞에서 한 말 전체를 받는데도 화면 속 사물로 보고 O 를 주던 오탐을 줄인다.
+test('지시 대상 지시문은 그걸·그것·그게·그거가 앞에서 한 말을 통째로 받으면 X 로 보고, 같은 문장이라도 앞 문맥이 비면 O 짝을 둔다', () => {
+  const deixisPrompt = ROUTER_PROMPT_MAP[JUDGE_GROUP_MAP.deixis].systemPrompt;
+  const speechPrompt = ROUTER_PROMPT_MAP[JUDGE_GROUP_MAP.speech].systemPrompt;
+  assert.match(deixisPrompt, /"그걸·그것·그게·그거"가 앞에서 한 말\(주장·사실·결과\)을 통째로 받으면 X 다 — 화면 속 사물이 아니다/);
+  assert.match(deixisPrompt, /예\) "[^"\n]+\. 그걸 [^"\n]+" → X \(앞의 [^)\n]+\)/);
+  assert.equal(speechPrompt.includes('통째로 받으면'), false);
+  const deixisList = ROUTER_PROMPT_MAP[JUDGE_GROUP_MAP.deixis].fewShotList;
+  const anaphoricList = deixisList.filter((example) => example.input.candidateList.length === 1
+    && example.input.candidateList[0].type === 'demonstrative' && /^그(걸|것|게|거)/.test(example.input.candidateList[0].phrase));
+  const statementX = anaphoricList.find((example) => example.input.before && example.output.judgeList[0].gap === 'X');
+  assert.ok(statementX, '앞 문맥의 말을 받는 X 예시');
+  assert.ok(anaphoricList.some((example) => example !== statementX && example.input.before === ''
+    && example.input.utterance === statementX.input.utterance && example.input.after === statementX.input.after
+    && example.output.judgeList[0].gap === 'O'), '같은 문장인데 앞 문맥이 빈 O 예시');
+});
+
+// 판단 예시가 시연 영상의 문장을 그대로 외우지 않게 한다.
+test('판단 지시문과 예시에는 시연 영상 문장이 들어 있지 않다', () => {
+  for (const group of Object.values(JUDGE_GROUP_MAP)) {
+    const { systemPrompt, fewShotList } = ROUTER_PROMPT_MAP[group];
+    const text = `${systemPrompt}\n${JSON.stringify(fewShotList)}`;
+    for (const word of ['지혜로', '익숙해지', '젤리', '왕꿈틀', '카드', '소금', '10.9', '9.3', '권장량']) assert.equal(text.includes(word), false, `${group}: ${word}`);
+  }
+});
+
+// 앞 문맥은 트리거 시각 이전의 마지막 화면 전환을 기준으로 자르고, 그-계열 지시는 전환 앞 발화도 함께 받는다.
+test('문맥 범위는 트리거 전 마지막 화면 전환 뒤 발화와 그-계열 지시의 전환 앞 15초를 알린다', () => {
+  for (const group of Object.values(JUDGE_GROUP_MAP)) {
+    const prompt = ROUTER_PROMPT_MAP[group].systemPrompt;
+    assert.ok(prompt.includes('앞 문맥은 트리거 전 마지막 화면 전환 뒤의 발화(최대 60초)다. 그-계열 지시는 전환 앞 15초도 들어 있다.'), group);
+    assert.ok(prompt.includes('뒤 문맥은 후보 뒤 몇 초 동안의 발화다.'), group);
+    assert.equal(prompt.includes('앞 문맥은 마지막 화면 전환 뒤의 발화'), false, group);
+  }
+});
+
+// 받아쓰기가 단위 없이 값만 남긴 수치("보시면 4.2, 3.1")에 다른 구절을 근거로 붙여 X 를 주는 누락을 줄인다.
+test('단순 수치는 단위·항목 없이 숫자만 말했으면 앞뒤 발화가 값마다 항목을 짝지어 줄 때만 X 다', () => {
+  const speechPrompt = ROUTER_PROMPT_MAP[JUDGE_GROUP_MAP.speech].systemPrompt;
+  const deixisPrompt = ROUTER_PROMPT_MAP[JUDGE_GROUP_MAP.deixis].systemPrompt;
+  assert.match(speechPrompt, /단위·항목 없이 숫자만 말했으면\("[^"\n]+"\) 각 숫자가 무엇\(누구·어느 항목\)의 값인지 앞뒤 발화가 짝지어 주지 않는 한 O 다/);
+  assert.match(speechPrompt, /주제만 정해졌거나 다른 값\(기준치\)과 견준다는 것만으로는 짝이 정해지지 않는다/);
+  assert.equal(deixisPrompt.includes('단위·항목 없이'), false);
 });
 
 function createFakeJudgeLlm(answerByGroup) {

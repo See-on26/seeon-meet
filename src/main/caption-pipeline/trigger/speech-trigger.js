@@ -79,6 +79,14 @@ const NON_REFERENT_NOUN_SET = new Set([
   '다음', '외', '밖', '중', '뒤', '앞', '날', '당시', '그때',
 ]);
 const REFERENT_BOUND_NOUN_SET = new Set(['쪽', '부분', '거', '것', '곳']);
+// 평가·감정 형용사는 화면 속 여럿 중 하나를 가려 주지 못한다. "재밌는 게 …", "중요한 건 …"처럼 것·거에 주격조사·
+// 화제 보조사(이·가·은·는)가 붙으면 뒤 절 전체를 끌어오는 말머리라 지시 대상이 아니다. 어근 + 하다 형용사("중요한")는
+// 시작 토큰이 어근이라 어근 목록으로 본다. "신기한 게 하나 있어요", "이상한 게 보이죠"처럼 눈에 띄는 모양을 말하기도 하는
+// 신기·이상·특이는 넣지 않는다. 목적어 자리("재밌는 거 하나 보여 드릴게요")는 그대로 후보로 두고 판단 LLM 이 가린다.
+const EVALUATIVE_ADJ_STEM_SET = new Set(['재밌', '재미있', '놀랍', '궁금하', '아쉽', '안타깝']);
+const EVALUATIVE_ADJ_ROOT_SET = new Set(['중요', '확실', '분명', '궁금']);
+const DISCOURSE_OPENER_NOUN_SET = new Set(['것', '거']);
+const DISCOURSE_OPENER_PARTICLE_SET = new Set(['JKS:이', 'JKS:가', 'JX:은', 'JX:는', 'JX:ᆫ']);
 // 존재·같음·지시 형용사는 대상을 가려 주는 형용사가 아니다("있는 거", "같은 것", "그런 거").
 const NON_DESCRIPTIVE_ADJ_SET = new Set(['있', '없', '같', '이렇', '그렇', '저렇', '요렇', '어떻', '아무렇', '다르']);
 // Kiwi 가 문맥에 따라 동사로 분석하는 형용사("싼 쪽"의 싸다).
@@ -273,9 +281,16 @@ function detectKoreanAdjectiveNoun(context) {
     // "오래된 것": 부사 + 되다는 상태를 나타내 형용사처럼 대상을 가린다.
     if (token.tag === 'XSV' && token.form === '되' && tokenList[index - 1]?.tag === 'MAG') startToken = tokenList[index - 1];
     if (!startToken) return;
+    if (isEvaluativeOpener({ startToken, noun, particle: tokenList[index + 3] })) return;
     candidateList.push(buildCandidate({ text, type: TRIGGER_TYPE_MAP.adjectiveNoun, start: startToken.start, end: noun.end }));
   });
   return candidateList.filter(Boolean);
+}
+
+function isEvaluativeOpener({ startToken, noun, particle }) {
+  const isEvaluative = EVALUATIVE_ADJ_STEM_SET.has(startToken.form) || EVALUATIVE_ADJ_ROOT_SET.has(startToken.form);
+  return isEvaluative && DISCOURSE_OPENER_NOUN_SET.has(noun.form)
+    && Boolean(particle) && DISCOURSE_OPENER_PARTICLE_SET.has(`${particle.tag}:${particle.form}`);
 }
 
 function isAdjectiveToken(token) {
@@ -298,7 +313,8 @@ function isUnitToken(token, { isAttached = false } = {}) {
   return token.tag === 'NNG' && UNIT_NOUN_SET.has(token.form);
 }
 
-// 숫자(+만·억 같은 수사) + 단위. "4억 5천만 원"처럼 띄어 쓴 큰 수도 한 구로 묶는다. 단위 없는 맨 숫자는 범위 밖이다.
+// 숫자(+만·억 같은 수사) + 단위. "4억 5천만 원"처럼 띄어 쓴 큰 수도 한 구로 묶는다.
+// 단위 없는 맨 정수는 범위 밖이고, 단위 없이 말한 소수("보시면 10.9, 9.3")는 숫자 하나씩 후보로 낸다.
 function detectKoreanNumber(context) {
   const { tokenList, text } = context;
   const candidateList = [];
@@ -306,6 +322,14 @@ function detectKoreanNumber(context) {
   while (index < tokenList.length) {
     const token = tokenList[index];
     const isNumeralDeterminer = token.tag === 'MM' && NUMERAL_DETERMINER_SET.has(token.form);
+    // 받아쓰기가 "9.3."처럼 소수 뒤에 마침표를 붙이면 Kiwi 가 일련번호(W_SERIAL) 한 덩어리로 묶는다.
+    if (token.tag === 'W_SERIAL') {
+      if (isBareDecimalValue({ tokenList, numberIndex: index })) {
+        candidateList.push(buildCandidate({ text, type: TRIGGER_TYPE_MAP.number, start: token.start, end: token.end }));
+      }
+      index += 1;
+      continue;
+    }
     if (!isNumberToken(token) && !isNumeralDeterminer) { index += 1; continue; }
     let endIndex = index;
     while (endIndex + 1 < tokenList.length && isNumberToken(tokenList[endIndex + 1])) endIndex += 1;
@@ -322,10 +346,32 @@ function detectKoreanNumber(context) {
       }
       index = endIndex + 2;
     } else {
+      // "10.9 9.3"처럼 이어진 숫자도 값마다 따로 낸다.
+      if (!isNumeralDeterminer) {
+        for (let numberIndex = index; numberIndex <= endIndex; numberIndex += 1) {
+          if (!isBareDecimalValue({ tokenList, numberIndex })) continue;
+          const numberToken = tokenList[numberIndex];
+          candidateList.push(buildCandidate({ text, type: TRIGGER_TYPE_MAP.number, start: numberToken.start, end: numberToken.end }));
+        }
+      }
       index = endIndex + 1;
     }
   }
   return candidateList.filter(Boolean);
+}
+
+const BARE_DECIMAL_PATTERN = /^\d+\.\d+$/;
+const SERIAL_DECIMAL_PATTERN = /^\d+\.\d+\.$/;
+
+// 단위 없이 말한 소수는 무엇의 값인지 묻는 수치다. 정수는 순번·개수·연도와 섞여 넣지 않는다.
+// 뒤에 명사가 바로 오면 "3.2 버전", "3.5년"처럼 이름표·날짜라 값이 아니다. "2024.10.23.", "1.2.3"은 소수 꼴이 아니다.
+function isBareDecimalValue({ tokenList, numberIndex }) {
+  const token = tokenList[numberIndex];
+  const isDecimal = (token.tag === 'SN' && BARE_DECIMAL_PATTERN.test(token.form))
+    || (token.tag === 'W_SERIAL' && SERIAL_DECIMAL_PATTERN.test(token.form));
+  if (!isDecimal) return false;
+  const next = tokenList[numberIndex + 1];
+  return !(next && NOUN_TAG_SET.has(next.tag));
 }
 
 function isBasisOrNoneQuantity({ tokenList, unitIndex }) {
