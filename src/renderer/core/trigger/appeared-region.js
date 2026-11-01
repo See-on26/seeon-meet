@@ -135,6 +135,13 @@ export function createAppearanceTracker({
     return { ...appearance.rect, kind: APPEARED_REGION_KIND };
   }
 
+  // sinceWallTs: 트리거 발화 시각. 말한 뒤 그림을 붙여 넣은 경우("이거 아닙니까?" → 붙여 넣기) 판정할 때 그 그림을 대상으로 쓴다.
+  function recallAfter({ sinceWallTs, slideLabel = null }) {
+    if (!appearance || !Number.isFinite(sinceWallTs)) return null;
+    if (appearance.slideLabel !== slideLabel || appearance.wallTs < sinceWallTs) return null;
+    return { ...appearance.rect, kind: APPEARED_REGION_KIND };
+  }
+
   function reset() {
     latest = null;
     stillCount = 0;
@@ -142,7 +149,7 @@ export function createAppearanceTracker({
     appearance = null;
   }
 
-  return { sample, capture, recall, reset };
+  return { sample, capture, recall, recallAfter, reset };
 }
 
 // 지시 발화에 붙일 영역: 직전 창의 가리킴 → 발화 전 움직이며 가리킨 기억 → 방금 나타난 그림 → 없음(전체 화면).

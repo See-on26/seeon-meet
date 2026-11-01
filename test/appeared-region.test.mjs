@@ -300,3 +300,24 @@ test('제품 화면: 가리킴 기억을 지우는 곳(공유 화면 변경·재
   assert.ok(resetCount >= 4);
   assert.equal(pairCount, resetCount);
 });
+
+// "이거 아닙니까?"라고 말한 뒤 그림을 붙여 넣으면 트리거 때는 아직 앞 화면이다. 판정할 때 트리거 뒤에 나타난 그림을 대상으로 쓴다.
+test('트리거 뒤에 같은 화면에 나타난 그림만 돌려준다(트리거 전에 나타났거나 다른 슬라이드면 없음)', () => {
+  const tracker = createAppearanceTracker();
+  const feeder = createFeeder(tracker);
+  feeder.feed([TITLE], 4);
+  feeder.feed([TITLE, PICTURE_LEFT], 4);
+  tracker.capture({ slideLabel: '3', wallTs: START_WALL_TS, nowTs: feeder.nowTs() });
+  const region = tracker.recallAfter({ sinceWallTs: START_WALL_TS - 1500, slideLabel: '3' });
+  assertSameRect(region, blockRect(PICTURE_LEFT));
+  assert.equal(region.kind, APPEARED_REGION_KIND);
+  assert.equal(tracker.recallAfter({ sinceWallTs: START_WALL_TS + 1, slideLabel: '3' }), null, '트리거보다 먼저 나타난 그림');
+  assert.equal(tracker.recallAfter({ sinceWallTs: START_WALL_TS - 1500, slideLabel: '2' }), null, '다른 슬라이드');
+  assert.equal(tracker.recallAfter({ sinceWallTs: Number.NaN, slideLabel: '3' }), null);
+});
+
+test('연결: 지시 판정은 트리거 말 뒤에 나타난 그림이 있으면 그 영역으로 찍고 pointingRect 로 보낸다', () => {
+  const source = fs.readFileSync(new URL('../src/renderer/app/main.js', import.meta.url), 'utf8');
+  assert.match(source, /appearanceTracker\.recallAfter\(\{ sinceWallTs: triggerWallTs, slideLabel \}\)/);
+  assert.match(source, /const decisionRegion = resolveDecisionRegion\(firedDecision\);/);
+});

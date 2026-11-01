@@ -1311,14 +1311,31 @@ const SCREEN_DEPENDENCY_LABEL_MAP = {
 
 // 화면은 판정이 난 지금 찍고, 판단 LLM 에는 보류(균형·품질 모드)가 끝난 결정을 보낸다.
 // 보류 중에 들어온 뒤 조각과 그 후보도 이 결정에 합쳐져 함께 판단을 받는다.
+// 말하고 나서 그림을 붙여 넣은 경우("이거 아닙니까?" → 붙여 넣기) 트리거 때는 아직 앞 화면이라 앞 화면의 가리킴 기억이 붙는다.
+// 판정할 때 트리거 말 뒤에 지금 화면에 나타난 그림이 있으면 그 그림을 가리킨 대상으로 쓴다.
+function resolveDecisionRegion(decision) {
+  if (!Number.isFinite(decision.eventVideoTimeMs)) return decision.region;
+  const triggerWallTs = Date.now() - Math.max(0, captureSource.videoTimeMs - decision.eventVideoTimeMs);
+  const slideLabel = slideRegistry.currentLabel();
+  const appeared = appearanceTracker.recallAfter({ sinceWallTs: triggerWallTs, slideLabel });
+  if (!appeared) return decision.region;
+  markDebug({
+    stage: DEBUG_STAGE_MAP.screenDependency, verdict: DEBUG_VERDICT_MAP.info, narrationType: NARRATION_TYPE_MAP.deixis,
+    reason: '트리거 말 뒤에 나타난 그림 영역을 붙임',
+    detail: `슬라이드=${slideLabel || '-'} 영역=${formatRegionRatio(appeared)}${decision.region ? ' (트리거 때 영역 대신)' : ''}`,
+  });
+  return appeared;
+}
+
 async function runDeixisDecision(firedDecision) {
   lastDeixisDecidedAt = performance.now();
   const mode = getCurrentMode();
   const sessionSeq = experimentSeq;
   // 판정 화면을 찍기 시작한 시각. 이 뒤에 화면이 바뀌었는지로 늦은 근거 재시도를 짝짓는다.
   const frameTs = Date.now();
+  const decisionRegion = resolveDecisionRegion(firedDecision);
   const [{ buffer, fullBuffer }, decision] = await Promise.all([
-    captureDeixisFrameSetWhenSettled(firedDecision.region), firedDecision.whenSealed ?? firedDecision,
+    captureDeixisFrameSetWhenSettled(decisionRegion), firedDecision.whenSealed ?? firedDecision,
   ]);
   if (!buffer || !decision) return;
   if (!captureSource.isActive || sessionSeq !== experimentSeq) return;
@@ -1393,10 +1410,10 @@ async function runDeixisDecision(firedDecision) {
   });
   // 잘린 그림이 있을 때만 그 영역의 비율 상자를 함께 보낸다(main 의 발화 ROI 가 발화로 찾은 곳과 견준다).
   const pointingRect = fullBuffer
-    ? toPointingRect({ subRegion: firedDecision.region, margin: POINTING_CROP_MARGIN }) : null;
+    ? toPointingRect({ subRegion: decisionRegion, margin: POINTING_CROP_MARGIN }) : null;
   const result = await window.seeon.sendPipelineDeixis({
     ts, buffer, fullBuffer, utterance, recentTranscript, beforeTranscript: before, afterTranscript: after,
-    hasPointingRegion: Boolean(region), pointingOrderHint, slideLabel: slideRegistry.currentLabel(),
+    hasPointingRegion: Boolean(region || decisionRegion), pointingOrderHint, slideLabel: slideRegistry.currentLabel(),
     wordBudgetMap, eventVideoTimeMs, triggerCandidateList: candidateList, pointingRect, frameTs,
   }).catch(() => null);
 

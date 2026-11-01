@@ -488,7 +488,7 @@ test('렌더러: 지시 판정은 잘린 그림이 있을 때만 그 영역 비�
   const source = readSource('src/renderer/app/main.js');
   const start = source.indexOf('async function runDeixisDecision(');
   const body = source.slice(start, source.indexOf('\n}\n', start));
-  assert.match(body, /const pointingRect = fullBuffer\s*\? toPointingRect\(\{ subRegion: firedDecision\.region, margin: POINTING_CROP_MARGIN \}\) : null;/);
+  assert.match(body, /const pointingRect = fullBuffer\s*\? toPointingRect\(\{ subRegion: decisionRegion, margin: POINTING_CROP_MARGIN \}\) : null;/);
   assert.match(body, /window\.seeon\.sendPipelineDeixis\(\{\s*ts, buffer, fullBuffer, [\s\S]*pointingRect,[\s\S]*\}\)/);
 });
 
