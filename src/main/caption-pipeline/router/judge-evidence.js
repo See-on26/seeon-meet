@@ -11,6 +11,7 @@ const EVIDENCE_FAIL_REASON_MAP = {
   phraseOnly: 'phrase_only',
   noQuantity: 'no_quantity',
   noSubject: 'no_subject',
+  listedValues: 'listed_values',
 };
 
 // 한글 수사는 단위가 붙을 때만 수량으로 본다. "그것만"의 만, "추천"의 천, "이만큼", "한 번 보시죠"를 수량으로 읽지 않기 위해서다.
@@ -52,8 +53,26 @@ function needsEvidence({ type }) {
   return EVIDENCE_TYPE_LIST.includes(type);
 }
 
+// 값을 이름 없이 늘어놓은 꼴("10.9 9.3", "10.9, 9.3", "10.9와 9.3"). 앞에서 주제를 말했어도 각 값이 무엇(성별·연도 등)을
+// 가르는지는 모르므로, 판단기가 주제 문장을 근거로 X 를 줘도 믿지 않는다. 값마다 이름이 붙으면("남자는 10.9, 여자는 9.3") 해당하지 않는다.
+const NUMBER_TEXT = '(?:\\d{1,3}(?:,\\d{3})+|\\d+)(?:\\.\\d+)?';
+// 나열을 가르는 것: 띄어쓴 쉼표·가운뎃점·빗금, 띄어쓰기, 와·과·하고·이랑·및. 붙여 쓴 쉼표는 자릿수 쉼표(3,400)라 가르지 않는다.
+const LIST_SEPARATOR_TEXT = '(?:\\s*[,、/]\\s+|\\s+|\\s*(?:와|과|하고|이랑|및)\\s*)';
+const LISTED_VALUE_PATTERN = new RegExp(`(?<![0-9.,])${NUMBER_TEXT}(?:${LIST_SEPARATOR_TEXT}${NUMBER_TEXT})+(?![0-9])`, 'g');
+const VALUE_PATTERN = new RegExp(NUMBER_TEXT, 'g');
+
+function isUnlabeledListedValue({ phrase, utterance }) {
+  const value = String(phrase || '').match(new RegExp(NUMBER_TEXT))?.[0];
+  if (!value) return false;
+  return (String(utterance || '').match(LISTED_VALUE_PATTERN) || [])
+    .some((run) => (run.match(VALUE_PATTERN) || []).includes(value));
+}
+
 // context: { before, utterance, after }. 근거는 앞뒤 발화나 트리거 문장 어디서 옮겨도 되지만 후보 구 자체는 근거가 아니다.
 function verifyValueEvidence({ type, phrase, evidence, context }) {
+  if (type === TRIGGER_TYPE_MAP.number && isUnlabeledListedValue({ phrase, utterance: context?.utterance })) {
+    return { isVerified: false, failReason: EVIDENCE_FAIL_REASON_MAP.listedValues };
+  }
   const normalizedEvidence = normalizeText(evidence);
   if (!normalizedEvidence) return { isVerified: false, failReason: EVIDENCE_FAIL_REASON_MAP.empty };
   const contextText = normalizeText([context?.before, context?.utterance, context?.after].filter(Boolean).join(' '));

@@ -139,3 +139,22 @@ test('판단 지시문은 수치·변화의 근거 인용을 요구하고 few-sh
     assert.equal(result.isVerified, true, `${candidate.phrase}: ${result.failReason}`);
   }
 });
+
+// 발표자가 "근데 보시면 10.9 9.3 거의 2배"처럼 값을 이름 없이 늘어놓으면, 앞에서 주제를 말했어도 각 값이 무엇(성별·연도 등)인지 모른다.
+// 판단기가 "앞에서 일본 섭취량이라고 말했다"며 X 를 줘도 믿지 않는다. 값마다 이름이 붙어 있으면 지금처럼 근거를 확인한다.
+test('이름 없이 늘어놓은 값들은 X 근거를 믿지 않는다(값마다 이름이 붙으면 그대로 확인)', () => {
+  const context = { before: 'WHO에서 하루 권장량이 5g이에요. 일본 사람들 소금 섭취량을 보면', utterance: '근데 보시면 10.9 9.3 거의 2배 가까이세요', after: '' };
+  const evidence = '일본 사람들 소금 섭취량을 보면';
+  for (const phrase of ['10.9', '9.3']) {
+    const result = verifyValueEvidence({ type: 'number', phrase, evidence, context });
+    assert.equal(result.isVerified, false, phrase);
+    assert.equal(result.failReason, 'listed_values', phrase);
+  }
+  for (const utterance of ['10.9, 9.3이에요', '10.9와 9.3이에요']) {
+    assert.equal(verifyValueEvidence({ type: 'number', phrase: '9.3', evidence, context: { ...context, utterance } }).failReason, 'listed_values', utterance);
+  }
+  const labeled = { ...context, utterance: '남자는 10.9, 여자는 9.3이에요' };
+  assert.equal(verifyValueEvidence({ type: 'number', phrase: '9.3', evidence: '여자는 9.3', context: labeled }).isVerified, true);
+  const single = { ...context, utterance: '근데 보시면 10.9예요' };
+  assert.equal(verifyValueEvidence({ type: 'number', phrase: '10.9', evidence, context: single }).isVerified, true);
+});
