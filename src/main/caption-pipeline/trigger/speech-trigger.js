@@ -87,6 +87,16 @@ const EVALUATIVE_ADJ_STEM_SET = new Set(['재밌', '재미있', '놀랍', '궁�
 const EVALUATIVE_ADJ_ROOT_SET = new Set(['중요', '확실', '분명', '궁금']);
 const DISCOURSE_OPENER_NOUN_SET = new Set(['것', '거']);
 const DISCOURSE_OPENER_PARTICLE_SET = new Set(['JKS:이', 'JKS:가', 'JX:은', 'JX:는', 'JX:ᆫ']);
+// 맛 형용사 + 것·거("단 거", "단거", "짠 게", "매운 건")는 먹을거리 전체를 이르는 말이라 화면 속 여럿 중 하나를 가리키지 않는다
+// ("그렇게 단거 먹고 막 그러면은"). 띄어쓰기·조사와 상관없이 거른다. 쪽·부분·곳("짠 쪽")은 자리를 가리킬 수 있어 그대로 둔다.
+// Kiwi 는 맛 형용사를 줄기("달/VA", "매콤하/VA")로도, 어근 + 하다("짭짤/XR 하/XSA")로도 자르므로 두 꼴을 함께 둔다.
+// 동사 관형형("제가 쓴 거"의 쓰다/VV)은 원래 후보가 아니라 "쓰"가 있어도 걸리지 않는다. 온도(뜨거운·시원한)는 넣지 않는다.
+const TASTE_ADJ_FORM_SET = new Set([
+  '달', '짜', '맵', '시', '쓰', '싱겁',
+  '달달하', '달콤하', '짭짤하', '매콤하', '새콤하', '느끼하', '고소하', '담백하', '시큼하', '쌉쌀하', '얼큰하',
+  '달달', '달콤', '짭짤', '매콤', '새콤', '느끼', '고소', '담백', '시큼', '쌉쌀', '얼큰',
+]);
+const TASTE_THING_NOUN_SET = new Set(['것', '거']);
 // 존재·같음·지시 형용사는 대상을 가려 주는 형용사가 아니다("있는 거", "같은 것", "그런 거").
 const NON_DESCRIPTIVE_ADJ_SET = new Set(['있', '없', '같', '이렇', '그렇', '저렇', '요렇', '어떻', '아무렇', '다르']);
 // Kiwi 가 문맥에 따라 동사로 분석하는 형용사("싼 쪽"의 싸다).
@@ -282,6 +292,7 @@ function detectKoreanAdjectiveNoun(context) {
     if (token.tag === 'XSV' && token.form === '되' && tokenList[index - 1]?.tag === 'MAG') startToken = tokenList[index - 1];
     if (!startToken) return;
     if (isEvaluativeOpener({ startToken, noun, particle: tokenList[index + 3] })) return;
+    if (isTasteThing({ startToken, noun })) return;
     candidateList.push(buildCandidate({ text, type: TRIGGER_TYPE_MAP.adjectiveNoun, start: startToken.start, end: noun.end }));
   });
   return candidateList.filter(Boolean);
@@ -291,6 +302,10 @@ function isEvaluativeOpener({ startToken, noun, particle }) {
   const isEvaluative = EVALUATIVE_ADJ_STEM_SET.has(startToken.form) || EVALUATIVE_ADJ_ROOT_SET.has(startToken.form);
   return isEvaluative && DISCOURSE_OPENER_NOUN_SET.has(noun.form)
     && Boolean(particle) && DISCOURSE_OPENER_PARTICLE_SET.has(`${particle.tag}:${particle.form}`);
+}
+
+function isTasteThing({ startToken, noun }) {
+  return TASTE_ADJ_FORM_SET.has(startToken.form) && TASTE_THING_NOUN_SET.has(noun.form);
 }
 
 function isAdjectiveToken(token) {
