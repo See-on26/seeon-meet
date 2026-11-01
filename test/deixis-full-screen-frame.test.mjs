@@ -140,7 +140,7 @@ test('제품 화면은 지시 판정 때 자리 잡기를 기다려 두 그림�
   const start = source.indexOf('async function runDeixisDecision(');
   assert.ok(start >= 0);
   const body = source.slice(start, source.indexOf('\n}\n', start));
-  assert.match(body, /const \[\{ buffer, fullBuffer \}, decision\] = await Promise\.all\(\[\s*captureDeixisFrameSetWhenSettled\(firedDecision\.region\),/);
+  assert.match(body, /const \[\{ buffer, fullBuffer \}, decision\] = await Promise\.all\(\[\s*captureDeixisFrameSetWhenSettled\(decisionRegion\),/);
   assert.match(body, /window\.seeon\.sendPipelineDeixis\(\{\s*ts, buffer, fullBuffer, /);
-  assert.match(body, /hasPointingRegion: Boolean\(region\)/);
+  assert.match(body, /hasPointingRegion: Boolean\(region \|\| decisionRegion\)/);
 });

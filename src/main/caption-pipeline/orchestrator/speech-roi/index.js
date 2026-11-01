@@ -3,7 +3,7 @@
 // 위치 출처: 같은 프레임 OCR 이 이미 끝나 있으면 그것 → 전환 때 뽑아 둔 위치(신선도 확인 뒤) → 없으면 확대하지 않는다.
 // 꺼져 있으면(SEEON_SPEECH_ROI=off) 아무것도 하지 않아 해설 요청이 지금과 바이트까지 같다.
 const { NARRATION_TYPE_MAP, VISUAL_DESCRIPTION_KIND_MAP, DEIXIS_FORM_MAP } = require('../../contracts/narration-types');
-const { ZOOM_KIND_MAP } = require('../../prompts/zoom-image-intro');
+const { readPointingZoomKind } = require('../../prompts/zoom-image-intro');
 const { extractSpeechTermList } = require('./term-extractor');
 const { selectRoiTarget, MATCH_KIND_MAP, ROI_SELECT_STATUS_MAP } = require('./label-matcher');
 const { estimateSpanRect, buildZoomRect, ZOOM_RECT_STATUS_MAP } = require('./roi-rect');
@@ -202,12 +202,15 @@ function createSpeechRoiResolver({ config, tokenizer = null, layoutStore = null,
     let zoomJpegBuffer = outcome.zoomJpegBuffer ?? null;
     let zoomKind = zoomJpegBuffer ? outcome.zoomKind : null;
     // 가리킴만 있는 지시 해설: 확대만 보내면 문맥을 잃었으므로 [전체, 가리킴] 두 장으로 준다. 수치·척도는 지금처럼 전체 한 장.
-    const isPointingPair = !zoomJpegBuffer && isEligible && outcome.status !== SPEECH_ROI_STATUS_MAP.error
+    // 가리킨 곳과 이름 라벨이 한 확대 상자에 함께 들지 않을 때도 가리킨 대상을 둘째 장으로 준다. 라벨 줄만 키우면
+    // 가리킨 그림(포장 위 상품명 등)이 빠지고, 라벨은 첫째 장(화면 전체)에 남는다.
+    const isPointingPreferred = Boolean(zoomJpegBuffer) && Boolean(outcome.zoom?.isPointingMergeTooLarge);
+    const isPointingPair = (!zoomJpegBuffer || isPointingPreferred) && isEligible && outcome.status !== SPEECH_ROI_STATUS_MAP.error
       && narrationType === NARRATION_TYPE_MAP.deixis && Boolean(config.isSpeechRoiPointingPairEnabled)
       && Boolean(regionFrame) && Boolean(validPointingRect);
     if (isPointingPair) {
       zoomJpegBuffer = regionFrame;
-      zoomKind = ZOOM_KIND_MAP.pointing;
+      zoomKind = readPointingZoomKind(pointingRect);
     }
     const record = buildRecord({
       narrationType, outcome, zoomKind, hasPointingRect: Boolean(validPointingRect), elapsedMs: now() - startedAt,

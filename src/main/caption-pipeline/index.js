@@ -30,7 +30,7 @@ const { createScreenRegistry, SCREEN_TYPE_MAP } = require('./orchestrator/screen
 const { createSlideTopicRegistry, SLIDE_TOPIC_VERDICT_MAP } = require('./orchestrator/slide-topic-registry');
 const { buildTransitionNarration, buildRevisitNarration, resolveHeardSlideNumber } = require('./orchestrator/slide-transition-text');
 const { createSpeakerRegistry } = require('./orchestrator/speaker-registry');
-const { createNarrationHistory } = require('./orchestrator/narration-history');
+const { createNarrationHistory, toMajorSlideKey } = require('./orchestrator/narration-history');
 const {
   readBlockingRelation, NARRATION_CLASS_LABEL_MAP, BLOCKING_RELATION_LABEL_MAP,
 } = require('./orchestrator/blocking-policy');
@@ -174,6 +174,9 @@ function registerPipeline({ getViewerView, meetingArchive = null }) {
   });
   const silenceGate = createSilenceNarrationGate();
   const featureGate = createFeatureGate();
+  // 기능 꺼짐이라 내보내지 않은 전환 고지(슬라이드 큰 번호 → 문장). 중복·간격 기록에 들어가지 않으므로
+  // 같은 화면의 무발화 해설 디버그에 그 고지를 셈하지 않았다고 적는다.
+  const featureOffTransitionBySlideMap = new Map();
   const silenceNarrator = createSilenceNarrator({
     gate: silenceGate, judge: createSilenceJudge({ config }), getCaptionLanguage,
   });
@@ -374,7 +377,7 @@ function registerPipeline({ getViewerView, meetingArchive = null }) {
   // 같은 슬라이드 안 화면 변화 해설과 늦은 근거 재시도. SEEON_SCREEN_CHANGE=off(기본)이면 아무것도 하지 않는다.
   const screenChange = createScreenChangeService({
     config, agentFieldMap, ocrClient, narrationHistory, describedStore, captionDescribed, slideTextStore,
-    sendCaption, appendRecord, markDebug, getCaptionLanguage,
+    sendCaption, appendRecord, markDebug, getCaptionLanguage, contextStore, slideLayoutStore,
   });
 
   async function sendCaption({ ts, text, source, slideLabel = null, isDedupeExempt = false,
@@ -390,6 +393,9 @@ function registerPipeline({ getViewerView, meetingArchive = null }) {
     // 사용자가 끈 분류(C15)는 맥락 저장소 기록만 남기고 TTS·재생을 하지 않는다. 재생되지 않았으므로 해설 목록에도 들어가지 않는다.
     if (!featureGate.isEnabled(resolvedClass)) {
       captionDescribed.revert({ ts, text });
+      if (resolvedClass === NARRATION_CLASS_MAP.pageTransition && slideLabel != null) {
+        featureOffTransitionBySlideMap.set(toMajorSlideKey(slideLabel), text);
+      }
       await appendRecord({
         kind: RECORD_KIND_MAP.narration, ts, source, text, slideLabel, isEmitted: false,
         skipReason: 'feature_off', narrationClass: resolvedClass,
@@ -402,7 +408,7 @@ function registerPipeline({ getViewerView, meetingArchive = null }) {
       return { isEmitted: false, reason: 'feature_off' };
     }
     // 간격 억제: 어느 분류가 어느 분류를 얼마 동안 막는지는 orchestrator/blocking-policy.js 표가 정한다.
-    const rate = narrationHistory.findRateLimited({ narrationClass: resolvedClass, ts, hasPointingRegion });
+    const rate = narrationHistory.findRateLimited({ narrationClass: resolvedClass, ts, hasPointingRegion, slideLabel });
     if (rate.isRateLimited) {
       const blockingRelation = readBlockingRelation({
         narrationClass: resolvedClass, blockedByClass: rate.blockedByClass,
@@ -413,15 +419,15 @@ function registerPipeline({ getViewerView, meetingArchive = null }) {
       await appendRecord({
         kind: RECORD_KIND_MAP.narration, ts, source, text, slideLabel, isEmitted: false,
         skipReason: 'rate-limited', narrationClass: resolvedClass, blockedByClass: rate.blockedByClass,
-        blockingRelation, sinceMs: rate.sinceMs, minIntervalMs: rate.minIntervalMs,
+        blockedByText: rate.blockedByText, blockingRelation, sinceMs: rate.sinceMs, minIntervalMs: rate.minIntervalMs,
       });
       console.log(`[pipeline]   간격 억제 [${resolvedClass}] "${truncateForLog(text)}"`
-        + ` ← 직전 ${blockedByLabel} 해설(${relationLabel}) ${sinceSec}초 < ${rate.minIntervalMs / 1000}초`);
+        + ` ← 직전 ${blockedByLabel} 해설 "${truncateForLog(rate.blockedByText)}"(${relationLabel}) ${sinceSec}초 < ${rate.minIntervalMs / 1000}초`);
       // 기록을 읽는 도구가 reason '간격 억제' 를 그대로 대조하므로 reason 은 두고, 막은 분류·관계는 detail 에 적는다.
       markDebug({
         stage: DEBUG_STAGE_MAP.dedupe, verdict: DEBUG_VERDICT_MAP.skip, narrationType: source, ts,
         reason: '간격 억제',
-        detail: `"${text}" — 직전 ${blockedByLabel} 해설(${relationLabel})과 ${sinceSec}초 간격`
+        detail: `"${text}" — 직전 ${blockedByLabel} 해설 "${rate.blockedByText}"(${relationLabel})과 ${sinceSec}초 간격`
           + ` (최소 ${rate.minIntervalMs / 1000}초 · ${NARRATION_CLASS_LABEL_MAP[resolvedClass] || resolvedClass}`
           + `${hasPointingRegion ? ', 필기 있음' : ''})`,
       });
@@ -431,16 +437,19 @@ function registerPipeline({ getViewerView, meetingArchive = null }) {
       ? { isDuplicate: false, matchedText: '', similarity: 0, reason: '', threshold: 0 }
       : narrationHistory.findDuplicate({ text, source, slotMap, slideLabel });
     if (duplicate.isDuplicate) {
+      // 막은 앞 해설의 분류(없으면 출처)를 함께 적는다. 문장만 있으면 어느 해설에 막혔는지 오해하기 쉽다.
+      const matchedLabel = NARRATION_CLASS_LABEL_MAP[duplicate.matchedClass] || duplicate.matchedSource || '-';
       await appendRecord({
         kind: RECORD_KIND_MAP.narration, ts, source, text, slideLabel, isEmitted: false,
         skipReason: `duplicate:${duplicate.reason}`,
         matchedText: duplicate.matchedText, similarity: Number(duplicate.similarity.toFixed(3)),
+        matchedClass: duplicate.matchedClass, matchedSource: duplicate.matchedSource, matchedTs: duplicate.matchedTs,
       });
-      console.log(`[pipeline]   중복 내레이션 억제 [${source}] "${truncateForLog(text)}" ≈ "${truncateForLog(duplicate.matchedText)}"`);
+      console.log(`[pipeline]   중복 내레이션 억제 [${source}] "${truncateForLog(text)}" ≈ [${matchedLabel}] "${truncateForLog(duplicate.matchedText)}"`);
       markDebug({
         stage: DEBUG_STAGE_MAP.dedupe, verdict: DEBUG_VERDICT_MAP.skip, narrationType: source, ts,
         reason: `중복(${duplicate.reason})`,
-        detail: `"${text}" ≈ 기존 "${duplicate.matchedText}"`
+        detail: `"${text}" ≈ 기존 [${matchedLabel}] "${duplicate.matchedText}"`
           + ` (유사도 ${duplicate.similarity.toFixed(2)} ≥ 임계 ${duplicate.threshold})`,
       });
       return { isEmitted: false, reason: `duplicate:${duplicate.reason}` };
@@ -490,6 +499,7 @@ function registerPipeline({ getViewerView, meetingArchive = null }) {
     slideTopicRegistry.reset();
     speakerRegistry.reset();
     narrationHistory.reset();
+    featureOffTransitionBySlideMap.clear();
     silenceGate.reset();
     slideTextStore.reset();
     factCardStore.reset();
@@ -924,7 +934,7 @@ function registerPipeline({ getViewerView, meetingArchive = null }) {
     return { isOk: true, disabledClassList: appliedList };
   });
 
-  // 무발화 기반: 발표자가 화면을 보라고 한 뒤 5초 이상 침묵하면 화면을 묘사한다. 애매하면 내지 않는다.
+  // 무발화 기반: 발표자가 화면을 보라고 한 뒤 몇 초(렌더러 LIVE_SILENCE_TRIGGER_MS) 침묵하면 화면을 묘사한다. 애매하면 내지 않는다.
   ipcMain.handle('pipeline-silence', async (_event, {
     ts, buffer, slideLabel, recentTranscript = '', silenceMs = 0, wordBudget = null, eventVideoTimeMs = null,
   }) => {
@@ -959,7 +969,10 @@ function registerPipeline({ getViewerView, meetingArchive = null }) {
     const elapsedMs = Date.now() - startedAt;
     const rejectionDetail = result.status === SILENCE_RESULT_MAP.none && !result.rawText
       ? describeAgentRejection(result).detailPrefix : '';
-    const transcriptLog = `${rejectionDetail}직전 발화="${truncateForLog(recentTranscript, 80)}" 무음=${silenceSec}초 슬라이드=${slideLabel}`;
+    const offTransitionText = featureOffTransitionBySlideMap.get(toMajorSlideKey(slideLabel));
+    const offTransitionLog = offTransitionText
+      ? ` · 같은 화면 전환 해설 "${truncateForLog(offTransitionText)}"은 기능 꺼짐이라 내보내지 않아 중복·간격 검사에서 셈하지 않음` : '';
+    const transcriptLog = `${rejectionDetail}직전 발화="${truncateForLog(recentTranscript, 80)}" 무음=${silenceSec}초 슬라이드=${slideLabel}${offTransitionLog}`;
     const debugByStatusMap = {
       [SILENCE_RESULT_MAP.gated]: {
         verdict: DEBUG_VERDICT_MAP.skip, reason: SILENCE_GATE_LABEL_MAP[result.reason] || result.reason,
@@ -1480,7 +1493,9 @@ function registerPipeline({ getViewerView, meetingArchive = null }) {
     wordBudget, currentSlideLabel = null, speakerHintNow = null, inputSource = 'typed',
     eventVideoTimeMs = null, heardWallTs = null, heardVideoTimeMs = null }) => {
     const startedAt = Date.now();
-    const currentSlideMajor = toSlideMajor(currentSlideLabel) ?? contextStore.getCurrentSlideMajor();
+    // 교차 모드는 회의를 늦게 듣는다. 실시간 화면은 사용자가 아직 듣지 못한 슬라이드일 수 있어, 들은 시각의 슬라이드를 먼저 쓴다.
+    const heardSlideMajor = Number.isFinite(heardWallTs) ? contextStore.findSlideMajorAt(heardWallTs) : null;
+    const currentSlideMajor = heardSlideMajor ?? toSlideMajor(currentSlideLabel) ?? contextStore.getCurrentSlideMajor();
     const qaList = contextStore.getQaList();
     try {
       const ruled = classifyQuestion(questionText);

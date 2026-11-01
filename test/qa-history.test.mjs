@@ -42,7 +42,7 @@ test('기록이 8,000자를 넘으면 가장 오래된 질문부터 뺀다', () 
 test('라우터는 직전 질문·답을 따로 보이고, 그 전 질문·답은 시간·횟수 제한 없이 목록으로 받는다', () => {
   const prompt = buildRouterPrompt({ questionText: '더 자세히', currentSlideMajor: 5, index: [], startedAt: 0, qaList });
   assert.match(prompt, /그 전 질문과 답 \(오래된 것부터\):\n질문: 연봉 슬라이드 뭐였어\? \/ 답: 반기 연봉 조정이에요 \/ 대상 슬라이드: 3\n/);
-  assert.match(prompt, /직전 질문과 답 \(되묻는 질문이면 직전 대상 슬라이드를 그대로 쓴다\):\n질문: 그거 얼마 올랐어\?\n답: 500 올랐어요\n대상 슬라이드: 3/);
+  assert.match(prompt, /직전 질문과 답 \(대상을 생략하고 되묻는 질문이면 [^\n]*직전 대상 슬라이드를 그대로 쓴다\.[^\n]*\):\n질문: 그거 얼마 올랐어\?\n답: 500 올랐어요\n대상 슬라이드: 3/);
   const single = buildRouterPrompt({ questionText: 'q', currentSlideMajor: 5, index: [], startedAt: 0, qaList: [qaList[0]] });
   assert.doesNotMatch(single, /그 전 질문과 답/);
   assert.match(single, /직전 질문과 답[^\n]*\n질문: 연봉 슬라이드 뭐였어\?/);

@@ -33,6 +33,8 @@ const SCREEN_CHANGE_MIN_INTERVAL_MS = 20000;
 //   사진 단독 전환의 반응 묘사도 페이지 전환 분류라 같은 규칙을 따른다.
 // - 화면 변화 해설은 화면 갱신을 알리는 안내라 발화 기반·지시 해설과 서로 막지 않는다(겹침은 중복 억제·이미 말한 값 거르기가 막는다).
 //   방금 화면을 말했으므로 전환 고지처럼 무발화 해설은 막는다. 순위가 무발화보다 낮아도 막는 유일한 예외다.
+// - 무발화를 막는 고지·변화 해설은 같은 슬라이드의 것만 센다(isSameSlideOnly). "방금 그 화면을 말했다"는 규칙이라
+//   슬라이드가 막 바뀐 뒤의 무발화 해설을 앞 슬라이드의 고지·변화 해설이 막으면 새 화면 묘사가 빠진다.
 // - 내용 해설(무발화·발화 기반·지시)은 순위가 같거나 낮은 내용 해설만 막는다(낮은 순위는 높은 순위를 막지 않는다).
 // - null 행은 간격 검사를 받지 않는다(중복 억제는 따로 받는다).
 // - 간격은 들어온 해설 행의 값이다. 가리킨 곳이 있으면 pointedMinIntervalMs, 없거나 값이 없으면 minIntervalMs.
@@ -43,6 +45,7 @@ const BLOCKING_RULE_MAP = {
   [silenceBased]: {
     blockedByClassList: [pageTransition, screenChange],
     minIntervalMs: SILENCE_AFTER_TRANSITION_MIN_INTERVAL_MS,
+    isSameSlideOnly: true,
   },
   [speechBased]: {
     blockedByClassList: [silenceBased, speechBased],

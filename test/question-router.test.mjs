@@ -60,3 +60,23 @@ test('라우터는 LLM 결과를 돌려주고, 실패하면 지금 화면으로 
   assert.deepEqual(failed.slideMajorList, []);
   assert.match(failed.reason, /timeout/);
 });
+
+// 앞 질문이 규칙 슬라이드였으면 "카드 4장이 뭐라고?"도 되묻기로 보고 그 슬라이드만 골라, 지금 듣는 카드 슬라이드 재료가 빠졌다.
+test('지나간 슬라이드 갈래에는 지금 듣는 슬라이드도 함께 넣는다(이미 있거나 3장이 차면 그대로)', async () => {
+  const routeWith = async ({ reply, currentSlideMajor }) => createQuestionRouter({ requestText: async () => reply })
+    .route({ questionText: '카드 4장이 뭐라고?', currentSlideMajor, index, startedAt: 0, qaList: [] });
+  assert.deepEqual((await routeWith({ reply: '{"route": "past_slide", "slideMajorList": [3]}', currentSlideMajor: 5 })).slideMajorList, [3, 5]);
+  assert.deepEqual((await routeWith({ reply: '{"route": "past_slide", "slideMajorList": [5, 3]}', currentSlideMajor: 5 })).slideMajorList, [5, 3]);
+  assert.deepEqual((await routeWith({ reply: '{"route": "past_slide", "slideMajorList": [1, 3, 5]}', currentSlideMajor: 5 })).slideMajorList, [1, 3, 5]);
+  assert.deepEqual((await routeWith({ reply: '{"route": "past_slide", "slideMajorList": [3]}', currentSlideMajor: null })).slideMajorList, [3]);
+  assert.deepEqual((await routeWith({ reply: '{"route": "speaker", "slideMajorList": [3]}', currentSlideMajor: 5 })).slideMajorList, [3]);
+});
+
+test('되묻기는 대상을 생략한 질문만이라고 라우터에 알린다', () => {
+  const prompt = buildRouterPrompt({
+    questionText: '카드 4장이 뭐라고?', currentSlideMajor: 5, index, startedAt: 1000,
+    qaList: [{ ts: 11000, question: '규칙이 뭐였지?', answer: '규칙 설명', route: 'past_slide', slideMajorList: [3] }],
+  });
+  assert.match(prompt, /대상을 생략하고 되묻는 질문이면/);
+  assert.match(prompt, /질문에 새 대상이 나오면 색인과 현재 슬라이드에서 다시 찾는다/);
+});

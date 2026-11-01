@@ -1,9 +1,7 @@
 import { SIC_CATCHUP_MIN_RATE, SIC_CATCHUP_MAX_RATE, SIC_CATCHUP_RATE_PER_SEC } from '../constants.js';
 import { NarrationQueue, QUEUE_DROP_REASON_MAP, readEntryAudio } from './narration-queue.js';
 import { isImmediateCaption } from './narration-entry.js';
-import {
-  computeGainFromDecibel, createSpatialPanner, DEFAULT_DUCK_DB, ANSWER_OVERLAY_POSITION_X, buildPlayStartInfo,
-} from './narration-mixer.js';
+import { buildPlayStartInfo } from './narration-mixer.js';
 import { defaultUiText } from '../i18n/ui-text.js';
 
 const START_LEAD_SEC = 0.02;
@@ -40,7 +38,6 @@ export class CaptionNarrator {
     this.ttsGainNode = null;
     this.analyserNode = null;
     this.liveTapSource = null;
-    this.answerPanner = null;
     this.currentSource = null;
     this.currentEntry = null;
     this.currentStartSec = 0;
@@ -48,9 +45,8 @@ export class CaptionNarrator {
     this.pausedTotalMs = 0;
     this.pauseStartedAt = null;
     this.queue = new NarrationQueue({ now, getPausedMs: () => this.readPausedMs(), isEntryEnabled, getPlaybackTimeMs });
-    // isInserting: 자동 해설 때문에 회의 영상을 멈춘 상태. isOverlaying: 질문 답을 회의 소리를 줄인 채 겹쳐 트는 상태.
+    // isInserting: 해설이나 질문 답 때문에 회의 영상을 멈춘 상태.
     this.isInserting = false;
-    this.isOverlaying = false;
     this.isCatchingUp = false;
     this.narratedSec = 0;
     this.currentNarrationSec = 0;
@@ -65,8 +61,6 @@ export class CaptionNarrator {
     this.ttsGainNode = this.audioContext.createGain();
     this.ttsGainNode.connect(this.audioContext.destination);
     this.ttsGainNode.connect(this.analyserNode);
-    this.answerPanner = createSpatialPanner({ audioContext: this.audioContext, positionX: ANSWER_OVERLAY_POSITION_X });
-    this.answerPanner.connect(this.ttsGainNode);
 
     try {
       if (stream.getAudioTracks().length) {
@@ -91,7 +85,6 @@ export class CaptionNarrator {
     for (const entry of unplayedList) this.onDrop({ entry, reason: QUEUE_DROP_REASON_MAP.stopped });
     this._closePause();
     this.isInserting = false;
-    this.isOverlaying = false;
     this.narratedSec = 0;
     this.currentNarrationSec = 0;
     const video = this.getLiveVideo();
@@ -99,7 +92,6 @@ export class CaptionNarrator {
     try { this.liveTapSource?.disconnect(); } catch {  }
     this.liveTapSource = null;
     if (this.audioContext) { this.audioContext.close().catch(() => {}); this.audioContext = null; }
-    this.answerPanner = null;
     this.ttsGainNode = null;
     this.analyserNode = null;
     this.onStatus('');
@@ -122,7 +114,7 @@ export class CaptionNarrator {
     if (!this.currentEntry) this._beginNext();
   }
 
-  // 자동 해설 때문에 회의 영상을 멈춘 누적 시간. 그동안 재생 위치가 서 있으므로 대기 줄은 기다린 시간에서 뺀다.
+  // 해설·질문 답 때문에 회의 영상을 멈춘 누적 시간. 그동안 재생 위치가 서 있으므로 대기 줄은 기다린 시간에서 뺀다.
   readPausedMs() {
     const runningMs = this.pauseStartedAt === null ? 0 : this.now() - this.pauseStartedAt;
     return this.pausedTotalMs + runningMs;
@@ -137,15 +129,12 @@ export class CaptionNarrator {
     this.playToken += 1;
     const token = this.playToken;
     this.currentEntry = entry;
-    if (isAnswer) {
-      this._enterOverlay();
-    } else {
-      // 회의를 막 멈출 때만 말 틈을 기다린다. 이미 멈춰 있으면 바로 이어 튼다.
-      if (!this.isInserting) await this.waitForInsertGap().catch(() => {});
-      if (token !== this.playToken) return;
-      await this._enterInsertion();
-      if (token !== this.playToken) return;
-    }
+    // 질문 답도 자동 해설처럼 회의를 멈추고 가운데에서 들려준 뒤 따라잡는다. 회의 소리와 겹치거나 좌우로 갈리면 알아듣기 어렵다.
+    // 회의를 막 멈출 때만 말 틈을 기다린다(질문 답은 기다리지 않는다). 이미 멈춰 있으면 바로 이어 튼다.
+    if (!isAnswer && !this.isInserting) await this.waitForInsertGap().catch(() => {});
+    if (token !== this.playToken) return;
+    await this._enterInsertion();
+    if (token !== this.playToken) return;
     try {
       if (this.audioContext.state === 'suspended') await this.audioContext.resume();
       // 교차 모드는 이미 회의를 멈춘 뒤라 합성하는 동안 회의가 해설 자리를 지나가지 않는다.
@@ -162,7 +151,7 @@ export class CaptionNarrator {
       this.currentNarrationSec = audioBuffer.duration || 0;
       const source = this.audioContext.createBufferSource();
       source.buffer = audioBuffer;
-      source.connect(isAnswer ? this.answerPanner : this.ttsGainNode);
+      source.connect(this.ttsGainNode);
       source.onended = () => { if (token === this.playToken) this._onNarrationEnded(); };
       this.currentSource = source;
       this.currentStartSec = this.audioContext.currentTime + START_LEAD_SEC;
@@ -195,7 +184,6 @@ export class CaptionNarrator {
   }
 
   async _enterInsertion() {
-    if (this.isOverlaying) this._leaveOverlay();
     if (this.isInserting) return;
     this.isInserting = true;
     this.narratedSec = 0;
@@ -214,21 +202,6 @@ export class CaptionNarrator {
     const narratedSec = this.narratedSec;
     this.narratedSec = 0;
     this._startCatchup(narratedSec);
-  }
-
-  // 질문 답은 회의를 멈추지 않는다. 회의 소리를 동시 모드 덕킹과 같은 −12dB 로 줄이고 답은 오른쪽에서 들려준다.
-  _enterOverlay() {
-    if (this.isInserting) this._endInsertion();
-    if (this.isOverlaying) return;
-    this.isOverlaying = true;
-    const video = this.getLiveVideo();
-    if (video) this._setVolume(video, computeGainFromDecibel({ decibel: DEFAULT_DUCK_DB }));
-  }
-
-  _leaveOverlay() {
-    this.isOverlaying = false;
-    const video = this.getLiveVideo();
-    if (video) this._setVolume(video, 1.0);
   }
 
   // 진행 중인 줄이기·키우기를 멈추고 소리 크기를 바로 정한다.
@@ -252,7 +225,6 @@ export class CaptionNarrator {
   }
 
   _finishPlayback() {
-    if (this.isOverlaying) { this._leaveOverlay(); this.onStatus(''); }
     if (this.isInserting) this._endInsertion();
   }
 
@@ -302,7 +274,7 @@ export class CaptionNarrator {
   getSicState() {
     const video = this.getLiveVideo();
     return {
-      isInserting: this.isInserting || this.isOverlaying,
+      isInserting: this.isInserting,
       isCatchingUp: this.isCatchingUp,
       playbackRate: video ? video.playbackRate : 1.0,
     };

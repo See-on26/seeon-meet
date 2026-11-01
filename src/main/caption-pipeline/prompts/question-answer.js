@@ -1,5 +1,6 @@
 const { formatElapsed } = require('../context/clock-format');
 const { buildAnswerLengthRule } = require('./answer-length-rule');
+const { buildAnswerFidelityRuleList } = require('./answer-fidelity-rule');
 const { formatHeardSlideTag } = require('../context/slide-tag');
 const { keepNewestWithinChars } = require('../context/newest-within-chars');
 const { DEFAULT_CAPTION_LANGUAGE } = require('../contracts/caption-language');
@@ -23,6 +24,7 @@ function buildAnswerRuleList({ minWordCount, maxWordCount, notFoundToken = 'NONE
     '(1) 아래 기록에 근거해서만 답한다. 지어내지 않는다.',
     `(2) 기록에서 답을 찾을 수 없으면 정확히 "${notFoundToken}"만 출력한다. 설명 문장을 붙이지 않는다.`,
     `(3) 답을 찾았으면 ${buildAnswerLengthRule({ minWordCount, maxWordCount })} 머리말 없이 답만 출력한다.`,
+    ...buildAnswerFidelityRuleList({ number: 4 }),
   ];
 }
 
@@ -61,7 +63,7 @@ function buildPastSlideAnswerPrompt({ questionText, evidenceText, minWordCount, 
     '',
     ...buildAnswerRuleList({ minWordCount, maxWordCount, notFoundToken: hasImage ? NEED_IMAGE_TOKEN : 'NONE' }),
     ...(hasImage
-      ? [`(4) 색·배치·모양처럼 화면 그림을 봐야 답할 수 있는 질문도 정확히 "${NEED_IMAGE_TOKEN}"만 출력한다.`]
+      ? [`(5) 색·배치·모양처럼 화면 그림을 봐야 답할 수 있는 질문도 정확히 "${NEED_IMAGE_TOKEN}"만 출력한다.`]
       : []),
     ...buildOutputLanguageRuleList({ language, detailLineList: [ANSWER_TOKEN_KEEP_RULE] }),
   ].join('\n');

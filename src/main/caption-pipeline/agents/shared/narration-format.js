@@ -48,6 +48,34 @@ function truncateSlot({ text, maxWordCount }) {
   return wordList.slice(0, maxWordCount).join(' ');
 }
 
+// 쉼표로 늘어놓은 짧은 영문·숫자 항목("A, 3, J, 4가")은 한 어절로 센다. 낱낱이 세면 항목 수만큼 어절이 늘어
+// 칸 상한에서 목록 뒤의 대상("…적힌 카드 네 장")이 잘린다. 한글 낱말 목록은 지금처럼 어절마다 센다.
+const SHORT_ITEM_WORD_PATTERN = /^[A-Za-z0-9]{1,3},$/;
+const SHORT_ITEM_LAST_WORD_PATTERN = /^[A-Za-z0-9]{1,3}[가-힣]{0,2}[,.]?$/;
+
+function toWordUnitList({ text }) {
+  const wordList = String(text || '').trim().split(/\s+/).filter(Boolean);
+  const unitList = [];
+  let index = 0;
+  while (index < wordList.length) {
+    let end = index;
+    while (end < wordList.length - 1 && SHORT_ITEM_WORD_PATTERN.test(wordList[end])) end += 1;
+    const isShortItemList = end > index && SHORT_ITEM_LAST_WORD_PATTERN.test(wordList[end]);
+    const nextIndex = isShortItemList ? end + 1 : index + 1;
+    unitList.push(wordList.slice(index, nextIndex).join(' '));
+    index = nextIndex;
+  }
+  return unitList;
+}
+
+function countWordUnit({ text }) {
+  return toWordUnitList({ text }).length;
+}
+
+function truncateSlotByUnit({ text, maxWordCount }) {
+  return toWordUnitList({ text }).slice(0, maxWordCount).join(' ');
+}
+
 // 한국어 명사구는 핵심 명사가 끝에 온다. 앞에서 자르면 "…영구 전환된 기업 회의 비중"이 "…영구"로 남아 뜻이 바뀌므로
 // 앞 꾸밈말부터 버리고 끝 어절을 남긴다.
 function truncateSlotKeepingTail({ text, maxWordCount }) {
@@ -608,9 +636,9 @@ function normalizeSlotMap({ slotList, rawSlotMap, language = CAPTION_LANGUAGE_MA
       continue;
     }
     const isWholeSentenceKept = slot.isWholeSentence
-      && countWord({ text }) <= slot.maxWordCount + SLOT_OVERAGE_TOLERANCE_WORD_COUNT;
+      && countWordUnit({ text }) <= slot.maxWordCount + SLOT_OVERAGE_TOLERANCE_WORD_COUNT;
     if (isWholeSentenceKept) {
-      slotMap[slot.key] = truncateSlot({ text, maxWordCount: slot.maxWordCount + SLOT_OVERAGE_TOLERANCE_WORD_COUNT });
+      slotMap[slot.key] = truncateSlotByUnit({ text, maxWordCount: slot.maxWordCount + SLOT_OVERAGE_TOLERANCE_WORD_COUNT });
       continue;
     }
     const slotMaxWordCount = slot.maxWordCount + (slot.overageWordCount || 0);
@@ -620,8 +648,8 @@ function normalizeSlotMap({ slotList, rawSlotMap, language = CAPTION_LANGUAGE_MA
       });
       continue;
     }
-    const truncated = truncateSlot({ text, maxWordCount: slotMaxWordCount });
-    const isTruncated = countWord({ text }) > slotMaxWordCount;
+    const truncated = truncateSlotByUnit({ text, maxWordCount: slotMaxWordCount });
+    const isTruncated = countWordUnit({ text }) > slotMaxWordCount;
     if (isTruncated) {
       slotMap[slot.key] = trimToCompletePhrase({
         // 대상 칸은 값 칸보다 먼저 다듬어지므로, 상한에서 자른 뒤 실제로 읽히는 대상 칸 낱말만 값에서 뺀다.

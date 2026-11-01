@@ -46,6 +46,41 @@ const FACT_COMPLETE_FORM_LINE_MAP = {
 // 어절 수를 맞추느라 연도·분기부터 빼면 추이·비교 자료가 언제의 것인지 알 수 없다. 발표자가 말한 시점이어도 남긴다.
 const TIME_MARK_RULE = '    시점(연도·분기·월·주)이 대상에 적혀 있으면 지우지 않는다 — 발표자가 말한 시점이어도 쓴다.';
 
+// 상품 포장·책 표지·간판처럼 그림 안에 크게 적힌 이름이 대상을 가르는 사실이다. 화면 제목 글만 읽으면 그 이름이 빠지고,
+// 장식 글꼴 로고를 소리 나는 대로 맞춰 읽으면 비슷한 다른 이름을 지어낸다. 한 글자씩 읽게 하고, 못 읽은 이름은 빼게 한다.
+// 이름을 쓰는 자리는 칸 구성을 따른다(단순형 fact 칸, 완전형 대상 이름 곁, 사실 칸이 꺼졌으면 caption).
+const PRODUCT_NAME_PLACE_MAP = {
+  [DEIXIS_FORM_MAP.simple]: 'fact 칸에 쓴다',
+  [DEIXIS_FORM_MAP.complete]: '대상 이름 곁에 붙인다',
+  anyForm: 'fact 칸에 쓴다(완전형은 대상 이름 곁에 붙인다)',
+  noFactSlot: 'caption 에 대상 이름과 함께 쓴다',
+};
+const PRODUCT_NAME_LETTER_RULE = '장식 글꼴·기울어진 로고는 한 글자씩 읽는다. 확실히 읽지 못한 글자를 비슷한 낱말로 지어내지 마라 — 못 읽으면 그 이름은 뺀다.';
+const PRODUCT_NAME_EXAMPLE_HEAD = '  예) "이 책 읽어 보셨어요?" → seen="이번 달 추천 도서 글, 푸른 등대 제목이 크게 적힌 책 표지"';
+const PRODUCT_NAME_FACT_EXAMPLE = `${PRODUCT_NAME_EXAMPLE_HEAD}, caption="이번 달 추천 도서", fact="푸른 등대"`;
+const PRODUCT_NAME_CAPTION_EXAMPLE = `${PRODUCT_NAME_EXAMPLE_HEAD}, caption="이번 달 추천 도서 푸른 등대"`;
+
+function readProductNamePlace({ subKind, isFactCompleteEnabled }) {
+  if (!isFactCompleteEnabled) return PRODUCT_NAME_PLACE_MAP.noFactSlot;
+  return PRODUCT_NAME_PLACE_MAP[subKind] || PRODUCT_NAME_PLACE_MAP.anyForm;
+}
+
+// 완전형은 대상이 여럿이라 한 대상 예시를 붙이지 않는다.
+function readProductNameExample({ subKind, isFactCompleteEnabled }) {
+  if (subKind === DEIXIS_FORM_MAP.complete) return '';
+  return isFactCompleteEnabled ? PRODUCT_NAME_FACT_EXAMPLE : PRODUCT_NAME_CAPTION_EXAMPLE;
+}
+
+function buildProductNameRuleList({ subKind, isFactCompleteEnabled }) {
+  const place = readProductNamePlace({ subKind, isFactCompleteEnabled });
+  return [
+    '가리킨 대상이 상품 포장·책 표지·간판·로고처럼 그림 안에 이름이 크게 적힌 것이면,'
+      + ` 그 그림에서 가장 크게 적힌 이름 글자(상품명·브랜드·제목·상호)를 읽어 ${place}. 그림 바깥의 제목·설명 글만으로 끝내지 않는다.`,
+    PRODUCT_NAME_LETTER_RULE,
+    readProductNameExample({ subKind, isFactCompleteEnabled }),
+  ].filter(Boolean);
+}
+
 function readFormRuleList({ subKind, isFactCompleteEnabled }) {
   const simpleList = isFactCompleteEnabled ? DEIXIS_FACT_SIMPLE_FORM_RULE_LIST : DEIXIS_FORM_RULE_MAP.simple;
   if (subKind === DEIXIS_FORM_MAP.simple) return simpleList;
@@ -95,6 +130,7 @@ function buildGroundingPrompt({ utterance, recentTranscript, maxChars,
     '청자는 화면을 볼 수 없다. 발표자가 가리킨 대상 중, 말로는 아직 설명되지 않은 시각 정보를 보충하는 캡션을 만들어라.',
     SPEECH_GAP_DECIDED_RULE,
     '가리킨 대상의 이름(지명·항목명·제품명 등)은 화면에서 읽어 반드시 밝힌다 — 지시어로만 들은 청자는 그것이 어느 것인지 모른다.',
+    ...buildProductNameRuleList({ subKind, isFactCompleteEnabled }),
     '',
     '가리킨 대상을 화면에서 특정할 수 없다 — 가리킨 곳에 읽을 글자·그림이 없다. 이때만 캡션을 만들지 않는다.',
     '',

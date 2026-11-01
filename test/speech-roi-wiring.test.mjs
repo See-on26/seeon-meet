@@ -488,7 +488,7 @@ test('렌더러: 지시 판정은 잘린 그림이 있을 때만 그 영역 비�
   const source = readSource('src/renderer/app/main.js');
   const start = source.indexOf('async function runDeixisDecision(');
   const body = source.slice(start, source.indexOf('\n}\n', start));
-  assert.match(body, /const pointingRect = fullBuffer\s*\? toPointingRect\(\{ subRegion: firedDecision\.region, margin: POINTING_CROP_MARGIN \}\) : null;/);
+  assert.match(body, /const pointingRect = fullBuffer\s*\? toPointingRect\(\{ subRegion: decisionRegion, margin: POINTING_CROP_MARGIN \}\) : null;/);
   assert.match(body, /window\.seeon\.sendPipelineDeixis\(\{\s*ts, buffer, fullBuffer, [\s\S]*pointingRect,[\s\S]*\}\)/);
 });
 
@@ -523,4 +523,21 @@ test('preload: pointingRect 를 그대로 넘기고, 없으면 null', async () =
   await seeon.sendPipelineDeixis({ ts: 2, buffer: new Uint8Array([1]).buffer, utterance: '여기', recentTranscript: '' });
   assert.deepEqual(invokeList[0].payload.pointingRect, pointingRect);
   assert.equal(invokeList[1].payload.pointingRect, null);
+});
+
+// 가리킨 곳(붙여 넣은 상품 사진 등)과 이름 라벨이 한 확대 상자에 함께 들지 않으면, 라벨 줄만 키운 그림에는 가리킨 대상이 빠진다.
+// 지시 해설은 이때 가리킨 대상을 둘째 장으로 준다(라벨은 첫째 장 화면 전체에 남는다). 다른 해설 유형은 지금처럼 라벨 쪽을 키운다.
+test('켬 + 가리킴이 가깝지만 합친 상자가 너무 크면: 지시 해설은 가리킨 대상을, 다른 유형은 라벨 쪽을 확대한다', () => {
+  const tallPointing = { x: 0.15, y: 0.05, w: 0.4, h: 0.9 };
+  const deixis = createSpeechRoiResolver({ config: onConfig(), layoutStore: layoutStoreOf(), imageOps: fakeImageOps() })
+    .resolve({ ...baseArgs, pointingRect: tallPointing, regionFrame });
+  assert.equal(deixis.zoomJpegBuffer, regionFrame);
+  assert.equal(deixis.zoomKind, ZOOM_KIND_MAP.pointing);
+  assert.equal(deixis.zoomTerm, null);
+  const appeared = createSpeechRoiResolver({ config: onConfig(), layoutStore: layoutStoreOf(), imageOps: fakeImageOps() })
+    .resolve({ ...baseArgs, pointingRect: { ...tallPointing, kind: 'appeared' }, regionFrame });
+  assert.equal(appeared.zoomKind, ZOOM_KIND_MAP.appeared);
+  const interpretation = createSpeechRoiResolver({ config: onConfig(), layoutStore: layoutStoreOf(), imageOps: fakeImageOps() })
+    .resolve({ ...baseArgs, narrationType: 'interpretation', subKind: 'value_to_meaning', pointingRect: tallPointing, regionFrame });
+  assert.equal(interpretation.zoomKind, ZOOM_KIND_MAP.speech);
 });

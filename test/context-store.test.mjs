@@ -1,10 +1,11 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
+import fs from 'node:fs';
 import { createRequire } from 'node:module';
 
 const require = createRequire(import.meta.url);
 const {
-  createContextStore, toSlideMajor, LABEL_STATUS_MAP, SEGMENT_STATUS_MAP,
+  createContextStore, toSlideMajor, LABEL_STATUS_MAP, SEGMENT_STATUS_MAP, LEAD_IN_UTTERANCE_MS,
 } = require('../src/main/caption-pipeline/context/context-store.js');
 
 function baseMark({ ts, slideLabel, filePath = `/tmp/${slideLabel}.jpg` }) {
@@ -265,4 +266,85 @@ test('구간 요약: 요청 표시·결과·스냅숏·reset', () => {
   store.markSegmentRequested({ key: '1@0', slideMajor: 1, startTs: 0, endTs: 60000, isRevisit: false });
   store.start({ sessionId: 's2', startedAt: 0 });
   assert.deepEqual(store.snapshot().segmentSummaryList, []);
+});
+
+// 화면 글자는 새 슬라이드를 확정한 순간에 한 번만 전사한다. 줄이 차례로 나타나는 슬라이드는 뒤에 나타난 줄이 빠지므로,
+// 화면 변화 OCR 이 찾은 새 줄을 그 슬라이드 글자에 덧붙인다(질문 답·라벨·요약 재료가 모든 줄을 본다).
+test('화면 글자 보강: 새 줄을 덧붙이고, 이미 있는 줄(띄어쓰기·문장부호만 다름)은 넣지 않는다', () => {
+  const store = createContextStore();
+  store.applyRecord(baseMark({ ts: 0, slideLabel: '2' }));
+  store.applySlideText({ slideLabel: '2', status: 'ready', text: '참가 규칙\n1. 신청서는 금요일까지 낸다' });
+  const addedCount = store.appendSlideTextLines({
+    slideLabel: '2-5', lineList: ['1.신청서는 금요일까지 낸다', '2. 늦게 낸 신청서는 다음 달로 넘긴다', '참가  규칙', ''],
+  });
+  assert.equal(addedCount, 1);
+  assert.equal(store.getSlide(2).slideText, '참가 규칙\n1. 신청서는 금요일까지 낸다\n2. 늦게 낸 신청서는 다음 달로 넘긴다');
+  assert.equal(store.getSlide(2).slideTextStatus, 'ready', '전사 상태는 그대로 둔다');
+  assert.equal(store.appendSlideTextLines({ slideLabel: '2', lineList: ['2. 늦게 낸 신청서는 다음 달로 넘긴다'] }), 0, '두 번 넣지 않는다');
+  assert.equal(store.appendSlideTextLines({ slideLabel: 'x', lineList: ['a'] }), 0);
+});
+
+// 다음 장면의 그림 아래 위치 표지("A B C D")만 있는 줄이 앞 슬라이드 글자에 붙으면, 질문 답이 그 표지를 내용으로 읽는다.
+test('화면 글자 보강: 짧은 표지만 늘어선 줄("A B C D", "1 | 2 | 3")은 덧붙이지 않는다', () => {
+  const store = createContextStore();
+  store.applyRecord(baseMark({ ts: 0, slideLabel: '3' }));
+  store.applySlideText({ slideLabel: '3', status: 'ready', text: '규칙\n1. 신청서는 금요일까지 낸다' });
+  const addedCount = store.appendSlideTextLines({
+    slideLabel: '3', lineList: ['A B C D', '1 | 2 | 3', '2. 늦게 낸 신청서는 다음 달로 넘긴다', 'Q3 실적'],
+  });
+  assert.equal(addedCount, 2);
+  assert.equal(store.getSlide(3).slideText, '규칙\n1. 신청서는 금요일까지 낸다\n2. 늦게 낸 신청서는 다음 달로 넘긴다\nQ3 실적');
+});
+
+test('화면 글자 보강: 전사보다 새 줄이 먼저 와도 전사가 끝나면 전사 글 뒤에 남는다', () => {
+  const store = createContextStore();
+  store.applyRecord(baseMark({ ts: 0, slideLabel: '3' }));
+  store.appendSlideTextLines({ slideLabel: '3', lineList: ['2. 늦게 낸 신청서는 다음 달로 넘긴다', '참가 규칙'] });
+  assert.equal(store.getSlide(3).slideTextStatus, 'missing');
+  store.applySlideText({ slideLabel: '3', status: 'ready', text: '참가 규칙\n1. 신청서는 금요일까지 낸다' });
+  assert.equal(store.getSlide(3).slideText, '참가 규칙\n1. 신청서는 금요일까지 낸다\n2. 늦게 낸 신청서는 다음 달로 넘긴다');
+  const snapshot = store.snapshot();
+  assert.deepEqual(snapshot.slideList[0].slideTextAddedLineList, ['2. 늦게 낸 신청서는 다음 달로 넘긴다', '참가 규칙']);
+  snapshot.slideList[0].slideTextAddedLineList.push('바깥에서 고침');
+  assert.equal(store.getSlide(3).slideTextAddedLineList.length, 2, '스냅숏을 고쳐도 저장소는 그대로다');
+});
+
+// 발화를 슬라이드에 붙이는 기준은 시작 시각이다. 화면이 바뀌기 직전에 시작해 새 화면 내용을 말한 발화도
+// 새 슬라이드 질문 답 재료에 들어가게, 전환 1.5초 안에 시작한 발화는 새 슬라이드 쪽에서도 꺼낼 수 있다.
+test('전환 직전 발화: 전환 1.5초 안에 시작한 발화는 새 슬라이드 재료에도 들어간다(요청할 때만)', () => {
+  const store = createContextStore();
+  store.applyRecord(baseMark({ ts: 0, slideLabel: '1' }));
+  store.applyRecord(baseMark({ ts: 10000, slideLabel: '2' }));
+  store.applyRecord({ kind: 'asr', ts: 7000, text: '앞 화면 이야기' });
+  store.applyRecord({ kind: 'asr', ts: 8900, text: '이 화면 첫 줄은 이렇습니다' });
+  store.applyRecord({ kind: 'asr', ts: 11000, text: '둘째 줄은 이렇습니다' });
+  assert.deepEqual(store.getUtteranceList({ slideMajor: 2 }).map((u) => u.text), ['둘째 줄은 이렇습니다']);
+  assert.deepEqual(
+    store.getUtteranceList({ slideMajor: 2, includeLeadIn: true }).map((u) => u.text),
+    ['이 화면 첫 줄은 이렇습니다', '둘째 줄은 이렇습니다'],
+  );
+  assert.deepEqual(
+    store.getUtteranceList({ slideMajor: 1, includeLeadIn: true }).map((u) => u.text),
+    ['앞 화면 이야기', '이 화면 첫 줄은 이렇습니다'],
+    '원래 슬라이드에서도 빠지지 않는다',
+  );
+  assert.equal(LEAD_IN_UTTERANCE_MS, 1500);
+});
+
+// 교차 모드는 회의를 늦게 듣는다. 질문의 "지금 슬라이드"는 실시간 화면이 아니라 사용자가 듣는 위치의 슬라이드다.
+test('들은 시각의 슬라이드를 찾는다(그 시각 전에 마지막으로 연 슬라이드)', () => {
+  const store = createContextStore();
+  store.applyRecord(baseMark({ ts: 1000, slideLabel: '3' }));
+  store.applyRecord(baseMark({ ts: 9000, slideLabel: '4' }));
+  assert.equal(store.findSlideMajorAt(500), null);
+  assert.equal(store.findSlideMajorAt(5000), 3);
+  assert.equal(store.findSlideMajorAt(9500), 4);
+});
+
+test('연결: 질문 갈래의 지금 슬라이드는 들은 시각의 슬라이드를 먼저 쓴다', () => {
+  const source = fs.readFileSync(new URL('../src/main/caption-pipeline/index.js', import.meta.url), 'utf8');
+  const questionStart = source.indexOf("ipcMain.handle('pipeline-question'");
+  const questionBody = source.slice(questionStart, source.indexOf('ipcMain.handle(', questionStart + 10));
+  assert.match(questionBody, /const heardSlideMajor = Number\.isFinite\(heardWallTs\) \? contextStore\.findSlideMajorAt\(heardWallTs\) : null;/);
+  assert.match(questionBody, /const currentSlideMajor = heardSlideMajor \?\? toSlideMajor\(currentSlideLabel\) \?\? contextStore\.getCurrentSlideMajor\(\);/);
 });

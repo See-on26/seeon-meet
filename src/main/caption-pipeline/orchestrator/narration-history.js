@@ -18,6 +18,11 @@ const TARGET_STOPWORD_LIST = [
 
 const TARGET_PARTICLE_LIST = ['으로', '에서', '이랑', '와의', '과의', '을', '를', '이', '가', '은', '는', '의', '에', '와', '과', '도', '로'];
 
+// 슬라이드 번호의 큰 번호(3-2 → 3). 같은 슬라이드인지 견줄 때 쓴다.
+function toMajorSlideKey(slideLabel) {
+  return String(slideLabel ?? '').split('-')[0];
+}
+
 function normalizeNarration({ text }) {
   return String(text || '')
     .toLowerCase()
@@ -82,32 +87,41 @@ function createNarrationHistory({
     return source === PAGE_TRANSITION_SOURCE ? pageTransitionThreshold : similarityThreshold;
   }
 
+  // 일치한 앞 해설이 무엇이었는지(분류·출처·시각)도 돌려준다. 로그에서 문장만 보고 다른 해설로 오해하지 않게 하기 위해서다.
+  function describeMatch({ entry = null, similarity = 0 } = {}) {
+    return {
+      matchedText: entry ? entry.text : '', similarity,
+      matchedClass: entry ? entry.narrationClass : null, matchedSource: entry ? entry.source : '',
+      matchedTs: entry ? entry.ts : null,
+    };
+  }
+
   function findDuplicate({ text, source = '', slotMap = null, slideLabel = null }) {
     const threshold = resolveThreshold({ source });
     const normalized = normalizeNarration({ text });
     if (!normalized) {
-      return { isDuplicate: false, matchedText: '', similarity: 0, reason: '', threshold };
+      return { isDuplicate: false, ...describeMatch(), reason: '', threshold };
     }
     const targetTokenSet = buildTargetTokenSet({ slotMap });
     const valueKey = VALUE_AWARE_SOURCE_LIST.includes(source)
       ? normalizeNarration({ text: slotMap?.value ?? slotMap?.target }) : '';
-    let best = { matchedText: '', similarity: 0 };
-    let bestTarget = { matchedText: '', similarity: 0 };
+    let best = describeMatch();
+    let bestTarget = describeMatch();
     for (const entry of entryList) {
       if (valueKey && !entry.normalized.includes(valueKey)) continue;
       if (entry.normalized === normalized) {
         return {
-          isDuplicate: true, matchedText: entry.text, similarity: 1, reason: 'exact', threshold,
+          isDuplicate: true, ...describeMatch({ entry, similarity: 1 }), reason: 'exact', threshold,
         };
       }
       const similarity = computeBigramSimilarity({ textA: normalized, textB: entry.normalized });
-      if (similarity > best.similarity) best = { matchedText: entry.text, similarity };
+      if (similarity > best.similarity) best = describeMatch({ entry, similarity });
       if (targetTokenSet && entry.targetTokenSet && entry.slideLabel === slideLabel) {
         const overlap = computeTargetOverlap({
           setA: targetTokenSet, setB: entry.targetTokenSet,
         });
         if (overlap > bestTarget.similarity) {
-          bestTarget = { matchedText: entry.text, similarity: overlap };
+          bestTarget = describeMatch({ entry, similarity: overlap });
         }
       }
     }
@@ -124,20 +138,26 @@ function createNarrationHistory({
 
   // 들어온 해설을 막을 수 있는 분류(blocking-policy 표) 중 가장 최근에 내보낸 해설과의 간격을 잰다.
   // 표에 없는 분류(순위가 더 낮은 해설·질문 답)는 아무리 최근이어도 세지 않는다.
-  function findRateLimited({ narrationClass = null, ts = Date.now(), hasPointingRegion = false }) {
+  // 같은 슬라이드만 세는 행(isSameSlideOnly)은 다른 슬라이드의 해설을 건너뛴다. 어느 한쪽이라도 슬라이드를 모르면 센다.
+  function findRateLimited({ narrationClass = null, ts = Date.now(), hasPointingRegion = false, slideLabel = null }) {
     const rule = findBlockingRule({ narrationClass });
-    if (!rule) return { isRateLimited: false, sinceMs: Infinity, minIntervalMs: 0, blockedByClass: null };
+    if (!rule) {
+      return { isRateLimited: false, sinceMs: Infinity, minIntervalMs: 0, blockedByClass: null, blockedByText: '' };
+    }
     const overrideMs = minIntervalMsByClassMap[normalizeNarrationClass({ narrationClass })];
     const minIntervalMs = Number.isFinite(overrideMs) ? overrideMs : resolveMinIntervalMs({ rule, hasPointingRegion });
     let blocker = null;
     for (const entry of entryList) {
       if (!rule.blockedByClassList.includes(entry.narrationClass)) continue;
+      if (rule.isSameSlideOnly && slideLabel != null && entry.slideLabel != null
+        && toMajorSlideKey(entry.slideLabel) !== toMajorSlideKey(slideLabel)) continue;
       if (!blocker || entry.ts > blocker.ts) blocker = entry;
     }
     const sinceMs = blocker ? ts - blocker.ts : Infinity;
     return {
       isRateLimited: sinceMs < minIntervalMs, sinceMs, minIntervalMs,
       blockedByClass: blocker ? blocker.narrationClass : null,
+      blockedByText: blocker ? blocker.text : '',
     };
   }
 
@@ -175,7 +195,7 @@ function createNarrationHistory({
 }
 
 module.exports = {
-  createNarrationHistory, normalizeNarration, computeBigramSimilarity,
+  createNarrationHistory, normalizeNarration, computeBigramSimilarity, toMajorSlideKey,
   DEFAULT_SIMILARITY_THRESHOLD, PAGE_TRANSITION_SIMILARITY_THRESHOLD,
   TARGET_OVERLAP_THRESHOLD,
 };
