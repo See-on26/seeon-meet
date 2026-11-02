@@ -87,3 +87,21 @@ test('정답 해설 자리의 지시어는 그대로 후보다', { skip: !hasKiw
   assert.deepEqual(demonstrativeListOf('사장님 최애 간식이 이거 아닙니까?'), ['이거']);
   assert.deepEqual(demonstrativeListOf('자리에 항상 이게 있기 때문에'), ['이게']);
 });
+
+// "이 얘기를 했습니다", "그 말 기억하세요"처럼 지시 관형사가 말(얘기·이야기·말·말씀)을 꾸미면 앞뒤에서 한 말을 가리킨다.
+// 화면 속 대상이 아니라서 뒷말 없이 판단하면 엉뚱한 화면을 읽었다(간식 영상 "이 얘기" → 슬라이드 2 글).
+test('지시 관형사 + 얘기·이야기·말·말씀은 후보가 아니다', { skip: !hasKiwiModel }, () => {
+  for (const text of [
+    '진짜 거짓말 안 하고 이 얘기를 했습니다',
+    '그 이야기는 나중에 할게요',
+    '이 말 기억하세요',
+    '그 말씀 하셨죠',
+  ]) {
+    assert.deepEqual(demonstrativeListOf(text), [], text);
+  }
+});
+
+test('지시 관형사 + 내용·질문처럼 화면에 적힌 것을 가리킬 수 있는 말은 그대로 후보다', { skip: !hasKiwiModel }, () => {
+  assert.deepEqual(demonstrativeListOf('이 내용 보세요'), ['이 내용']);
+  assert.deepEqual(demonstrativeListOf('이 질문에 답해 보세요'), ['이 질문']);
+});
