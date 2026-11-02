@@ -11,6 +11,7 @@ const { DEV_KIWI_MODEL_DIR, KIWI_MODEL_FILE_LIST } = require('../src/main/captio
 
 // "그렇게" 바로 뒤에 형용사가 오면("그렇게 단 거", "그렇게 비싼 걸") 정도를 세게 말하는 말이라 화면 속 대상을 가리키지 않는다.
 // 뒤에 동사가 오는 "그렇게 하면", "그렇게 접수할게요"는 앞에서 말한 방식을 가리켜 여럿 중 어느 것인지 물을 수 있어 그대로 둔다.
+// 받아쓰기 조각이 "그렇게"로 끝나면 뒤 말을 몰라 정도인지 방식인지 가릴 수 없고, 판단도 뒤 문맥 없이 O 로 기울어 후보로 두지 않는다.
 const hasKiwiModel = KIWI_MODEL_FILE_LIST.every((name) => fs.existsSync(path.join(DEV_KIWI_MODEL_DIR, name)));
 let kiwiTrigger = null;
 
@@ -39,6 +40,16 @@ test('"그렇게" 바로 뒤에 형용사가 오면 지시 후보가 아니다',
   ]) {
     assert.deepEqual(demonstrativeListOf(text), [], text);
   }
+});
+
+test('받아쓰기 조각이 "그렇게"로 끝나 뒤에 오는 말이 없으면 지시 후보가 아니다', { skip: !hasKiwiModel }, () => {
+  for (const text of [
+    '아니 너희들 건강은 어떻게 하려고 그런 거 그렇게',
+    '아 그렇게?',
+  ]) {
+    assert.deepEqual(demonstrativeListOf(text), [], text);
+  }
+  assert.deepEqual(demonstrativeListOf('사장님 최애 간식이 이거'), ['이거']);
 });
 
 test('"그렇게" 뒤에 동사가 오면(앞에서 말한 방식) 그대로 지시 후보다', { skip: !hasKiwiModel }, () => {
