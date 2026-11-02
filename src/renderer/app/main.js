@@ -45,6 +45,7 @@ import {
 } from '../core/audio-renderer/narration-entry.js';
 import { QUEUE_DROP_LABEL_MAP, QUEUE_DROP_REASON_MAP } from '../core/audio-renderer/narration-queue.js';
 import { NarrationAudioPrefetcher } from '../core/audio-renderer/narration-audio-prefetcher.js';
+import { CaptionCardGate } from '../core/audio-renderer/caption-card-gate.js';
 import { QuestionRecorder } from '../core/command/question-recorder.js';
 import { MeetMicGuard } from '../core/command/meet-mic-guard.js';
 import { MicQuestionController, MIC_PHASE_MAP } from '../core/command/mic-question-controller.js';
@@ -159,6 +160,7 @@ const isNarrationEntryEnabled = (entry) => featureToggleStore.isClassOn(entry.na
 // 해설이 들리기 시작한 순간을 main 에 알린다(개발자 모드 흐름 창의 '재생됨').
 // "들은 자리"는 교차 모드면 지연 재생 위치, 동시 모드면 원본 현재 위치다. 둘 다 캡처 영상 시각 축이다.
 function reportNarrationPlayStart(info) {
+  captionCardGate.release({ entry: info.entry });
   const report = {
     ...info,
     mode: getCurrentMode(),
@@ -179,6 +181,8 @@ async function synthesizeEntryAudio(entry) {
 }
 
 const narrationAudio = new NarrationAudioPrefetcher({ synthesize: synthesizeEntryAudio });
+// 해설 기록 카드(자막)는 그 해설의 소리가 나기 시작할 때 띄운다(caption-card-gate.js).
+const captionCardGate = new CaptionCardGate({ showCard: appendLogCard });
 
 const narrator = new CaptionNarrator({
   prepareAudio: (entry) => narrationAudio.take(entry),
@@ -351,6 +355,7 @@ function startNarrationPlayer({ stream }) {
 }
 
 function stopNarrationPlayer() {
+  captionCardGate.clear();
   if (narrationMixer) { narrationMixer.stop(); narrationMixer = null; return; }
   narrator.stop();
 }
@@ -1491,8 +1496,8 @@ function handleAsrTranscript({ text, ts, endTs, segmentList = [], triggerCandida
 
 const CAPTION_SOURCE_TRANSITION = 'page-transition';
 
-function handleCaption({ text, source, narrationClass = null, eventVideoTimeMs = null }) {
-  appendLogCard({ narrationClass, source, text });
+// 카드는 여기서 띄우지 않고 소리가 시작될 때 띄운다(emitCaption 의 captionCardGate.hold).
+function handleCaption({ text, source, eventVideoTimeMs = null }) {
   if (source === CAPTION_SOURCE_TRANSITION) lastScreenNarration = text;
   return Number.isFinite(eventVideoTimeMs) ? eventVideoTimeMs : captureSource.videoTimeMs;
 }
@@ -2166,6 +2171,7 @@ async function emitCaption(payload, { leaderHandle = null } = {}) {
   const entry = {
     ...toNarrationEntry(payload), eventTimeMs: captionCaptureMs,
   };
+  captionCardGate.hold({ entry, card: { narrationClass: payload.narrationClass, source: payload.source, text: payload.text } });
   narrationAudio.register(entry);
   if (isImmediateCaption(payload)) {
     leaderHandle?.settle({ status: LEADER_STATUS_MAP.unscheduled });
@@ -2267,6 +2273,7 @@ function toNarrationEntry(payload) {
 // 사용자가 듣지 못한 해설. main 은 해설을 내보낼 때 이미 "말했음"(간격 억제·중복·재설명 금지·맥락 저장소)으로 적어 두므로,
 // 재생하지 못하고 버리는 모든 경로는 여기로 알려 그 기록을 되돌린다. 미리 만들던 소리 자리도 다음 해설에 넘긴다.
 function reportUnplayedNarration({ entry, reason, waitedMs = null, detailSuffix = '' }) {
+  captionCardGate.drop({ entry, reason });
   narrationAudio.discard(entry);
   window.seeon.reportNarrationDropped({
     ts: entry.ts, text: entry.text, slideLabel: entry.slideLabel, source: entry.source,

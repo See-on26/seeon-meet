@@ -61,5 +61,7 @@ test('main.js 카드는 payload 의 재생 분류를 넘겨 공용 표로 코드
   assert.doesNotMatch(source, /LOG_TAG_MAP/);
   assert.match(source, /function appendLogCard\(\{ narrationClass = null, source, text, ts = Date\.now\(\) \}\)/);
   assert.match(source, /const tag = resolveAdCardTag\(\{ narrationClass, source \}\);/);
-  assert.match(source, /function handleCaption\(\{ text, source, narrationClass = null, eventVideoTimeMs = null \}\) \{\n {2}appendLogCard\(\{ narrationClass, source, text \}\);/);
+  // 카드는 소리가 시작될 때 띄운다: 재생 분류를 담아 들고 있다가(captionCardGate) appendLogCard 로 띄운다.
+  assert.match(source, /const captionCardGate = new CaptionCardGate\(\{ showCard: appendLogCard \}\);/);
+  assert.match(source, /captionCardGate\.hold\(\{ entry, card: \{ narrationClass: payload\.narrationClass, source: payload\.source, text: payload\.text \} \}\);/);
 });
