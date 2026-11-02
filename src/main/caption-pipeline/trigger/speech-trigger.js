@@ -73,6 +73,11 @@ const DEMONSTRATIVE_PRONOUN_SET = new Set([
 ]);
 const DEMONSTRATIVE_ADVERB_SET = new Set(['이렇게', '그렇게', '저렇게', '요렇게']);
 const DEMONSTRATIVE_ADJ_STEM_SET = new Set(['이렇', '그렇', '저렇', '요렇']);
+// "그렇게 단 거", "그렇게 비싼 걸"처럼 "그렇게" 바로 뒤에 형용사가 오면 정도를 세게 말하는 말이라 화면 속 대상을 가리키지 않는다.
+// 앞에서 말한 방식을 가리키는 "그렇게 하면", "그렇게 접수할게요"(동사)는 그대로 둔다. "이렇게 높은 막대"는 화면 속 높이를
+// 가리킬 수 있어 그-계열만 거른다. 있다·없다·같다는 "그렇게 있으면"처럼 방식을 말하기도 해 형용사로 치지 않는다.
+const DEGREE_ONLY_ADVERB_STEM_SET = new Set(['그렇']);
+const NON_DEGREE_TARGET_ADJ_SET = new Set(['있', '없', '같']);
 // "그 때", "그 정도"처럼 화면의 대상이 아니라 시간·정도를 가리키는 말.
 const NON_REFERENT_NOUN_SET = new Set([
   '때', '정도', '동안', '후', '전', '이후', '이전', '사이', '순간', '덕분', '탓', '만큼', '뿐', '대신', '와중', '무렵', '즈음',
@@ -235,6 +240,13 @@ function findNextIndex({ tokenList, fromIndex, isMatch, maxDistance }) {
   return -1;
 }
 
+function isDegreeTargetAdjectiveAt({ tokenList, index }) {
+  const token = tokenList[index];
+  if (!token) return false;
+  if (PREDICATE_ADJ_TAG_SET.has(token.tag)) return !NON_DEGREE_TARGET_ADJ_SET.has(token.form);
+  return ['NNG', 'XR'].includes(token.tag) && tokenList[index + 1]?.tag === 'XSA';
+}
+
 function detectKoreanDemonstrative(context) {
   const { tokenList, text } = context;
   const candidateList = [];
@@ -261,12 +273,15 @@ function detectKoreanDemonstrative(context) {
       return;
     }
     if (token.tag === 'MAG' && DEMONSTRATIVE_ADVERB_SET.has(token.form)) {
+      if (DEGREE_ONLY_ADVERB_STEM_SET.has(token.form.replace(/게$/, ''))
+        && isDegreeTargetAdjectiveAt({ tokenList, index: index + 1 })) return;
       candidateList.push(buildCandidate({ text, type: TRIGGER_TYPE_MAP.demonstrative, start: token.start, end: token.end }));
       return;
     }
     const next = tokenList[index + 1];
     if (PREDICATE_ADJ_TAG_SET.has(token.tag) && DEMONSTRATIVE_ADJ_STEM_SET.has(token.form)
       && next?.tag === 'EC' && next.form === '게') {
+      if (DEGREE_ONLY_ADVERB_STEM_SET.has(token.form) && isDegreeTargetAdjectiveAt({ tokenList, index: index + 2 })) return;
       candidateList.push(buildCandidate({
         text, type: TRIGGER_TYPE_MAP.demonstrative, start: token.start, end: wordEndOf({ context, token: next }),
       }));

@@ -33,10 +33,8 @@ function phraseListOf(text, type) {
 
 const JELLY_UTTERANCE = '아니 너희들 건강은 어떻게 하려고 그런 거 그렇게 단거 먹고 막 그러면은 어? 이게 이게 말이 뭐 단짠 단짠';
 
-test('"그렇게 단거 먹고" 발화에서 "단거"는 후보가 아니고, 같은 발화의 지시대명사 후보는 그대로다', { skip: !hasKiwiModel }, () => {
-  assert.deepEqual(candidatePairListOf(JELLY_UTTERANCE), [
-    [demonstrative, '그렇게'], [demonstrative, '이게'], [demonstrative, '이게'],
-  ]);
+test('"그렇게 단거 먹고" 발화에서 "단거"·"그렇게"는 후보가 아니고, 같은 발화의 다른 지시대명사 후보는 그대로다', { skip: !hasKiwiModel }, () => {
+  assert.deepEqual(candidatePairListOf(JELLY_UTTERANCE), [[demonstrative, '이게'], [demonstrative, '이게']]);
 });
 
 test('맛 형용사 + 것·거·게·건은 띄어 쓰든 붙여 쓰든 형용사 + 지시 명사 후보가 아니다', { skip: !hasKiwiModel }, () => {
