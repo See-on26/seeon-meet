@@ -63,7 +63,8 @@ export const MODE_POLICY_MAP = {
     isSwitchableFrom: false, isSpeculative: false, isMixed: false,
   },
   [MODE_MAP.delayed]: {
-    delayMs: 10000, maxNarrationMs: 6000, rateMin: 1.1, rateMax: 1.5,
+    // 따라잡기는 1.5배로 고정한다(끝 약 1초만 1.0배로 부드럽게, delay-buffer.js). 1.1~1.5배로 두면 끝의 1.1배 꼬리가 길었다.
+    delayMs: 10000, maxNarrationMs: 6000, rateMin: 1.5, rateMax: 1.5,
     contextAnchor: CONTEXT_ANCHOR_MAP.screenTransition,
     beforeMs: CONTEXT_BEFORE_MS, afterMs: CONTEXT_AFTER_DELAYED_MS,
     asrSegmentMs: ASR_SEGMENT_DELAYED_MS,

@@ -14,10 +14,17 @@ export function isDelayRestored({ actualDelayMs, targetDelayMs, toleranceMs = DE
   return Math.abs(actualDelayMs - targetDelayMs) <= toleranceMs;
 }
 
-export function computeCatchupRate({ excessMs, rateMin, rateMax, ratePerSec = 0.1 }) {
+// 따라잡기 끝에서 배속을 1.0배까지 부드럽게 내리는 시간. 남은 지연을 다 메우는 순간 1.0배가 되게, 지금 배속 r₀ 에서
+// 1.0배까지 이 시간 동안 곧게 내릴 때 메우는 지연 (r-1)²·T / (2(r₀-1)) 을 거꾸로 풀어 배속을 정한다.
+// 예전처럼 남은 지연에 비례해 낮추기만 하면 끝에서 1.1배 꼬리가 길었다(균형 모드 6초 해설 → 따라잡기 20초, 그중 1.2배 미만 7초).
+export const CATCHUP_RAMP_SEC = 1.0;
+
+export function computeCatchupRate({ excessMs, rateMin, rateMax, ratePerSec = 0.1, rampSec = CATCHUP_RAMP_SEC }) {
   if (excessMs <= 0) return 1.0;
   const excessSec = excessMs / 1000;
-  return Math.min(rateMax, Math.max(rateMin, rateMin + excessSec * ratePerSec));
+  const bodyRate = Math.min(rateMax, Math.max(rateMin, rateMin + excessSec * ratePerSec));
+  const rampRate = 1 + Math.sqrt(2 * (bodyRate - 1) * excessSec / rampSec);
+  return Math.min(bodyRate, rampRate);
 }
 
 export function computeCatchupDurationMs({ excessMs, rate }) {
