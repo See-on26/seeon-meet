@@ -6,7 +6,7 @@ const require = createRequire(import.meta.url);
 const { normalizeKoreanSpeechText } = require('../src/main/caption-pipeline/output/korean-speech-text.js');
 const { createTtsClient } = require('../src/main/caption-pipeline/output/tts-client.js');
 
-// TTS 로 보내는 한국어 글만 숫자·세는 말·단위를 읽는 말로 바꾼다. 음성 엔진(MeloTTS·Ming·Qwen)마다 읽는 규칙이 달라
+// TTS 로 보내는 한국어 글만 숫자·세는 말·단위를 읽는 말로 바꾼다. 음성 엔진마다 읽는 규칙이 달라
 // "카드 4장"을 "사장"으로, "10.9g"를 "십.9g"로 읽는 일이 생기므로, 앱에서 한 번 맞춰 같은 글을 보낸다.
 
 function assertCaseList(caseList) {
