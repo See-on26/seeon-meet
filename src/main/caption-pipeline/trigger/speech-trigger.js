@@ -81,6 +81,11 @@ const DEMONSTRATIVE_ADJ_STEM_SET = new Set(['이렇', '그렇', '저렇', '요�
 const DEGREE_ONLY_ADVERB_STEM_SET = new Set(['그렇']);
 const NON_DEGREE_TARGET_ADJ_SET = new Set(['있', '없', '같']);
 // Kiwi 문장 부호 품사(마침표·쉼표·따옴표·줄임표·기타 기호). 숫자(SN)·외국어(SL)는 말이라 넣지 않는다.
+// "이게 말이 돼?", "그게 말이죠"처럼 지시어 + 조사 + "말"은 말버릇(관용구)이고, "이게 이게", "이거 이거"처럼 같은 지시어를
+// 곧바로 되풀이한 앞의 것은 말더듬이다. 둘 다 화면 속 대상을 가리키지 않는다(되풀이한 뒤의 것은 그대로 후보로 둔다).
+// 조사 없이 "이거 말고"처럼 이어지는 말은 관용구가 아니라 거르지 않는다.
+const DISCOURSE_IDIOM_NOUN_FORM = '말';
+const DEMONSTRATIVE_PARTICLE_TAG_SET = new Set(['JKS', 'JX']);
 const PUNCTUATION_TAG_SET = new Set(['SF', 'SP', 'SS', 'SE', 'SO', 'SW']);
 // "그 때", "그 정도"처럼 화면의 대상이 아니라 시간·정도를 가리키는 말.
 const NON_REFERENT_NOUN_SET = new Set([
@@ -251,6 +256,14 @@ function isDegreeUseOrChunkEndAt({ tokenList, index }) {
   return ['NNG', 'XR'].includes(token.tag) && tokenList[index + 1]?.tag === 'XSA';
 }
 
+function isDiscourseDemonstrativeAt({ tokenList, index }) {
+  const hasParticle = DEMONSTRATIVE_PARTICLE_TAG_SET.has(tokenList[index + 1]?.tag);
+  const next = tokenList[index + (hasParticle ? 2 : 1)];
+  if (!next) return false;
+  if (hasParticle && next.tag === 'NNG' && next.form === DISCOURSE_IDIOM_NOUN_FORM) return true;
+  return next.tag === 'NP' && next.form === tokenList[index].form;
+}
+
 function detectKoreanDemonstrative(context) {
   const { tokenList, text } = context;
   const candidateList = [];
@@ -273,6 +286,7 @@ function detectKoreanDemonstrative(context) {
       return;
     }
     if (token.tag === 'NP' && DEMONSTRATIVE_PRONOUN_SET.has(token.form)) {
+      if (isDiscourseDemonstrativeAt({ tokenList, index })) return;
       candidateList.push(buildCandidate({ text, type: TRIGGER_TYPE_MAP.demonstrative, start: token.start, end: token.end }));
       return;
     }
