@@ -63,6 +63,11 @@ test('판단 지시문은 트리거 문장 안에서 후보 앞에 나온 말도
   }
 });
 
+test('판단 지시문은 이게·이거가 바로 앞 행동·상황 하나를 받으면 X 이고, 여럿을 나란히 말했으면 그 줄을 쓰지 말라고 적는다', () => {
+  assert.match(ROUTER_PROMPT_MAP.deixis.systemPrompt, /"이게·이거"가 바로 앞에서 말한 행동이나 상황 \*\*하나\*\*[^\n]*받으면 X/);
+  assert.match(ROUTER_PROMPT_MAP.deixis.systemPrompt, /여러 대상·방식을 나란히 말했으면 이 줄로 X 하지 말고/);
+});
+
 test('few-shot 답은 모두 후보 수만큼 O/X 를 낸다', () => {
   for (const example of FEW_SHOT_LIST) {
     assert.equal(example.output.judgeList.length, example.input.candidateList.length);
