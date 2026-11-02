@@ -93,6 +93,10 @@ const NON_REFERENT_NOUN_SET = new Set([
   '다음', '외', '밖', '중', '뒤', '앞', '날', '당시', '그때',
 ]);
 const REFERENT_BOUND_NOUN_SET = new Set(['쪽', '부분', '거', '것', '곳']);
+// "이 얘기를 했습니다", "그 말 기억하세요"처럼 지시 관형사가 말을 꾸미면 앞뒤에서 한 말을 가리킨다. 화면 속 대상이 아니어서
+// 뒷말 없이 판단하면 엉뚱한 화면을 읽었다(간식 영상 "이 얘기" → 슬라이드 2 글, 그 해설이 간격 규칙으로 정답 해설을 막음).
+// "이 내용", "이 질문"은 화면에 적힌 글을 가리킬 수 있어 넣지 않는다.
+const SPEECH_CONTENT_NOUN_SET = new Set(['얘기', '이야기', '말', '말씀']);
 // 평가·감정 형용사는 화면 속 여럿 중 하나를 가려 주지 못한다. "재밌는 게 …", "중요한 건 …"처럼 것·거에 주격조사·
 // 화제 보조사(이·가·은·는)가 붙으면 뒤 절 전체를 끌어오는 말머리라 지시 대상이 아니다. 어근 + 하다 형용사("중요한")는
 // 시작 토큰이 어근이라 어근 목록으로 본다. "신기한 게 하나 있어요", "이상한 게 보이죠"처럼 눈에 띄는 모양을 말하기도 하는
@@ -276,7 +280,8 @@ function detectKoreanDemonstrative(context) {
         tokenList, fromIndex: index, maxDistance: 4,
         isMatch: (next) => NOUN_TAG_SET.has(next.tag),
       });
-      if (nounIndex < 0 || NON_REFERENT_NOUN_SET.has(tokenList[nounIndex].form)) return;
+      if (nounIndex < 0 || NON_REFERENT_NOUN_SET.has(tokenList[nounIndex].form)
+        || SPEECH_CONTENT_NOUN_SET.has(tokenList[nounIndex].form)) return;
       let endIndex = nounIndex;
       while (endIndex + 1 < tokenList.length && NOUN_TAG_SET.has(tokenList[endIndex + 1].tag)
         && context.wordOf(tokenList[endIndex + 1]) === context.wordOf(tokenList[nounIndex])) endIndex += 1;
